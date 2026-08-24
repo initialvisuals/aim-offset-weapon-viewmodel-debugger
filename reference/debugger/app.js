@@ -120,6 +120,9 @@ const state = {
   hobZero: true,
   /** Zero distance in demo meters. */
   zeroDist: 100,
+  /** PerspectiveCamera near/far — tunable in Settings (O) for depth teaching. */
+  camNear: 0.05,
+  camFar: 520,
   /** Draw sight vs bore/launch debug rays. */
   showAimRays: false,
   /** 3px hip crosshair visibility (ADS optic HUD unaffected). */
@@ -548,6 +551,42 @@ function setZeroDist(m, { toast = false } = {}) {
   if (toast) showToast(`Zero ${state.zeroDist} m`);
 }
 
+function applyCameraClip() {
+  if (!camera) return;
+  const near = Math.max(0.001, Math.min(2, Number(state.camNear) || 0.05));
+  const far = Math.max(near + 10, Math.min(5000, Number(state.camFar) || 520));
+  state.camNear = near;
+  state.camFar = far;
+  camera.near = near;
+  camera.far = far;
+  camera.updateProjectionMatrix();
+}
+
+function setCamNear(v, { toast = false } = {}) {
+  state.camNear = parseFloat(v);
+  applyCameraClip();
+  const inp = el("camNearInput");
+  if (inp) inp.value = String(state.camNear);
+  const slider = el("camNearSlider");
+  if (slider) slider.value = String(state.camNear);
+  const val = el("camNearVal");
+  if (val) val.textContent = state.camNear.toFixed(3);
+  if (toast) showToast(`Camera near ${state.camNear}`);
+}
+
+function setCamFar(v, { toast = false } = {}) {
+  state.camFar = parseFloat(v);
+  applyCameraClip();
+  const inp = el("camFarInput");
+  if (inp) inp.value = String(Math.round(state.camFar));
+  const slider = el("camFarSlider");
+  if (slider) slider.value = String(state.camFar);
+  const val = el("camFarVal");
+  if (val) val.textContent = String(Math.round(state.camFar));
+  if (toast) showToast(`Camera far ${Math.round(state.camFar)}`);
+}
+
+
 function syncSettingsUI() {
   const btnSim = el("btnSettingsSim");
   const btnArcade = el("btnSettingsArcade");
@@ -563,6 +602,20 @@ function syncSettingsUI() {
 
   const zsel = el("settingsZeroDist");
   if (zsel) zsel.value = String(state.zeroDist);
+
+  const nearInp = el("camNearInput");
+  const nearSlider = el("camNearSlider");
+  const nearVal = el("camNearVal");
+  if (nearInp) nearInp.value = String(state.camNear);
+  if (nearSlider) nearSlider.value = String(state.camNear);
+  if (nearVal) nearVal.textContent = Number(state.camNear).toFixed(3);
+
+  const farInp = el("camFarInput");
+  const farSlider = el("camFarSlider");
+  const farVal = el("camFarVal");
+  if (farInp) farInp.value = String(Math.round(state.camFar));
+  if (farSlider) farSlider.value = String(state.camFar);
+  if (farVal) farVal.textContent = String(Math.round(state.camFar));
 
   const lookPct = Math.round((player.lookSens / LOOK_SENS_BASE) * 100);
   const lookSlider = el("lookSensSlider");
@@ -846,6 +899,8 @@ const player = {
 
 /** Subtle chalk/wood range marker lines on the floor (no floating text). */
 let groundRangeLines = [];
+/** Painted stencil range numbers on bay walls. */
+let wallRangeNumbers = [];
 
 function clearGroundRangeLines() {
   for (const mesh of groundRangeLines) {
@@ -858,12 +913,13 @@ function clearGroundRangeLines() {
     }
   }
   groundRangeLines = [];
+  clearWallRangeNumbers();
 }
 
 function buildGroundRangeLines(zs) {
   clearGroundRangeLines();
   // Floor y = -1.4, strip = -1.385, grid = -1.39 — sit just above to avoid z-fight.
-  const y = -1.335;
+  const y = -1.328;
   const width = 10.8; // between side rails at ±5.5
   const depth = 0.07;
   for (const z of zs) {
@@ -902,6 +958,87 @@ function buildGroundRangeLines(zs) {
   }
 }
 
+
+function clearWallRangeNumbers() {
+  for (const mesh of wallRangeNumbers) {
+    if (mesh.parent) mesh.parent.remove(mesh);
+    if (mesh.geometry) mesh.geometry.dispose();
+    const mat = mesh.material;
+    if (mat) {
+      if (mat.map) mat.map.dispose();
+      if (Array.isArray(mat)) mat.forEach((m) => { if (m.map) m.map.dispose(); m.dispose(); });
+      else mat.dispose();
+    }
+  }
+  wallRangeNumbers = [];
+}
+
+/** White stencil-style distance number painted on bay walls. */
+function makeRangeNumberTexture(label) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, 256, 256);
+  // Soft dark edge / stencil shadow
+  ctx.font = "bold 140px Arial, Helvetica, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 14;
+  ctx.strokeStyle = "rgba(20, 24, 32, 0.55)";
+  ctx.strokeText(String(label), 128, 132);
+  ctx.fillStyle = "#f4f6f8";
+  ctx.fillText(String(label), 128, 132);
+  // Small "m" unit mark
+  ctx.font = "bold 42px Arial, Helvetica, sans-serif";
+  ctx.fillStyle = "rgba(244, 246, 248, 0.85)";
+  ctx.fillText("m", 128, 210);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Paint big range numbers on inner faces of side bay walls at chalk Z.
+ * Offset off the wall surface to avoid coplanar z-fighting with wall albedo.
+ */
+function buildWallRangeNumbers(lanes) {
+  clearWallRangeNumbers();
+  // Walls sit at x=±12, half-thickness 0.275 → inner faces ≈ ±11.725
+  const wallHalf = 0.275;
+  const inset = 0.045; // pull off wall toward lane center
+  const y = 0.35;
+  const planeW = 2.4;
+  const planeH = 2.4;
+  for (const lane of lanes) {
+    const label = lane.m != null ? lane.m : Math.round(Math.abs(lane.z));
+    const z = lane.z;
+    for (const side of [-12, 12]) {
+      const tex = makeRangeNumberTexture(label);
+      const mat = new THREE.MeshBasicMaterial({
+        map: tex,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      });
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), mat);
+      const inner = side > 0 ? side - wallHalf - inset : side + wallHalf + inset;
+      mesh.position.set(inner, y, z);
+      // Face toward lane center
+      mesh.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+      mesh.renderOrder = 2;
+      scene.add(mesh);
+      wallRangeNumbers.push(mesh);
+    }
+  }
+}
 
 /** Procedural CanvasTexture — no external downloads. */
 function makeCanvasTexture(draw, size = 256, opts = {}) {
@@ -1123,9 +1260,14 @@ function makeBarrel(r, h, x, y, z, color = 0x3d4a3a) {
   return mesh;
 }
 
-function makeBox(w, h, d, color, x, y, z) {
+/** Optional matOpts: { roughness, metalness } — metal vs polymer separation on guns. */
+function makeBox(w, h, d, color, x, y, z, matOpts = null) {
   const geo = new THREE.BoxGeometry(w, h, d);
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.65, metalness: 0.15 });
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    roughness: matOpts && matOpts.roughness != null ? matOpts.roughness : 0.65,
+    metalness: matOpts && matOpts.metalness != null ? matOpts.metalness : 0.15,
+  });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
@@ -1140,9 +1282,13 @@ function adsFovForOptic(optic) {
   return FOV_BY_OPTIC.iron;
 }
 
-function makeCyl(rTop, rBot, h, color, x, y, z, rx, ry, rz, segs = 16) {
+function makeCyl(rTop, rBot, h, color, x, y, z, rx, ry, rz, segs = 16, matOpts = null) {
   const geo = new THREE.CylinderGeometry(rTop, rBot, h, segs);
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.35 });
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    roughness: matOpts && matOpts.roughness != null ? matOpts.roughness : 0.55,
+    metalness: matOpts && matOpts.metalness != null ? matOpts.metalness : 0.35,
+  });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(x, y, z);
   mesh.rotation.set(rx || 0, ry || 0, rz || 0);
@@ -1164,14 +1310,70 @@ function makeLensGlass(radius, opacity = 0.2) {
   );
 }
 
-function makeRingTube(innerR, outerR, length, color, segs = 20) {
+
+/** Gun mesh material presets — polymer (matte) vs metal (shinier). */
+const GUN_MAT = {
+  polymer: { roughness: 0.78, metalness: 0.06 },
+  polymerDark: { roughness: 0.82, metalness: 0.04 },
+  metal: { roughness: 0.36, metalness: 0.72 },
+  darkMetal: { roughness: 0.4, metalness: 0.62 },
+  bronze: { roughness: 0.45, metalness: 0.55 },
+};
+
+/** Picatinny-ish rail: base + overlapping tooth boxes for readable bevel. */
+function makePicRail(width, height, length, x, y, z) {
   const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.add(makeBox(width, height * 0.5, length, 0x1a1f28, 0, -height * 0.12, 0, GUN_MAT.darkMetal));
+  const teeth = Math.max(5, Math.floor(length / 0.017));
+  for (let i = 0; i < teeth; i++) {
+    const tz = (i / (teeth - 1) - 0.5) * (length * 0.9);
+    g.add(makeBox(width * 0.94, height * 0.55, 0.0075, 0x2a3140, 0, height * 0.28, tz, GUN_MAT.darkMetal));
+  }
+  // Side rails for bevel read
+  g.add(makeBox(0.004, height * 0.7, length * 0.98, 0x151920, -width * 0.48, 0.0, 0, GUN_MAT.darkMetal));
+  g.add(makeBox(0.004, height * 0.7, length * 0.98, 0x151920, width * 0.48, 0.0, 0, GUN_MAT.darkMetal));
+  return g;
+}
+
+/** Additive cross-blade muzzle flash sprite (position = muzzle tip). */
+function makeMuzzleFlashSprite(x, y, z, scale = 1) {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.name = "muzzleFlash";
+  const mkMat = (hex, opacity) =>
+    new THREE.MeshBasicMaterial({
+      color: hex,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.01 * scale, 10, 10), mkMat(0xfff2c8, 0.95));
+  const long = new THREE.Mesh(new THREE.PlaneGeometry(0.072 * scale, 0.02 * scale), mkMat(0xffaa44, 0.85));
+  const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.072 * scale, 0.02 * scale), mkMat(0xffcc66, 0.8));
+  cross.rotation.z = Math.PI / 2;
+  const diag = new THREE.Mesh(new THREE.PlaneGeometry(0.048 * scale, 0.014 * scale), mkMat(0xff8800, 0.7));
+  diag.rotation.z = Math.PI / 4;
+  const diag2 = new THREE.Mesh(new THREE.PlaneGeometry(0.048 * scale, 0.014 * scale), mkMat(0xff8800, 0.7));
+  diag2.rotation.z = -Math.PI / 4;
+  g.add(core, long, cross, diag, diag2);
+  g.visible = false;
+  g.userData.flashScale = scale;
+  return g;
+}
+
+function makeRingTube(innerR, outerR, length, color, segs = 20, matOpts = null) {
+  const g = new THREE.Group();
+  const roughness = matOpts && matOpts.roughness != null ? matOpts.roughness : 0.42;
+  const metalness = matOpts && matOpts.metalness != null ? matOpts.metalness : 0.55;
   const outer = new THREE.Mesh(
     new THREE.CylinderGeometry(outerR, outerR, length, segs, 1, true),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.4, side: THREE.DoubleSide })
+    new THREE.MeshStandardMaterial({ color, roughness, metalness, side: THREE.DoubleSide })
   );
   outer.rotation.x = Math.PI / 2;
-  const lipMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.4, side: THREE.DoubleSide });
+  const lipMat = new THREE.MeshStandardMaterial({ color, roughness, metalness, side: THREE.DoubleSide });
   const lipF = new THREE.Mesh(new THREE.RingGeometry(innerR, outerR, segs), lipMat);
   lipF.position.z = length / 2;
   const lipB = new THREE.Mesh(new THREE.RingGeometry(innerR, outerR, segs), lipMat.clone());
@@ -1183,62 +1385,78 @@ function makeRingTube(innerR, outerR, length, color, segs = 20) {
 function makeOpticMesh(profile) {
   const g = new THREE.Group();
   g.name = "optic_" + profile;
+  const scopeMat = GUN_MAT.darkMetal;
   if (profile === "iron") {
-    // Front post + rear notch — no glass; alignment geometry for hip/ADS
-    const rearBase = makeBox(0.05, 0.014, 0.022, 0x1a1f28, 0, 0.01, 0.055);
-    const notchL = makeBox(0.01, 0.028, 0.014, 0x11151c, -0.016, 0.028, 0.055);
-    const notchR = makeBox(0.01, 0.028, 0.014, 0x11151c, 0.016, 0.028, 0.055);
-    const frontBase = makeBox(0.014, 0.01, 0.014, 0x1a1f28, 0, 0.01, -0.14);
-    const post = makeBox(0.007, 0.022, 0.007, 0xc45c2a, 0, 0.026, -0.14);
-    const tip = makeBox(0.009, 0.005, 0.009, 0xffaa66, 0, 0.039, -0.14);
-    g.add(rearBase, notchL, notchR, frontBase, post, tip);
+    // High-contrast front post + rear notch — readable silhouette
+    const rearBase = makeBox(0.052, 0.012, 0.024, 0x14181f, 0, 0.009, 0.055, scopeMat);
+    const notchL = makeBox(0.009, 0.032, 0.013, 0x0c0e12, -0.017, 0.03, 0.055, scopeMat);
+    const notchR = makeBox(0.009, 0.032, 0.013, 0x0c0e12, 0.017, 0.03, 0.055, scopeMat);
+    // Inner bevel lips so the notch reads as a U
+    const lipL = makeBox(0.004, 0.028, 0.01, 0x2a3140, -0.011, 0.028, 0.055, scopeMat);
+    const lipR = makeBox(0.004, 0.028, 0.01, 0x2a3140, 0.011, 0.028, 0.055, scopeMat);
+    const frontBase = makeBox(0.016, 0.009, 0.016, 0x14181f, 0, 0.009, -0.14, scopeMat);
+    const post = makeBox(0.006, 0.026, 0.006, 0xd4682e, 0, 0.028, -0.14, GUN_MAT.bronze);
+    const tip = makeBox(0.01, 0.005, 0.01, 0xffc078, 0, 0.042, -0.14, GUN_MAT.bronze);
+    g.add(rearBase, notchL, notchR, lipL, lipR, frontBase, post, tip);
   } else if (profile === "holo") {
-    // EOTech XPS3-ish: compact black hood, open rear window, see-through glass
-    const blk = 0x12151a;
-    const blk2 = 0x1c2129;
-    const mount = makeBox(0.046, 0.01, 0.055, blk2, 0, 0.005, 0.005);
-    // Side walls + top hood (rear open toward shooter)
-    const sideL = makeBox(0.006, 0.042, 0.05, blk, -0.028, 0.032, -0.005);
-    const sideR = makeBox(0.006, 0.042, 0.05, blk, 0.028, 0.032, -0.005);
-    const top = makeBox(0.062, 0.007, 0.05, blk, 0, 0.055, -0.005);
-    // Open front aperture (rim only) so glass is see-through
-    const frontBot = makeBox(0.062, 0.006, 0.006, blk, 0, 0.012, -0.03);
-    const frontL = makeBox(0.006, 0.042, 0.006, blk, -0.028, 0.032, -0.03);
-    const frontR = makeBox(0.006, 0.042, 0.006, blk, 0.028, 0.032, -0.03);
-    const glass = makeLensGlass(0.02, 0.1);
-    glass.material.color.setHex(0xb0c4d8);
-    glass.position.set(0, 0.032, -0.028);
-    const batt = makeBox(0.018, 0.028, 0.028, blk2, 0.04, 0.03, 0.0);
-    const hoodLip = makeBox(0.062, 0.005, 0.01, blk, 0, 0.056, 0.02);
-    g.add(mount, sideL, sideR, top, frontBot, frontL, frontR, glass, batt, hoodLip);
+    // EOTech XPS3-ish: crisp black hood, open rear, clean edges
+    const blk = 0x0e1014;
+    const blk2 = 0x1a1e26;
+    const edge = 0x2a303a;
+    const mount = makeBox(0.048, 0.009, 0.056, blk2, 0, 0.005, 0.004, scopeMat);
+    const sideL = makeBox(0.005, 0.044, 0.05, blk, -0.029, 0.033, -0.005, scopeMat);
+    const sideR = makeBox(0.005, 0.044, 0.05, blk, 0.029, 0.033, -0.005, scopeMat);
+    const top = makeBox(0.063, 0.006, 0.05, blk, 0, 0.057, -0.005, scopeMat);
+    // Edge bevel strips (overlapping) for cleaner hood silhouette
+    const topEdge = makeBox(0.065, 0.003, 0.048, edge, 0, 0.061, -0.005, scopeMat);
+    const frontBot = makeBox(0.063, 0.005, 0.005, blk, 0, 0.012, -0.031, scopeMat);
+    const frontL = makeBox(0.005, 0.044, 0.005, blk, -0.029, 0.033, -0.031, scopeMat);
+    const frontR = makeBox(0.005, 0.044, 0.005, blk, 0.029, 0.033, -0.031, scopeMat);
+    const glass = makeLensGlass(0.02, 0.09);
+    glass.material.color.setHex(0xc8d8e8);
+    glass.position.set(0, 0.033, -0.029);
+    const batt = makeBox(0.017, 0.03, 0.03, blk2, 0.041, 0.031, 0.0, scopeMat);
+    const battCap = makeBox(0.019, 0.008, 0.032, edge, 0.041, 0.048, 0.0, scopeMat);
+    const hoodLip = makeBox(0.063, 0.004, 0.01, blk, 0, 0.057, 0.021, scopeMat);
+    g.add(mount, sideL, sideR, top, topEdge, frontBot, frontL, frontR, glass, batt, battCap, hoodLip);
   } else if (profile === "acog") {
-    // Longer tube + eye relief; open aperture; HUD chevron when ADS
-    const mount = makeBox(0.038, 0.014, 0.09, 0x3a4558, 0, 0.007, 0.01);
-    const tube = makeRingTube(0.012, 0.02, 0.13, 0x4a5568, 18);
+    // Cleaner anodized tube — less muddy blues
+    const body = 0x2e3542;
+    const dark = 0x161b24;
+    const mount = makeBox(0.038, 0.013, 0.09, body, 0, 0.007, 0.01, scopeMat);
+    const mountLip = makeBox(0.042, 0.004, 0.086, dark, 0, 0.015, 0.01, scopeMat);
+    const tube = makeRingTube(0.012, 0.019, 0.13, body, 18, scopeMat);
     tube.position.set(0, 0.038, -0.01);
-    const bell = makeRingTube(0.014, 0.026, 0.028, 0x2c3340, 18);
+    const bell = makeRingTube(0.014, 0.025, 0.028, dark, 18, scopeMat);
     bell.position.set(0, 0.038, -0.09);
-    const ocular = makeRingTube(0.011, 0.022, 0.024, 0x2c3340, 18);
+    const ocular = makeRingTube(0.011, 0.021, 0.024, dark, 18, scopeMat);
     ocular.position.set(0, 0.038, 0.065);
-    const glassF = makeLensGlass(0.013, 0.14);
+    const glassF = makeLensGlass(0.013, 0.13);
+    glassF.material.color.setHex(0xa8c0d8);
     glassF.position.set(0, 0.038, -0.105);
-    const glassB = makeLensGlass(0.011, 0.1);
+    const glassB = makeLensGlass(0.011, 0.09);
+    glassB.material.color.setHex(0xb0c8dc);
     glassB.position.set(0, 0.038, 0.078);
-    g.add(mount, tube, bell, ocular, glassF, glassB);
+    g.add(mount, mountLip, tube, bell, ocular, glassF, glassB);
   } else {
-    // sniper_scope — long tube, objective bell + ocular
-    const mount = makeBox(0.036, 0.012, 0.12, 0x3a4558, 0, 0.006, 0);
-    const tube = makeRingTube(0.011, 0.019, 0.2, 0x2a3140, 20);
+    // sniper_scope — long tube, crisp dark housing
+    const body = 0x1e2430;
+    const dark = 0x10141a;
+    const mount = makeBox(0.036, 0.011, 0.12, 0x2a3140, 0, 0.006, 0, scopeMat);
+    const mountLip = makeBox(0.04, 0.0035, 0.116, dark, 0, 0.013, 0, scopeMat);
+    const tube = makeRingTube(0.011, 0.018, 0.2, body, 20, scopeMat);
     tube.position.set(0, 0.04, -0.02);
-    const obj = makeRingTube(0.016, 0.032, 0.04, 0x1a1f28, 22);
+    const obj = makeRingTube(0.016, 0.031, 0.04, dark, 22, scopeMat);
     obj.position.set(0, 0.04, -0.14);
-    const ocular = makeRingTube(0.012, 0.024, 0.032, 0x1a1f28, 20);
+    const ocular = makeRingTube(0.012, 0.023, 0.032, dark, 20, scopeMat);
     ocular.position.set(0, 0.04, 0.1);
-    const glassObj = makeLensGlass(0.018, 0.18);
+    const glassObj = makeLensGlass(0.018, 0.16);
+    glassObj.material.color.setHex(0x9eb6cc);
     glassObj.position.set(0, 0.04, -0.162);
-    const glassEye = makeLensGlass(0.012, 0.12);
+    const glassEye = makeLensGlass(0.012, 0.11);
+    glassEye.material.color.setHex(0xb4c8dc);
     glassEye.position.set(0, 0.04, 0.118);
-    g.add(mount, tube, obj, ocular, glassObj, glassEye);
+    g.add(mount, mountLip, tube, obj, ocular, glassObj, glassEye);
   }
   return g;
 }
@@ -1262,49 +1480,93 @@ function buildBlockGun(style) {
   }
   gunRoot = new THREE.Group();
   const isRifle = style === "example_rifle";
+  const poly = GUN_MAT.polymer;
+  const polyD = GUN_MAT.polymerDark;
+  const metal = GUN_MAT.metal;
+  const dark = GUN_MAT.darkMetal;
 
   if (isRifle) {
-    const stock = makeBox(0.05, 0.085, 0.2, 0x4a3a2a, 0.008, -0.015, 0.2);
-    const stockPad = makeBox(0.052, 0.095, 0.03, 0x3a2e22, 0.008, -0.01, 0.31);
-    const receiver = makeBox(0.062, 0.078, 0.28, 0x5a6578, 0, 0.002, 0.02);
-    const rail = makeBox(0.028, 0.01, 0.26, 0x2a3140, 0, 0.046, -0.02);
-    const handguard = makeBox(0.058, 0.055, 0.22, 0x3a4558, 0, 0.008, -0.22);
-    const barrel = makeCyl(0.012, 0.012, 0.38, 0x2c3340, 0, 0.022, -0.52, Math.PI / 2, 0, 0, 12);
-    const muzzleBrake = makeCyl(0.016, 0.014, 0.04, 0x1a1f28, 0, 0.022, -0.72, Math.PI / 2, 0, 0, 10);
-    const mag = makeBox(0.036, 0.15, 0.05, 0x444b58, 0, -0.115, 0.0);
+    // Stock — polymer / wood tone with pad bevel
+    const stock = makeBox(0.048, 0.078, 0.18, 0x5a4634, 0.008, -0.012, 0.195, poly);
+    const stockComb = makeBox(0.046, 0.022, 0.14, 0x4a3a2a, 0.008, 0.028, 0.19, polyD);
+    const stockPad = makeBox(0.054, 0.098, 0.028, 0x2e241c, 0.008, -0.008, 0.308, polyD);
+    const stockPadLip = makeBox(0.056, 0.01, 0.03, 0x1e1812, 0.008, 0.04, 0.308, polyD);
+    // Receiver — brighter metal vs matte polymer elsewhere
+    const receiver = makeBox(0.06, 0.074, 0.27, 0x6e7a8c, 0, 0.004, 0.02, metal);
+    const receiverTop = makeBox(0.062, 0.012, 0.26, 0x5a6578, 0, 0.042, 0.018, metal);
+    const receiverSide = makeBox(0.064, 0.05, 0.22, 0x4a5568, 0, 0.0, 0.03, dark);
+    const rail = makePicRail(0.028, 0.012, 0.26, 0, 0.052, -0.02);
+    // Handguard polymer with overlapping bevel edges
+    const handguard = makeBox(0.056, 0.05, 0.21, 0x323840, 0, 0.006, -0.22, poly);
+    const hgTop = makeBox(0.052, 0.01, 0.2, 0x2a3038, 0, 0.034, -0.22, polyD);
+    const hgBevelL = makeBox(0.006, 0.04, 0.2, 0x3a4048, -0.029, 0.006, -0.22, poly);
+    const hgBevelR = makeBox(0.006, 0.04, 0.2, 0x3a4048, 0.029, 0.006, -0.22, poly);
+    // Barrel taper toward muzzle (rTop at muzzle end after rot)
+    const barrel = makeCyl(0.009, 0.013, 0.38, 0x1e2430, 0, 0.022, -0.52, Math.PI / 2, 0, 0, 12, dark);
+    const gasBlock = makeBox(0.028, 0.022, 0.036, 0x2a3140, 0, 0.034, -0.4, metal);
+    // Muzzle brake — multi-slot device
+    const muzzleBrake = makeCyl(0.017, 0.014, 0.042, 0x12161c, 0, 0.022, -0.72, Math.PI / 2, 0, 0, 12, dark);
+    const brakeVentL = makeBox(0.006, 0.014, 0.028, 0x0a0c10, -0.016, 0.022, -0.72, dark);
+    const brakeVentR = makeBox(0.006, 0.014, 0.028, 0x0a0c10, 0.016, 0.022, -0.72, dark);
+    // Mag well lip + polymer mag
+    const magWell = makeBox(0.042, 0.022, 0.058, 0x4a5568, 0, -0.042, 0.0, metal);
+    const mag = makeBox(0.034, 0.145, 0.048, 0x2e343e, 0, -0.118, 0.0, polyD);
+    const magRib = makeBox(0.036, 0.012, 0.05, 0x3a404c, 0, -0.08, 0.0, poly);
     mag.name = "mag";
+    mag.add(magRib);
     magMesh = mag;
-    const pistol = makeBox(0.036, 0.1, 0.048, 0x2a3140, 0, -0.085, 0.1);
+    const pistol = makeBox(0.034, 0.096, 0.046, 0x2a3038, 0, -0.085, 0.1, poly);
     pistol.rotation.x = 0.22;
-    gripMesh = makeBox(0.038, 0.055, 0.07, 0x6b5344, 0, -0.048, -0.2);
-    muzzleFlash = makeBox(0.04, 0.04, 0.04, 0xffcc66, 0, 0.022, -0.76);
-    gunRoot.add(stock, stockPad, receiver, rail, handguard, barrel, muzzleBrake, mag, pistol, gripMesh, muzzleFlash);
+    gripMesh = makeBox(0.036, 0.052, 0.068, 0x5c4a3a, 0, -0.048, -0.2, poly);
+    const gripBevel = makeBox(0.038, 0.01, 0.06, 0x4a3a2e, 0, -0.02, -0.2, polyD);
+    gripMesh.add(gripBevel);
+    muzzleFlash = makeMuzzleFlashSprite(0, 0.022, -0.76, 1.15);
+    gunRoot.add(
+      stock, stockComb, stockPad, stockPadLip,
+      receiver, receiverTop, receiverSide, rail,
+      handguard, hgTop, hgBevelL, hgBevelR,
+      barrel, gasBlock, muzzleBrake, brakeVentL, brakeVentR,
+      magWell, mag, pistol, gripMesh, muzzleFlash
+    );
     gripMesh.userData.base = { x: 0, y: -0.048, z: -0.2, rotX: 0, rotY: 0, rotZ: 0 };
     opticRoot = new THREE.Group();
     opticRoot.position.set(0, 0.052, -0.02);
     opticRoot.userData.base = { x: 0, y: 0.052, z: -0.02, rotX: 0, rotY: 0, rotZ: 0 };
   } else {
-    const stock = makeBox(0.042, 0.06, 0.1, 0x3a4558, 0.01, -0.01, 0.13);
-    const receiver = makeBox(0.058, 0.072, 0.18, 0x5a6578, 0, 0.0, 0.01);
-    const rail = makeBox(0.024, 0.009, 0.16, 0x2a3140, 0, 0.042, -0.01);
-    const handguard = makeBox(0.05, 0.05, 0.12, 0x445060, 0, 0.006, -0.13);
-    const barrel = makeCyl(0.011, 0.011, 0.2, 0x2c3340, 0, 0.016, -0.28, Math.PI / 2, 0, 0, 12);
-    const muzzleDevice = makeCyl(0.014, 0.013, 0.028, 0x1a1f28, 0, 0.016, -0.4, Math.PI / 2, 0, 0, 10);
-    const mag = makeBox(0.038, 0.12, 0.05, 0x444b58, 0, -0.1, 0.01);
+    // Compact PDW — polymer shell, metal upper
+    const stock = makeBox(0.04, 0.055, 0.09, 0x2e343e, 0.01, -0.008, 0.128, poly);
+    const stockPad = makeBox(0.044, 0.062, 0.02, 0x1e2228, 0.01, -0.006, 0.178, polyD);
+    const receiver = makeBox(0.056, 0.068, 0.17, 0x6e7a8c, 0, 0.002, 0.01, metal);
+    const receiverTop = makeBox(0.058, 0.01, 0.16, 0x5a6578, 0, 0.038, 0.008, metal);
+    const rail = makePicRail(0.024, 0.011, 0.16, 0, 0.048, -0.01);
+    const handguard = makeBox(0.048, 0.046, 0.115, 0x323840, 0, 0.004, -0.13, poly);
+    const hgBevel = makeBox(0.05, 0.008, 0.11, 0x3a4048, 0, 0.03, -0.13, polyD);
+    const barrel = makeCyl(0.0085, 0.012, 0.2, 0x1e2430, 0, 0.016, -0.28, Math.PI / 2, 0, 0, 12, dark);
+    const muzzleDevice = makeCyl(0.015, 0.012, 0.03, 0x12161c, 0, 0.016, -0.4, Math.PI / 2, 0, 0, 12, dark);
+    const flashHiderRing = makeCyl(0.016, 0.015, 0.01, 0x0a0c10, 0, 0.016, -0.418, Math.PI / 2, 0, 0, 10, dark);
+    const magWell = makeBox(0.044, 0.02, 0.056, 0x4a5568, 0, -0.04, 0.01, metal);
+    const mag = makeBox(0.036, 0.115, 0.048, 0x2e343e, 0, -0.102, 0.01, polyD);
+    const magRib = makeBox(0.038, 0.01, 0.05, 0x3a404c, 0, -0.07, 0.01, poly);
     mag.name = "mag";
+    mag.add(magRib);
     magMesh = mag;
-    const pistol = makeBox(0.034, 0.088, 0.042, 0x2a3140, 0, -0.078, 0.07);
+    const pistol = makeBox(0.032, 0.084, 0.04, 0x2a3038, 0, -0.078, 0.07, poly);
     pistol.rotation.x = 0.28;
-    gripMesh = makeBox(0.034, 0.048, 0.048, 0x6b5344, 0, -0.052, -0.1);
-    muzzleFlash = makeBox(0.032, 0.032, 0.032, 0xffcc66, 0, 0.016, -0.43);
-    gunRoot.add(stock, receiver, rail, handguard, barrel, muzzleDevice, mag, pistol, gripMesh, muzzleFlash);
+    gripMesh = makeBox(0.032, 0.046, 0.046, 0x5c4a3a, 0, -0.052, -0.1, poly);
+    const gripBevel = makeBox(0.034, 0.008, 0.04, 0x4a3a2e, 0, -0.028, -0.1, polyD);
+    gripMesh.add(gripBevel);
+    muzzleFlash = makeMuzzleFlashSprite(0, 0.016, -0.43, 0.95);
+    gunRoot.add(
+      stock, stockPad, receiver, receiverTop, rail,
+      handguard, hgBevel, barrel, muzzleDevice, flashHiderRing,
+      magWell, mag, pistol, gripMesh, muzzleFlash
+    );
     gripMesh.userData.base = { x: 0, y: -0.052, z: -0.1, rotX: 0, rotY: 0, rotZ: 0 };
     opticRoot = new THREE.Group();
     opticRoot.position.set(0, 0.048, -0.01);
     opticRoot.userData.base = { x: 0, y: 0.048, z: -0.01, rotX: 0, rotY: 0, rotZ: 0 };
   }
 
-  muzzleFlash.material = new THREE.MeshBasicMaterial({ color: 0xffaa44, transparent: true, opacity: 0.95 });
   muzzleFlash.visible = false;
   muzzleSocket = new THREE.Object3D();
   muzzleSocket.name = "muzzleSocket";
@@ -1448,12 +1710,12 @@ function buildOpticsTable() {
 
 function buildShootingRange() {
   const baseLanes = [
-    { z: -25, pts: 5 },
-    { z: -55, pts: 8 },
-    { z: -100, pts: 12 },
-    { z: -160, pts: 16 },
-    { z: -250, pts: 22 },
-    { z: -380, pts: 30 },
+    { z: -50, m: 50, pts: 5 },
+    { z: -100, m: 100, pts: 8 },
+    { z: -150, m: 150, pts: 12 },
+    { z: -200, m: 200, pts: 16 },
+    { z: -300, m: 300, pts: 22 },
+    { z: -400, m: 400, pts: 30 },
   ];
   clearGroundRangeLines();
   rangeTargets = [];
@@ -1485,8 +1747,9 @@ function buildShootingRange() {
     scene.add(rail);
   }
 
-  // Nominal circular-lane distances as thin floor markers (lines only, no text).
+  // Nominal circular-lane distances as thin floor markers + wall stencil numbers.
   buildGroundRangeLines(baseLanes.map((lane) => lane.z));
+  buildWallRangeNumbers(baseLanes);
 
   baseLanes.forEach((lane, i) => {
     const x = (Math.random() - 0.5) * 8.5;
@@ -1950,7 +2213,7 @@ function clearInputFlags() {
 
 function initThree() {
   const canvas = el("view3d");
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setClearColor(0x141820, 1);
   renderer.shadowMap.enabled = true;
@@ -1960,7 +2223,9 @@ function initThree() {
   scene.background = new THREE.Color(0x141820);
   // Subtle distance fog so ~400m berm reads as far without crushing mid-lane contrast
   scene.fog = new THREE.Fog(0x141820, 90, 430);
-  camera = new THREE.PerspectiveCamera(player.fovHip, 1, 0.01, 500);
+  // near slightly above 0.01 improves distant depth precision; far clears ~410m berm.
+  // logarithmicDepthBuffer on the renderer further reduces distant z-fighting.
+  camera = new THREE.PerspectiveCamera(player.fovHip, 1, state.camNear, state.camFar);
 
   playerRoot = new THREE.Group();
   leanPivot = new THREE.Group();
@@ -2520,8 +2785,8 @@ function spawnImpactDecal(pos, normal, kind) {
         opacity: isPunch ? 0.72 : 0.55,
         depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
         side: THREE.DoubleSide,
       })
     );
@@ -2798,11 +3063,20 @@ function updatePlayer(dt) {
   // so offset should be local +X (right)
   leanPivot.position.set(-leanRatio * player.leanOffset, 0, 0);
 
-  // Muzzle flash
+  // Muzzle flash — rotate + soft scale pulse
   if (muzzleFlash) {
-    const on = performance.now() < player.flashUntil;
+    const now = performance.now();
+    const on = now < player.flashUntil;
     muzzleFlash.visible = on;
-    if (on) muzzleFlash.rotation.z += dt * 20;
+    if (on) {
+      muzzleFlash.rotation.z += dt * 28;
+      const remain = Math.max(0, player.flashUntil - now) / 60;
+      const base = muzzleFlash.userData.flashScale || 1;
+      const s = base * (0.75 + 0.55 * remain);
+      muzzleFlash.scale.setScalar(s);
+    } else {
+      muzzleFlash.scale.setScalar(muzzleFlash.userData.flashScale || 1);
+    }
   }
 
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
@@ -3318,6 +3592,23 @@ function bind() {
       const adsVal = el("adsLookMulVal");
       if (adsVal) adsVal.textContent = `${player.adsLookMul.toFixed(2)}×`;
     };
+  }
+
+  const camNearSlider = el("camNearSlider");
+  const camNearInput = el("camNearInput");
+  if (camNearSlider) {
+    camNearSlider.oninput = (e) => setCamNear(e.target.value);
+  }
+  if (camNearInput) {
+    camNearInput.onchange = (e) => setCamNear(e.target.value, { toast: true });
+  }
+  const camFarSlider = el("camFarSlider");
+  const camFarInput = el("camFarInput");
+  if (camFarSlider) {
+    camFarSlider.oninput = (e) => setCamFar(e.target.value);
+  }
+  if (camFarInput) {
+    camFarInput.onchange = (e) => setCamFar(e.target.value, { toast: true });
   }
 
   window.addEventListener("keydown", onKeyDown);

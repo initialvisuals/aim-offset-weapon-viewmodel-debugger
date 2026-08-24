@@ -138,7 +138,11 @@ const GOD_RAYS_STEPS = 48;
 /** Settings default; 0 skips the pass. */
 const GOD_RAYS_DEFAULT = 0.9;
 /** Settings default; 0 skips the pass. */
-const BLOOM_DEFAULT = 0.45;
+const BLOOM_DEFAULT = 0.22;
+/** Mesh sun angular diameter (degrees). Real sun ~0.53; default a hair smaller. */
+const SUN_SIZE_DEFAULT = 0.45;
+/** HDR mul on ToD sun color for the mesh disc. 1.4 just kisses bloom threshold. */
+const SUN_PUNCH_DEFAULT = 1.4;
 /** Bright-pass luminance floor (HDR). Knee is a fraction of this. */
 const BLOOM_THRESHOLD = 1.0;
 const BLOOM_KNEE = 0.22;
@@ -260,6 +264,10 @@ const state = {
   godRays: GOD_RAYS_DEFAULT,
   /** HDR bloom (0 = off, 2 = strong). Independent of god rays. */
   bloom: BLOOM_DEFAULT,
+  /** Mesh sun angular diameter in degrees (real sun ~0.53). */
+  sunSize: SUN_SIZE_DEFAULT,
+  /** HDR mul on ToD sun color for the mesh disc. */
+  sunPunch: SUN_PUNCH_DEFAULT,
   /** Procedural cloud cover (0 = clear). Stars follow the clock. */
   clouds: CLOUDS_DEFAULT,
 };
@@ -1117,11 +1125,12 @@ function sunPath(hour) {
 function ensureSkyDiscs() {
   if (!scene) return;
   if (!sunDisc) {
+    // Tiny HDR seed for bloom. Sky shader already draws the sun halo.
     sunDisc = new THREE.Mesh(
-      new THREE.SphereGeometry(6.5, 16, 12),
+      new THREE.SphereGeometry(1, 16, 12),
       new THREE.MeshBasicMaterial({ color: 0xffe4b8, fog: false, depthWrite: false, toneMapped: false })
     );
-    sunDisc.material.color.setRGB(4.2, 3.5, 2.4);
+    sunDisc.material.color.setRGB(1.6, 1.35, 0.95);
     sunDisc.renderOrder = -10;
     sunDisc.raycast = () => {};
     scene.add(sunDisc);
@@ -1375,14 +1384,16 @@ function updateSkyDome(dt) {
   const R = skyFollowRadius();
   skyDome.scale.setScalar(Math.max(20, R * 0.55));
   if (skyMat) skyMat.uniforms.skyTime.value += dt;
-  const discScale = R / SKY_DISC_R;
+  const sizeDeg = state.sunSize ?? SUN_SIZE_DEFAULT;
+  const angRad = (sizeDeg * Math.PI / 180) * 0.5;
+  const sunScale = Math.max(0.06, R * Math.tan(angRad));
   if (sunDisc && sunDisc.visible) {
     sunDisc.position.copy(_skyCamPos).addScaledVector(_keySunDir, R);
-    sunDisc.scale.setScalar(discScale);
+    sunDisc.scale.setScalar(sunScale);
   }
   if (moonDisc && moonDisc.visible) {
     moonDisc.position.copy(_skyCamPos).addScaledVector(_moonDir, R);
-    moonDisc.scale.setScalar(discScale);
+    moonDisc.scale.setScalar(R / SKY_DISC_R);
   }
 }
 
@@ -1460,7 +1471,7 @@ function applyTimeOfDay() {
     sunDisc.visible = up;
     if (up) {
       sunDisc.material.color.copy(pal.sun);
-      sunDisc.material.color.multiplyScalar(4.2);
+      sunDisc.material.color.multiplyScalar(state.sunPunch ?? SUN_PUNCH_DEFAULT);
     }
   }
   if (moonDisc) {
@@ -1604,6 +1615,40 @@ function setBloom(v, { toast = false } = {}) {
   syncBloomUI();
   if (toast) showToast(`Bloom ${state.bloom.toFixed(2)}`);
 }
+
+function syncSunSizeUI() {
+  const n = state.sunSize ?? SUN_SIZE_DEFAULT;
+  const slider = el("sunSizeSlider");
+  const val = el("sunSizeVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2) + "\u00b0";
+}
+
+function setSunSize(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0.08, 8);
+  state.sunSize = Number.isFinite(n) ? n : SUN_SIZE_DEFAULT;
+  updateSkyDome(0);
+  syncSunSizeUI();
+  if (toast) showToast("Sun size " + state.sunSize.toFixed(2) + "\u00b0");
+}
+
+function syncSunPunchUI() {
+  const n = state.sunPunch ?? SUN_PUNCH_DEFAULT;
+  const slider = el("sunPunchSlider");
+  const val = el("sunPunchVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2);
+}
+
+function setSunPunch(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, 4);
+  state.sunPunch = Number.isFinite(n) ? n : SUN_PUNCH_DEFAULT;
+  applyTimeOfDay();
+  updateSkyDome(0);
+  syncSunPunchUI();
+  if (toast) showToast("Sun disc " + state.sunPunch.toFixed(2));
+}
+
 
 function syncCloudsUI() {
   const n = state.clouds ?? CLOUDS_DEFAULT;
@@ -1749,6 +1794,8 @@ function syncSettingsUI() {
 
   syncGodRaysUI();
   syncBloomUI();
+  syncSunSizeUI();
+  syncSunPunchUI();
   syncCloudsUI();
   syncConcreteWearUI();
   syncFxSettingsUI();
@@ -2592,7 +2639,44 @@ void applyRangeConcreteNormal(inout vec3 normal) {
 }
 `;
 
+let concreteShaderFailed = false;
+
+function fallbackConcreteMaterials() {
+  if (concreteShaderFailed) return;
+  concreteShaderFailed = true;
+  console.warn("[concrete] custom shader failed; falling back to MeshStandardMaterial");
+  if (!scene) return;
+  scene.traverse((obj) => {
+    const list = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
+    for (const m of list) {
+      if (!m || !m.userData || !m.userData.concreteKind) continue;
+      const kind = m.userData.concreteKind;
+      const cfg = CONCRETE_KINDS[kind] || CONCRETE_KINDS.floor;
+      m.onBeforeCompile = () => {};
+      m.customProgramCacheKey = () => "rangeConcreteFallback";
+      if (m.color) m.color.setHex(cfg.color || 0x8a8680);
+      m.roughness = cfg.roughness != null ? cfg.roughness : 0.86;
+      m.metalness = 0.02;
+      m.needsUpdate = true;
+    }
+  });
+}
+
 function compileRangeConcrete(shader, cfg) {
+  if (concreteShaderFailed) return;
+  const vs = shader.vertexShader;
+  const fs = shader.fragmentShader;
+  if (
+    !vs.includes("#include <common>") ||
+    !vs.includes("#include <worldpos_vertex>") ||
+    !fs.includes("#include <common>") ||
+    !fs.includes("#include <roughnessmap_fragment>")
+  ) {
+    console.warn("[concrete] missing shader chunks; using MeshStandardMaterial");
+    fallbackConcreteMaterials();
+    return;
+  }
+
   shader.uniforms.uConcreteWear = uConcreteWear;
   shader.uniforms.uConScale = { value: cfg.scale };
   shader.uniforms.uConVar = { value: cfg.variation };
@@ -2608,28 +2692,39 @@ function compileRangeConcrete(shader, cfg) {
   shader.uniforms.uConRough = { value: cfg.roughness };
   shader.uniforms.uConFloorY = { value: FLOOR_Y };
 
-  shader.vertexShader = "varying vec3 vConWP;\nvarying vec3 vConWN;\n" + shader.vertexShader;
+  shader.vertexShader = shader.vertexShader.replace(
+    "#include <common>",
+    `#include <common>
+varying vec3 vConWP;
+varying vec3 vConWN;
+`
+  );
   shader.vertexShader = shader.vertexShader.replace(
     "#include <worldpos_vertex>",
     `#include <worldpos_vertex>
     vConWP = (modelMatrix * vec4(transformed, 1.0)).xyz;
-    vConWN = inverseTransformDirection(transformedNormal, viewMatrix);
+    vConWN = normalize(mat3(modelMatrix) * objectNormal);
     `
   );
 
-  shader.fragmentShader = CONCRETE_GLSL_FNS + shader.fragmentShader;
+  shader.fragmentShader = shader.fragmentShader.replace(
+    "#include <common>",
+    "#include <common>\n" + CONCRETE_GLSL_FNS
+  );
   shader.fragmentShader = shader.fragmentShader.replace(
     "#include <roughnessmap_fragment>",
     `#include <roughnessmap_fragment>
     applyRangeConcreteAlbedo(diffuseColor, roughnessFactor);
     `
   );
-  shader.fragmentShader = shader.fragmentShader.replace(
-    "#include <normal_fragment_begin>",
-    `#include <normal_fragment_begin>
+  if (shader.fragmentShader.includes("#include <normal_fragment_begin>")) {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <normal_fragment_begin>",
+      `#include <normal_fragment_begin>
     applyRangeConcreteNormal(normal);
     `
-  );
+    );
+  }
 }
 
 function makeConcreteMaterial(kind) {
@@ -2642,8 +2737,16 @@ function makeConcreteMaterial(kind) {
     dithering: false,
   });
   mat.userData.concreteKind = kind;
-  mat.onBeforeCompile = (shader) => compileRangeConcrete(shader, cfg);
-  mat.customProgramCacheKey = () => "rangeConcrete";
+  if (concreteShaderFailed) return mat;
+  mat.onBeforeCompile = (shader) => {
+    try {
+      compileRangeConcrete(shader, cfg);
+    } catch (err) {
+      console.warn("[concrete] onBeforeCompile failed", err);
+      fallbackConcreteMaterials();
+    }
+  };
+  mat.customProgramCacheKey = () => "rangeConcrete_" + kind;
   return mat;
 }
 
@@ -5910,6 +6013,22 @@ function initThree() {
   renderer.toneMappingExposure = 1;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.debug.checkShaderErrors = true;
+  renderer.debug.onShaderError = (gl, program, glVertexShader, glFragmentShader) => {
+    const vsSrc = gl.getShaderSource(glVertexShader) || "";
+    const fsSrc = gl.getShaderSource(glFragmentShader) || "";
+    const vsLog = gl.getShaderInfoLog(glVertexShader) || "";
+    const fsLog = gl.getShaderInfoLog(glFragmentShader) || "";
+    const pLog = gl.getProgramInfoLog(program) || "";
+    console.error("[shader]", pLog, vsLog, fsLog);
+    if (
+      vsSrc.includes("vConWP") ||
+      fsSrc.includes("applyRangeConcreteAlbedo") ||
+      fsSrc.includes("uConScale")
+    ) {
+      fallbackConcreteMaterials();
+    }
+  };
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(SCENE_BG_BASE);
@@ -8362,6 +8481,20 @@ function bind() {
     bloomSlider.oninput = (e) => setBloom(e.target.value);
   }
   syncBloomUI();
+  const sunSizeSlider = el("sunSizeSlider");
+  if (sunSizeSlider) {
+    sunSizeSlider.value = String(state.sunSize);
+    sunSizeSlider.oninput = (e) => setSunSize(e.target.value);
+  }
+  syncSunSizeUI();
+
+  const sunPunchSlider = el("sunPunchSlider");
+  if (sunPunchSlider) {
+    sunPunchSlider.value = String(state.sunPunch);
+    sunPunchSlider.oninput = (e) => setSunPunch(e.target.value);
+  }
+  syncSunPunchUI();
+
 
   const cloudsSlider = el("cloudsSlider");
   if (cloudsSlider) {

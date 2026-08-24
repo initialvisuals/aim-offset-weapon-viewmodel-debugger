@@ -122,6 +122,25 @@ const state = {
   breathLeft: 3,
   breathMax: 3,
   crouchToggled: false,
+  /** 0 = stand, 1 = full sit. Wheel / C / Z / slide drive this. */
+  crouchGrad: 0,
+  /** Last analog crouch depth for C-toggle (default full sit). */
+  crouchLastDepth: 1,
+  sliding: false,
+  slideT: 0,
+  slideDur: 0.7,
+  slideFx: 0,
+  slideFz: 0,
+  slideSpeed: 0,
+  vaulting: false,
+  vaultT: 0,
+  vaultDur: 0.36,
+  vaultFrom: null,
+  vaultLip: null,
+  vaultTo: null,
+  vaultSupportTo: 0,
+  lookVault: null,
+  spaceHoldT: 0,
   /** Sim (true) = HoB + ballistic zero. Arcade (false) = reticle-faithful / idealized bore=aim. */
   hobZero: true,
   /** Zero distance in demo meters. */
@@ -1068,9 +1087,23 @@ let opticRoot, gripMesh, muzzleFlash, muzzleSocket, ejectionPort, swayRig, magMe
 let tracers = [];
 /** Short-lived bullet spark bursts (MeshBasic quads). */
 let impactSparks = [];
-/** World impact marks — FIFO capped. */
+/** World impact marks — FIFO capped (walls / berm / silhouettes). */
 let impactDecals = [];
 const IMPACT_DECAL_MAX = 50;
+/** Round paper-target holes — persist until table reset (not in the FIFO TTL pool). */
+let paperDecals = [];
+const PAPER_DECAL_MAX = 280;
+const _decalParentQ = new THREE.Quaternion();
+const _decalWorldQ = new THREE.Quaternion();
+const _decalLocal = new THREE.Vector3();
+const _vaultFwd = new THREE.Vector3();
+const _vaultOrigin = new THREE.Vector3();
+const _vaultDown = new THREE.Vector3(0, -1, 0);
+const _vaultBox = new THREE.Box3();
+const VAULT_HOLD_SEC = 0.22;
+const VAULT_MIN_H = 0.38;
+const VAULT_MAX_H = 1.18;
+const VAULT_REACH = 1.45;
 const FLOOR_Y = -1.4;
 /** Ejected brass casings — FIFO-capped, sleep after one damped floor bounce. */
 let casings = [];
@@ -1107,6 +1140,7 @@ const input = {
   sprint: false, leanLeft: false, leanRight: false,
   ads: false, shoot: false, holdBreath: false,
   crouchHold: false,
+  spaceDown: false,
 };
 
 /** Spawn / firing-line world Z. Range art distances are meters downrange (−Z) from here. */
@@ -1128,6 +1162,14 @@ const player = {
   eyeHeight: 0.2,
   eyeCurrent: 0.2,
   crouchEyeMul: 0.6,
+  /** Meters above support at gradient=1 (sit on heels). Standing is ~1.6 m above floor. */
+  crouchSitHeight: 0.82,
+  /** Foot support world Y (floor or vaulted table top). */
+  supportY: FLOOR_Y,
+  planarSpeed: 0,
+  fwdIntent: 0,
+  wasSprint: false,
+  wasCrouched: false,
   crouchSpeedMul: 0.6,
   moveSpeed: 3.2,
   sprintMul: 1.65,
@@ -1431,6 +1473,52 @@ function registerLeanSolid(obj) {
   return obj;
 }
 
+/** Tag a prop as a vault lip (sandbags, benches, tables, low crates). */
+function markVaultable(obj) {
+  if (!obj) return obj;
+  obj.userData.vaultable = true;
+  obj.traverse((c) => {
+    c.userData.vaultable = true;
+  });
+  return obj;
+}
+
+function isAdsNow() {
+  if (input.ads) return true;
+  const t = state.adsPreview ? 1 : state.adsFactor;
+  return t > 0.22;
+}
+
+function hasFwdIntent() {
+  return player.fwdIntent >= 0.18 || player.planarSpeed > 1.6 || state.sliding;
+}
+
+function standEyeWorld() {
+  return player.supportY + (player.eyeHeight - FLOOR_Y);
+}
+
+function sitEyeWorld() {
+  return player.supportY + player.crouchSitHeight;
+}
+
+function syncCrouchSlider() {
+  const slider = el("crouchHeightSlider");
+  const val = el("crouchHeightVal");
+  const pct = Math.round(clamp(state.crouchGrad, 0, 1) * 100);
+  if (slider && document.activeElement !== slider) slider.value = String(pct);
+  if (val) val.textContent = pct + "%";
+}
+
+function setCrouchGrad(g, { remember = true } = {}) {
+  state.crouchGrad = clamp(g, 0, 1);
+  if (remember && state.crouchGrad > 0.04) state.crouchLastDepth = state.crouchGrad;
+  if (state.crouchGrad < 0.02) {
+    state.crouchGrad = 0;
+    state.crouchToggled = false;
+  }
+  syncCrouchSlider();
+}
+
 function addLeanSolid(obj) {
   scene.add(obj);
   return registerLeanSolid(obj);
@@ -1498,7 +1586,7 @@ function makeCrate(w, h, d, x, y, z, rotY = 0) {
   const band2 = band1.clone();
   band2.position.y = -h * 0.18;
   mesh.add(band1, band2);
-  return mesh;
+  return markVaultable(mesh);
 }
 
 function makeBarrel(r, h, x, y, z, color = 0x3d4a3a) {
@@ -1514,7 +1602,7 @@ function makeBarrel(r, h, x, y, z, color = 0x3d4a3a) {
   rim.rotation.x = Math.PI / 2;
   rim.position.y = h * 0.42;
   mesh.add(rim);
-  return mesh;
+  return markVaultable(mesh);
 }
 
 /** Tan canvas bag — simple stacked boxes for the firing-line stall. */
@@ -1562,7 +1650,7 @@ function makeSandbagStack(cx, cz, opts = {}) {
       group.add(makeSandbag(w, bagH, d, lx, ly, lz, yaw, color));
     }
   }
-  return group;
+  return markVaultable(group);
 }
 
 /** Low timber rest in front of bags — short, side-bay only (not a lane barrier). */
@@ -1601,7 +1689,7 @@ function makeStallBench(cx, cz, seatW = 1.1) {
       group.add(leg);
     }
   }
-  return group;
+  return markVaultable(group);
 }
 
 /** Optional matOpts: { roughness, metalness } — metal vs polymer separation on guns. */
@@ -2052,6 +2140,7 @@ function buildOpticsTable() {
   top.position.set(0, tableY, tableZ);
   top.castShadow = true;
   top.receiveShadow = true;
+  markVaultable(top);
   // Subtle edge lip / apron
   const apron = makeBox(1.68, 0.05, 0.04, 0x3a2e22, 0, tableY - 0.04, tableZ + 0.27);
   const apronB = makeBox(1.68, 0.05, 0.04, 0x3a2e22, 0, tableY - 0.04, tableZ - 0.27);
@@ -2146,6 +2235,7 @@ function buildWeaponsBench() {
   top.position.set(tableX, tableY, tableZ);
   top.castShadow = true;
   top.receiveShadow = true;
+  markVaultable(top);
   const apron = makeBox(1.18, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ + 0.24);
   const apronB = makeBox(1.18, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ - 0.24);
   const legMat = 0x2e241c;
@@ -2190,6 +2280,80 @@ function buildWeaponsBench() {
     scene.add(group);
     pickups.push(group);
   });
+  buildRangeResetButton(tableX, tableY, tableZ);
+}
+
+function makeResetLabelTexture() {
+  return makeCanvasTexture((ctx, size) => {
+    ctx.fillStyle = "#16181c";
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = "#c9a227";
+    ctx.fillRect(10, 10, size - 20, size - 20);
+    ctx.fillStyle = "#1c1e22";
+    ctx.fillRect(18, 18, size - 36, size - 36);
+    ctx.fillStyle = "#f4ead0";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "bold 54px Arial, Helvetica, sans-serif";
+    ctx.fillText("RESET", size / 2, size / 2 - 20);
+    ctx.font = "bold 34px Arial, Helvetica, sans-serif";
+    ctx.fillText("TARGETS", size / 2, size / 2 + 32);
+  }, 256);
+}
+
+/** Chunky industrial reset on the weapons bench (look + F / click). */
+function buildRangeResetButton(tableX, tableY, tableZ) {
+  const group = new THREE.Group();
+  const y = tableY + 0.05;
+  group.position.set(tableX, y, tableZ + 0.205);
+  const plate = new THREE.Mesh(
+    new THREE.BoxGeometry(0.24, 0.02, 0.17),
+    new THREE.MeshStandardMaterial({ color: 0x2a3038, roughness: 0.42, metalness: 0.58 })
+  );
+  plate.position.y = 0.01;
+  plate.castShadow = true;
+  group.add(plate);
+  const bezel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.048, 0.054, 0.018, 22),
+    new THREE.MeshStandardMaterial({ color: 0x3a424c, roughness: 0.38, metalness: 0.62 })
+  );
+  bezel.position.y = 0.024;
+  group.add(bezel);
+  const btn = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.036, 0.04, 0.03, 22),
+    new THREE.MeshStandardMaterial({
+      color: 0xb42318,
+      roughness: 0.32,
+      metalness: 0.22,
+      emissive: 0x3a0606,
+      emissiveIntensity: 0.4,
+    })
+  );
+  btn.position.y = 0.042;
+  btn.castShadow = true;
+  group.add(btn);
+  const label = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.22, 0.075),
+    new THREE.MeshBasicMaterial({ map: makeResetLabelTexture() })
+  );
+  label.position.set(0, 0.034, 0.09);
+  group.add(label);
+  const highlight = new THREE.Mesh(
+    new THREE.BoxGeometry(0.26, 0.018, 0.2),
+    new THREE.MeshBasicMaterial({ color: 0xff6644, transparent: true, opacity: 0.0 })
+  );
+  highlight.position.y = 0.004;
+  group.add(highlight);
+  group.userData = {
+    resetTargets: true,
+    label: "Reset targets",
+    highlight,
+    baseY: y,
+    allowed: true,
+    buttonMesh: btn,
+  };
+  scene.add(group);
+  pickups.push(group);
 }
 
 function buildShootingRange() {
@@ -2764,6 +2928,21 @@ function resetSilhouettes() {
   }
 }
 
+function clearPaperDecals() {
+  for (const mesh of paperDecals) {
+    if (mesh.parent) mesh.parent.remove(mesh);
+    if (mesh.material) mesh.material.dispose();
+  }
+  paperDecals = [];
+}
+
+/** Table-button / F reset: new paper + stand silhouettes back up. Score stays. */
+function resetRangeTargets() {
+  resetSilhouettes();
+  clearPaperDecals();
+  showToast("Targets reset");
+}
+
 function updateSilhouettes(dt) {
   const now = performance.now();
   const k = 1 - Math.exp(-10 * dt);
@@ -2871,6 +3050,8 @@ function clearInputFlags() {
   input.ads = input.shoot = false;
   input.holdBreath = false;
   input.crouchHold = false;
+  input.spaceDown = false;
+  state.spaceHoldT = 0;
   state.holdBreath = false;
   player.leanTarget = 0;
   state.adsTarget = state.adsPreview ? 1 : 0;
@@ -3023,13 +3204,19 @@ function applySwayAndRecoil(dt, moving) {
     reloadDipRx = 0.28 * envelope;   // slight +rotX tilt
   }
 
+  const crouchB = clamp(state.crouchGrad, 0, 1);
+  const vaultB = state.vaulting ? 1 - Math.abs(state.vaultT / Math.max(0.12, state.vaultDur) - 0.5) * 2 : 0;
+  const tuck = Math.max(crouchB, state.sliding ? 0.7 : 0, clamp(vaultB, 0, 1));
+  const crouchDipY = -0.06 * tuck;
+  const crouchDipZ = 0.03 * tuck;
+
   swayRig.position.set(
     sx + player.recoilPunch.x,
-    sy + player.recoilPunch.y + reloadDipY,
-    sz + player.recoilPunch.z
+    sy + player.recoilPunch.y + reloadDipY + crouchDipY,
+    sz + player.recoilPunch.z + crouchDipZ
   );
   swayRig.rotation.set(
-    rx + player.recoilRot.x + reloadDipRx,
+    rx + player.recoilRot.x + reloadDipRx + 0.04 * tuck,
     ry + player.recoilRot.y,
     rz + player.recoilRot.z,
     "XYZ"
@@ -3039,7 +3226,7 @@ function applySwayAndRecoil(dt, moving) {
 function updateHoldBreath(dt) {
   const bar = el("breathBar");
   const fill = el("breathFill");
-  const want = gameplayActive() && input.holdBreath && state.breathLeft > 0;
+  const want = gameplayActive() && isAdsNow() && input.holdBreath && state.breathLeft > 0 && !state.vaulting;
   if (want) {
     if (!state.holdBreath) state.holdBreath = true;
     state.breathLeft = Math.max(0, state.breathLeft - dt);
@@ -3391,6 +3578,7 @@ function updateCasings(dt) {
 
 function fireWeapon() {
   if (!gameplayActive()) return;
+  if (state.vaulting) return;
   if (player.fireCooldown > 0) return;
   if (state.lookPickup) {
     tryEquipLooked();
@@ -3548,50 +3736,76 @@ function spawnImpactSparks(pos, normal) {
  * kind: "punch" (targets) | "scuff" (floor / berm / walls).
  * Caps at IMPACT_DECAL_MAX via FIFO recycle.
  */
-function spawnImpactDecal(pos, normal, kind) {
+function makeImpactDecalMesh(isPunch) {
+  return new THREE.Mesh(
+    getImpactDecalGeo(),
+    new THREE.MeshBasicMaterial({
+      map: getImpactScorchTexture(),
+      color: isPunch ? 0x1a1a1a : 0x14100c,
+      transparent: true,
+      opacity: isPunch ? 0.72 : 0.55,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+      side: THREE.DoubleSide,
+    })
+  );
+}
+
+function recycleDecalFrom(list, isPunch) {
+  const mesh = list.shift();
+  if (mesh.parent) mesh.parent.remove(mesh);
+  mesh.material.color.setHex(isPunch ? 0x1a1a1a : 0x14100c);
+  mesh.material.map = getImpactScorchTexture();
+  mesh.material.opacity = isPunch ? 0.72 : 0.55;
+  mesh.material.needsUpdate = true;
+  return mesh;
+}
+
+function spawnImpactDecal(pos, normal, kind, opts) {
   if (!scene || !pos) return;
   const isPunch = kind === "punch";
+  const paper = !!(opts && opts.paperTarget && opts.parent);
+  const parent = paper ? opts.parent : null;
   const size = isPunch
     ? 0.07 + Math.random() * 0.05
     : 0.11 + Math.random() * 0.12;
-  const tint = isPunch ? 0x1a1a1a : 0x14100c;
   let mesh;
-  if (impactDecals.length >= IMPACT_DECAL_MAX) {
-    mesh = impactDecals.shift();
-    if (mesh.parent) mesh.parent.remove(mesh);
-    mesh.material.color.setHex(tint);
-    mesh.material.map = getImpactScorchTexture();
-    mesh.material.opacity = isPunch ? 0.72 : 0.55;
-    mesh.material.needsUpdate = true;
-  } else {
-    mesh = new THREE.Mesh(
-      getImpactDecalGeo(),
-      new THREE.MeshBasicMaterial({
-        map: getImpactScorchTexture(),
-        color: tint,
-        transparent: true,
-        opacity: isPunch ? 0.72 : 0.55,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -4,
-        polygonOffsetUnits: -4,
-        side: THREE.DoubleSide,
-      })
-    );
+  if (paper) {
+    if (paperDecals.length >= PAPER_DECAL_MAX) mesh = recycleDecalFrom(paperDecals, isPunch);
+    else mesh = makeImpactDecalMesh(isPunch);
     mesh.renderOrder = 3;
+    mesh.userData.paperPersist = true;
+  } else {
+    if (impactDecals.length >= IMPACT_DECAL_MAX) mesh = recycleDecalFrom(impactDecals, isPunch);
+    else mesh = makeImpactDecalMesh(isPunch);
+    mesh.renderOrder = 3;
+    mesh.userData.paperPersist = false;
   }
   orientFlatToNormal(mesh, normal);
   mesh.scale.set(size, size * (0.75 + Math.random() * 0.5), 1);
-  mesh.position.copy(pos).addScaledVector(_impactN, 0.012);
-  // Slight random spin in-plane
   mesh.rotateZ((Math.random() - 0.5) * Math.PI);
-  scene.add(mesh);
-  impactDecals.push(mesh);
+  if (parent && parent.isObject3D) {
+    parent.updateWorldMatrix(true, false);
+    _decalLocal.copy(pos).addScaledVector(_impactN, 0.005);
+    parent.worldToLocal(_decalLocal);
+    mesh.position.copy(_decalLocal);
+    parent.getWorldQuaternion(_decalParentQ);
+    _decalWorldQ.copy(mesh.quaternion);
+    mesh.quaternion.copy(_decalParentQ).invert().multiply(_decalWorldQ);
+    parent.add(mesh);
+    paperDecals.push(mesh);
+  } else {
+    mesh.position.copy(pos).addScaledVector(_impactN, 0.012);
+    scene.add(mesh);
+    impactDecals.push(mesh);
+  }
 }
 
-function spawnImpactFX(pos, normal, kind) {
+function spawnImpactFX(pos, normal, kind, opts) {
   spawnImpactSparks(pos, normal);
-  spawnImpactDecal(pos, normal, kind || "scuff");
+  spawnImpactDecal(pos, normal, kind || "scuff", opts);
 }
 
 /** Floor plane hit along tracer segment (y = FLOOR_Y). */
@@ -3720,7 +3934,10 @@ function updateTracers(dt) {
         tr.mesh.position.copy(best.hit);
         if (best.kind === "circle") {
           flashTarget(best.target, best.hit);
-          spawnImpactFX(best.hit, best.normal, "punch");
+          spawnImpactFX(best.hit, best.normal, "punch", {
+            paperTarget: true,
+            parent: best.target.mesh,
+          });
         } else if (best.kind === "sil") {
           flashSilhouetteZone(best.sil, best.zone, best.hit);
           spawnImpactFX(best.hit, best.normal, "punch");
@@ -3754,6 +3971,260 @@ function updateTracers(dt) {
   }
 }
 
+
+function vaultRootFor(obj) {
+  let o = obj;
+  let best = obj;
+  while (o) {
+    if (o.userData && o.userData.vaultable) best = o;
+    o = o.parent;
+  }
+  return best;
+}
+
+function findVaultCandidate() {
+  if (!camera || state.vaulting) return null;
+  if (!gameplayActive()) return null;
+  if (!document.pointerLockElement) return null;
+  if (isAdsNow()) return null;
+  const fx = -Math.sin(player.yaw);
+  const fz = -Math.cos(player.yaw);
+  _vaultFwd.set(fx, 0, fz);
+  if (_vaultFwd.lengthSq() < 1e-8) return null;
+  _vaultFwd.normalize();
+  const chestY = lerp(player.supportY + 0.42, player.eyeCurrent, 0.28);
+  _vaultOrigin.set(player.pos.x, chestY, player.pos.z);
+  _raycaster.near = 0.05;
+  _raycaster.far = VAULT_REACH;
+  _raycaster.set(_vaultOrigin, _vaultFwd);
+  const hits = _raycaster.intersectObjects(leanSolids, false);
+  let hit = null;
+  for (const h of hits) {
+    if (h.distance < 0.06) continue;
+    let o = h.object;
+    let ok = false;
+    while (o) {
+      if (o.userData && o.userData.vaultable) { ok = true; break; }
+      o = o.parent;
+    }
+    if (!ok) continue;
+    hit = h;
+    break;
+  }
+  if (!hit) return null;
+  const root = vaultRootFor(hit.object);
+  _vaultBox.setFromObject(root);
+  const topY = _vaultBox.max.y;
+  const topH = topY - player.supportY;
+  // Height is measured from the current support (usually floor).
+  const fromFloor = topY - FLOOR_Y;
+  if (fromFloor < VAULT_MIN_H || fromFloor > VAULT_MAX_H) return null;
+  const sizeX = _vaultBox.max.x - _vaultBox.min.x;
+  const sizeZ = _vaultBox.max.z - _vaultBox.min.z;
+  const thick = Math.min(sizeX, sizeZ);
+  const overDist = clamp(thick * 0.55 + 0.32, 0.42, 1.05);
+  const landX = hit.point.x + _vaultFwd.x * overDist;
+  const landZ = hit.point.z + _vaultFwd.z * overDist;
+  // Down probe: land on the surface we cleared if it is wide, else floor.
+  _vaultOrigin.set(landX, topY + 0.85, landZ);
+  _raycaster.near = 0;
+  _raycaster.far = topY + 0.85 - (FLOOR_Y - 0.2);
+  _raycaster.set(_vaultOrigin, _vaultDown);
+  const downs = _raycaster.intersectObjects(leanSolids, false);
+  let landSupport = FLOOR_Y;
+  let landedOnTop = false;
+  if (downs.length) {
+    const d = downs[0];
+    let dRoot = d.object;
+    let dVault = false;
+    while (dRoot) {
+      if (dRoot.userData && dRoot.userData.vaultable) { dVault = true; break; }
+      dRoot = dRoot.parent;
+    }
+    const hy = d.point.y;
+    const hFromFloor = hy - FLOOR_Y;
+    if (dVault && hFromFloor >= VAULT_MIN_H - 0.05 && hFromFloor <= VAULT_MAX_H + 0.15) {
+      landSupport = hy;
+      landedOnTop = true;
+    } else if (!dVault && hFromFloor > 1.3) {
+      // Tall non-vaultable (bay wall / berm) — abort.
+      return null;
+    }
+  }
+  const lipY = topY + 0.16;
+  return {
+    hit,
+    root,
+    landX,
+    landZ,
+    landSupport,
+    lipY,
+    landedOnTop,
+    dist: hit.distance,
+  };
+}
+
+function startVault(cand) {
+  if (!cand || state.vaulting) return;
+  state.vaulting = true;
+  state.vaultT = 0;
+  state.vaultDur = 0.34 + Math.min(0.08, cand.dist * 0.04);
+  state.vaultFrom = new THREE.Vector3(player.pos.x, player.eyeCurrent, player.pos.z);
+  state.vaultLip = new THREE.Vector3(
+    lerp(player.pos.x, cand.landX, 0.42),
+    cand.lipY,
+    lerp(player.pos.z, cand.landZ, 0.42)
+  );
+  const landEye = cand.landSupport + (player.eyeHeight - FLOOR_Y);
+  state.vaultTo = new THREE.Vector3(cand.landX, landEye, cand.landZ);
+  state.vaultSupportTo = cand.landSupport;
+  state.sliding = false;
+  state.spaceHoldT = 0;
+  // Stand up through the vault; crouch restores after if Z still held.
+  setCrouchGrad(0, { remember: false });
+}
+
+function finishVault() {
+  player.pos.x = state.vaultTo.x;
+  player.pos.z = state.vaultTo.z;
+  player.supportY = state.vaultSupportTo;
+  player.eyeCurrent = state.vaultTo.y;
+  state.vaulting = false;
+  state.vaultT = 0;
+  // Resume crouch only if Z still held (C toggle was cleared on start).
+  if (input.crouchHold) {
+    state.crouchToggled = false;
+    setCrouchGrad(state.crouchLastDepth > 0.05 ? state.crouchLastDepth : 1);
+  } else {
+    setCrouchGrad(0, { remember: false });
+  }
+}
+
+function updateVault(dt) {
+  if (!state.vaulting) return false;
+  state.vaultT += dt;
+  const u = clamp(state.vaultT / Math.max(0.12, state.vaultDur), 0, 1);
+  const s = smooth01(u);
+  const from = state.vaultFrom;
+  const lip = state.vaultLip;
+  const to = state.vaultTo;
+  let x, y, z;
+  if (u < 0.38) {
+    const t = smooth01(u / 0.38);
+    x = lerp(from.x, lip.x, t);
+    z = lerp(from.z, lip.z, t);
+    y = lerp(from.y, lip.y, t);
+  } else if (u < 0.72) {
+    const t = smooth01((u - 0.38) / 0.34);
+    x = lerp(lip.x, lerp(lip.x, to.x, 0.7), t);
+    z = lerp(lip.z, lerp(lip.z, to.z, 0.7), t);
+    y = lerp(lip.y, lerp(lip.y, to.y, 0.15), t);
+  } else {
+    const t = smooth01((u - 0.72) / 0.28);
+    x = lerp(lerp(lip.x, to.x, 0.7), to.x, t);
+    z = lerp(lerp(lip.z, to.z, 0.7), to.z, t);
+    y = lerp(lerp(lip.y, to.y, 0.15), to.y, t);
+  }
+  // Small dip then recover — not a cartoon hop.
+  const dip = -0.045 * Math.sin(Math.PI * s);
+  player.pos.x = x;
+  player.pos.z = z;
+  player.pos.x = clamp(player.pos.x, -10, 10);
+  player.pos.z = clamp(player.pos.z, rangeZ(412), SPAWN_Z + 1.5);
+  player.eyeCurrent = y + dip;
+  player.supportY = lerp(FLOOR_Y, state.vaultSupportTo, s);
+  player.planarSpeed = 2.4;
+  if (u >= 1) finishVault();
+  return true;
+}
+
+function startSlide() {
+  if (state.sliding || state.vaulting || isAdsNow()) return;
+  if (!gameplayActive()) return;
+  state.sliding = true;
+  state.slideT = 0;
+  state.slideDur = 0.68;
+  state.slideFx = -Math.sin(player.yaw);
+  state.slideFz = -Math.cos(player.yaw);
+  if (input.left && !input.right) {
+    // slight steer from strafe at start
+    const rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
+    state.slideFx -= rx * 0.25;
+    state.slideFz -= rz * 0.25;
+  } else if (input.right && !input.left) {
+    const rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
+    state.slideFx += rx * 0.25;
+    state.slideFz += rz * 0.25;
+  }
+  const len = Math.hypot(state.slideFx, state.slideFz) || 1;
+  state.slideFx /= len;
+  state.slideFz /= len;
+  state.slideSpeed = 7.3;
+  setCrouchGrad(Math.max(state.crouchGrad, 0.88));
+}
+
+function updateSlide(dt) {
+  if (!state.sliding) return false;
+  state.slideT += dt;
+  const u = state.slideT / state.slideDur;
+  state.slideSpeed *= Math.exp(-2.15 * dt);
+  player.pos.x += state.slideFx * state.slideSpeed * dt;
+  player.pos.z += state.slideFz * state.slideSpeed * dt;
+  player.pos.x = clamp(player.pos.x, -10, 10);
+  player.pos.z = clamp(player.pos.z, rangeZ(412), SPAWN_Z + 1.5);
+  player.planarSpeed = state.slideSpeed;
+  if (u >= 1 || state.slideSpeed < 1.15) {
+    state.sliding = false;
+    // Stay crouched if C/Z still want it; else stand.
+    if (!input.crouchHold && !state.crouchToggled) setCrouchGrad(0, { remember: true });
+  }
+  return true;
+}
+
+function updateSupport(dt) {
+  if (state.vaulting) return;
+  // Step off tables: if nothing vaultable under us, drop support back to floor.
+  _vaultOrigin.set(player.pos.x, player.eyeCurrent + 0.1, player.pos.z);
+  _raycaster.near = 0;
+  _raycaster.far = (player.eyeCurrent + 0.1) - (FLOOR_Y - 0.15);
+  _raycaster.set(_vaultOrigin, _vaultDown);
+  const hits = _raycaster.intersectObjects(leanSolids, false);
+  let want = FLOOR_Y;
+  if (hits.length) {
+    const h = hits[0];
+    let o = h.object;
+    let ok = false;
+    while (o) {
+      if (o.userData && o.userData.vaultable) { ok = true; break; }
+      o = o.parent;
+    }
+    const hy = h.point.y;
+    if (ok && (hy - FLOOR_Y) >= VAULT_MIN_H - 0.08 && (hy - FLOOR_Y) <= VAULT_MAX_H + 0.2) {
+      want = hy;
+    }
+  }
+  player.supportY = lerp(player.supportY, want, 1 - Math.exp(-10 * dt));
+  if (Math.abs(player.supportY - want) < 0.01) player.supportY = want;
+}
+
+function updateVaultPrompt(baseText) {
+  const prompt = el("equipPrompt");
+  if (!prompt) return;
+  const cand = state.lookVault;
+  const showVault = !!(cand && gameplayActive() && !isAdsNow() && !state.vaulting);
+  if (baseText) {
+    prompt.hidden = false;
+    prompt.textContent = showVault ? baseText + "  ·  [Hold Space] Vault" : baseText;
+    return;
+  }
+  if (showVault) {
+    prompt.hidden = false;
+    prompt.textContent = "[Hold Space] Vault";
+  } else if (!state.lookPickup) {
+    prompt.hidden = true;
+  }
+}
+
 function updatePlayer(dt) {
   // ADS factor spring (RMB hold) — also syncs slider via refresh path
   if (!state.adsPreview) {
@@ -3765,13 +4236,53 @@ function updatePlayer(dt) {
     state.adsFactor = 1;
   }
 
-  // Crouch (Z hold or C toggle) — sticky toggle survives unlock; no Ctrl (browser steals it)
-  const crouching = input.crouchHold || state.crouchToggled;
-  const eyeTarget = player.eyeHeight * (crouching ? player.crouchEyeMul : 1);
-  player.eyeCurrent = lerp(player.eyeCurrent, eyeTarget, 1 - Math.exp(-12 * dt));
-  if (Math.abs(player.eyeCurrent - eyeTarget) < 0.0005) player.eyeCurrent = eyeTarget;
-  // Keep pos.y as standing reference; root uses lerped eye before bob
-  player.pos.y = player.eyeHeight;
+  // Analog crouch (C toggle / Z hold / wheel). No Ctrl — browsers steal it.
+  // Z hold: press from stand goes to last depth; release stands unless C is latched.
+  if (input.crouchHold && state.crouchGrad < 0.04 && !state.vaulting) {
+    setCrouchGrad(state.crouchLastDepth > 0.05 ? state.crouchLastDepth : 1);
+  }
+  if (!input.crouchHold && !state.crouchToggled && !state.sliding && !state.vaulting) {
+    // Wheel-sticky crouch stays; Z-release stands only if Z was the latch.
+    // (Z-up handler zeros grad when not C-toggled.)
+  }
+  const crouchBusy = state.crouchGrad > 0.04 || input.crouchHold || state.crouchToggled || state.sliding;
+  let eyeTarget = lerp(standEyeWorld(), sitEyeWorld(), clamp(state.crouchGrad, 0, 1));
+  if (state.sliding) eyeTarget -= 0.05 * (1 - clamp(state.slideT / state.slideDur, 0, 1));
+
+  // Hold-Space vault charge (not ADS). Tap does nothing (jump reserved).
+  if (gameplayActive() && !state.vaulting) {
+    state.lookVault = findVaultCandidate();
+    if (input.spaceDown && isAdsNow()) {
+      input.holdBreath = true;
+    } else if (input.spaceDown && !isAdsNow()) {
+      input.holdBreath = false;
+      if (state.lookVault && hasFwdIntent()) {
+        state.spaceHoldT += dt;
+        if (state.spaceHoldT >= VAULT_HOLD_SEC) startVault(state.lookVault);
+      } else {
+        state.spaceHoldT = 0;
+      }
+    } else if (!isAdsNow()) {
+      state.spaceHoldT = 0;
+    }
+    // Optional auto-vault: sprint into a close lip.
+    if (!state.vaulting && state.lookVault && input.sprint && input.forward && !isAdsNow()
+        && state.lookVault.dist < 0.52 && player.fwdIntent > 0.22) {
+      startVault(state.lookVault);
+    }
+  } else if (!state.vaulting) {
+    state.lookVault = null;
+  }
+
+  const vaultingNow = updateVault(dt);
+  if (!vaultingNow) updateSlide(dt);
+  if (!vaultingNow) updateSupport(dt);
+
+  if (!state.vaulting) {
+    player.eyeCurrent = lerp(player.eyeCurrent, eyeTarget, 1 - Math.exp(-12 * dt));
+    if (Math.abs(player.eyeCurrent - eyeTarget) < 0.0005) player.eyeCurrent = eyeTarget;
+  }
+  player.pos.y = standEyeWorld();
 
   // Lean spring toward ±leanMax while Q/E held — clamped so camera cannot clip solids
   // (probe uses eyeCurrent so crouch lean height stays honest)
@@ -3780,7 +4291,6 @@ function updatePlayer(dt) {
   else if (input.leanRight && !input.leanLeft) leanDesired = -player.leanMax;
   player.leanTarget = clampLeanTarget(leanDesired);
   player.leanAngle = lerp(player.leanAngle, player.leanTarget, 1 - Math.exp(-player.leanSpring * dt));
-  // Hard clamp current angle too (walk into cover while already leaned)
   if (Math.abs(player.leanAngle) > 1e-4) {
     const maxAbs = Math.abs(clampLeanTarget(Math.sign(player.leanAngle) * player.leanMax));
     if (Math.abs(player.leanAngle) > maxAbs) {
@@ -3788,33 +4298,47 @@ function updatePlayer(dt) {
     }
   }
 
-  // Movement on XZ
+  // Movement on XZ (vault/slide own their translation)
   let mx = 0, mz = 0;
-  if (gameplayActive()) {
+  if (gameplayActive() && !state.vaulting && !state.sliding) {
     if (input.forward) mz -= 1;
     if (input.back) mz += 1;
     if (input.left) mx -= 1;
     if (input.right) mx += 1;
   }
-  const moving = Math.abs(mx) + Math.abs(mz) > 0;
-  const sprinting = input.sprint && !crouching;
-  if (moving) {
+  const moving = Math.abs(mx) + Math.abs(mz) > 0 || state.sliding;
+  const sprinting = input.sprint && !crouchBusy && !state.sliding && !state.vaulting;
+  if (gameplayActive() && !state.vaulting && !state.sliding && moving) {
     const len = Math.hypot(mx, mz) || 1;
     mx /= len; mz /= len;
     let speed = player.moveSpeed;
-    if (crouching) speed *= player.crouchSpeedMul;
+    if (state.crouchGrad > 0.3 || input.crouchHold) speed *= player.crouchSpeedMul;
     else if (sprinting) speed *= player.sprintMul;
     const cy = Math.cos(player.yaw), sy = Math.sin(player.yaw);
-    // yaw 0 looks down -Z
-    player.pos.x += (mx * cy + mz * sy) * speed * dt;
-    player.pos.z += (-mx * sy + mz * cy) * speed * dt;
+    const dx = (mx * cy + mz * sy) * speed * dt;
+    const dz = (-mx * sy + mz * cy) * speed * dt;
+    player.pos.x += dx;
+    player.pos.z += dz;
     player.pos.x = clamp(player.pos.x, -10, 10);
     player.pos.z = clamp(player.pos.z, rangeZ(412), SPAWN_Z + 1.5);
+    player.planarSpeed = Math.hypot(dx, dz) / Math.max(dt, 1e-4);
+  } else if (!state.sliding && !state.vaulting) {
+    player.planarSpeed = lerp(player.planarSpeed, 0, 1 - Math.exp(-8 * dt));
+  }
+  if (input.forward && gameplayActive()) player.fwdIntent = Math.min(1.2, player.fwdIntent + dt);
+  else player.fwdIntent = Math.max(0, player.fwdIntent - dt * 2.4);
+
+  // Sprint + crouch rising edge → power slide
+  if (gameplayActive() && !state.vaulting && !state.sliding) {
+    const wantCrouch = state.crouchGrad > 0.2 || input.crouchHold || state.crouchToggled;
+    if (player.wasSprint && wantCrouch && !player.wasCrouched) startSlide();
+    player.wasSprint = !!(input.sprint && (moving || input.forward) && !wantCrouch);
+    player.wasCrouched = wantCrouch;
   }
 
   // View bob
-  const bobAmp = moving ? (sprinting ? 0.025 : 0.014) : 0;
-  player.bobPhase += dt * (moving ? (sprinting ? 12 : 8) : 0);
+  const bobAmp = (moving && !state.vaulting) ? (sprinting ? 0.025 : (state.sliding ? 0.008 : 0.014)) : 0;
+  player.bobPhase += dt * (moving && !state.vaulting ? (sprinting ? 12 : 8) : 0);
   const bobY = Math.sin(player.bobPhase) * bobAmp;
   const bobX = Math.cos(player.bobPhase * 0.5) * bobAmp * 0.5;
 
@@ -3903,6 +4427,11 @@ function syncAdsSlider() {
   if (swayBtn) swayBtn.setAttribute("aria-pressed", state.swayEnabled ? "true" : "false");
 }
 
+function isPickupNode(o) {
+  if (!o || !o.userData) return false;
+  return !!(o.userData.opticId || o.userData.weaponId || o.userData.resetTargets);
+}
+
 function updatePickupHover() {
   state.lookPickup = null;
   if (!pickups.length || !camera) return;
@@ -3911,9 +4440,8 @@ function updatePickupHover() {
   let found = null;
   for (const h of hits) {
     let o = h.object;
-    while (o && !(o.userData.opticId || o.userData.weaponId)) o = o.parent;
-    if (o && (o.userData.opticId || o.userData.weaponId)) {
-      // proximity: also require near table
+    while (o && !isPickupNode(o)) o = o.parent;
+    if (o && isPickupNode(o)) {
       const dx = o.position.x - player.pos.x;
       const dz = o.position.z - player.pos.z;
       if (Math.hypot(dx, dz) < 2.8) {
@@ -3926,8 +4454,13 @@ function updatePickupHover() {
     const hl = p.userData.highlight;
     const active = found === p;
     if (hl) hl.material.opacity = active ? 0.55 : 0.0;
-    p.position.y = p.userData.baseY + (active ? 0.02 : 0);
-    p.rotation.y += active ? 0.02 : 0.005;
+    if (p.userData.resetTargets) {
+      p.position.y = p.userData.baseY + (active ? 0.008 : 0);
+      if (p.userData.buttonMesh) p.userData.buttonMesh.position.y = active ? 0.03 : 0.042;
+    } else {
+      p.position.y = p.userData.baseY + (active ? 0.02 : 0);
+      p.rotation.y += active ? 0.02 : 0.005;
+    }
   });
   state.lookPickup = found;
   updateEquipPrompt();
@@ -3940,12 +4473,16 @@ function updateEquipPrompt() {
     const pu = state.lookPickup.userData;
     const label = pu.label;
     prompt.hidden = false;
+    if (pu.resetTargets) {
+      updateVaultPrompt("[F] Reset targets  ·  click to reset");
+      return;
+    }
     if (pu.weaponId) {
       const equipped = state.weaponId === pu.weaponId;
       if (equipped) {
-        prompt.textContent = `Looking at ${label} (equipped)`;
+        updateVaultPrompt(`Looking at ${label} (equipped)`);
       } else {
-        prompt.textContent = `[F] Equip ${label}  ·  click to equip`;
+        updateVaultPrompt(`[F] Equip ${label}  ·  click to equip`);
       }
     } else {
       const id = pu.opticId;
@@ -3953,15 +4490,15 @@ function updateEquipPrompt() {
       const allowed = weaponAllowsOptic(id);
       if (!allowed) {
         const w = (WEAPON_META[state.weaponId] && WEAPON_META[state.weaponId].label) || state.weaponId;
-        prompt.textContent = `${label} — not available on ${w}`;
+        updateVaultPrompt(`${label} — not available on ${w}`);
       } else if (equipped) {
-        prompt.textContent = `Looking at ${label} (equipped)`;
+        updateVaultPrompt(`Looking at ${label} (equipped)`);
       } else {
-        prompt.textContent = `[F] Attach ${label}  ·  click to equip`;
+        updateVaultPrompt(`[F] Attach ${label}  ·  click to equip`);
       }
     }
   } else {
-    prompt.hidden = true;
+    updateVaultPrompt(null);
   }
 }
 
@@ -4014,13 +4551,17 @@ function updateHudHint() {
   } else if (state.panelOpen) {
     hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
   } else {
-    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd> crouch · <kbd>Z</kbd> hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>F</kbd> bench pickup · RMB ADS · <kbd>Space</kbd> breath · LMB fire · <kbd>V</kbd> reload · <kbd>G</kbd> guns`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>F</kbd> bench · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
   }
 }
 
 function tryEquipLooked() {
   if (!state.lookPickup) return;
   const pu = state.lookPickup.userData;
+  if (pu.resetTargets) {
+    resetRangeTargets();
+    return;
+  }
   if (pu.weaponId) {
     if (state.weaponId === pu.weaponId) {
       showToast((pu.label || pu.weaponId) + " already equipped");
@@ -4131,29 +4672,36 @@ function onKeyDown(e) {
     if (code === "ShiftLeft" || code === "ShiftRight") input.sprint = true;
     if (code === "KeyZ") {
       input.crouchHold = true;
+      if (state.crouchGrad < 0.04 && !state.vaulting) {
+        setCrouchGrad(state.crouchLastDepth > 0.05 ? state.crouchLastDepth : 1);
+      }
       e.preventDefault();
     }
     if ((k === "c" || k === "C") && !e.repeat) {
-      state.crouchToggled = !state.crouchToggled;
+      if (state.crouchToggled) {
+        state.crouchToggled = false;
+        setCrouchGrad(0, { remember: true });
+      } else {
+        state.crouchToggled = true;
+        const depth = state.crouchGrad > 0.05 ? state.crouchGrad : (state.crouchLastDepth > 0.05 ? state.crouchLastDepth : 1);
+        setCrouchGrad(depth);
+      }
       e.preventDefault();
     }
     if (code === "KeyQ") input.leanLeft = true;
     if (code === "KeyE") input.leanRight = true;
     if (k === " " || code === "Space") {
-      input.holdBreath = true;
+      input.spaceDown = true;
+      if (isAdsNow() && !state.vaulting) input.holdBreath = true;
+      else input.holdBreath = false;
       e.preventDefault();
     }
-    // F = bench pickup (weapons + optics); E is lean only; G remains gun dialog backup
+    // F = bench pickup (weapons + optics + reset); E is lean only; G remains gun dialog backup
     if ((k === "f" || k === "F") && !e.repeat) {
       if (state.lookPickup) tryEquipLooked();
       e.preventDefault();
     }
     if ((k === "r" || k === "R") && !e.repeat) {
-      resetSilhouettes();
-      e.preventDefault();
-    }
-    // V = reVload (R is silhouette reset; F is bench pickup equip)
-    if ((code === "KeyV" || k === "v" || k === "V") && !e.repeat) {
       beginReload();
       e.preventDefault();
     }
@@ -4233,10 +4781,19 @@ function onKeyUp(e) {
   if (code === "KeyA") input.left = false;
   if (code === "KeyD") input.right = false;
   if (code === "ShiftLeft" || code === "ShiftRight") input.sprint = false;
-  if (code === "KeyZ") input.crouchHold = false;
+  if (code === "KeyZ") {
+    input.crouchHold = false;
+    if (!state.crouchToggled && !state.vaulting && !state.sliding) {
+      setCrouchGrad(0, { remember: true });
+    }
+  }
   if (code === "KeyQ") input.leanLeft = false;
   if (code === "KeyE") input.leanRight = false;
-  if (code === "Space") input.holdBreath = false;
+  if (code === "Space") {
+    input.holdBreath = false;
+    input.spaceDown = false;
+    state.spaceHoldT = 0;
+  }
 }
 
 function onMouseDown(e) {
@@ -4280,6 +4837,7 @@ function onMouseMove(e) {
   const opticMul = ADS_LOOK_MUL[state.optic] ?? 1;
   adsMul *= lerp(1, opticMul, adsT);
   if (state.holdBreath && state.breathLeft > 0) adsMul *= 0.65;
+  if (state.vaulting) adsMul *= 0.35;
   const sens = player.lookSens * adsMul;
   player.yaw -= e.movementX * sens;
   player.pitch -= e.movementY * sens;
@@ -4297,8 +4855,26 @@ function bindPointerLock() {
       input.leanLeft = input.leanRight = false;
       input.holdBreath = false;
       input.crouchHold = false;
+      input.spaceDown = false;
+      state.spaceHoldT = 0;
     }
   });
+}
+
+function onWheel(e) {
+  if (!gameplayActive() || !document.pointerLockElement) return;
+  e.preventDefault();
+  if (state.vaulting) return;
+  const down = e.deltaY > 0;
+  const mag = Math.abs(e.deltaY);
+  const notches = mag > 180 ? 2 : 1;
+  const step = 0.14 * notches;
+  const next = state.crouchGrad + (down ? step : -step);
+  if (next > 0.02) state.crouchToggled = false; // analog path; C latch not required
+  setCrouchGrad(next);
+  if (input.crouchHold && state.crouchGrad > 0.04) {
+    // wheel while Z held changes hold depth
+  }
 }
 
 function bind() {
@@ -4422,6 +4998,16 @@ function bind() {
       if (adsVal) adsVal.textContent = `${player.adsLookMul.toFixed(2)}×`;
     };
   }
+  const crouchSlider = el("crouchHeightSlider");
+  if (crouchSlider) {
+    crouchSlider.oninput = (e) => {
+      const pct = clamp(parseFloat(e.target.value) || 0, 0, 100);
+      const g = pct / 100;
+      state.crouchToggled = g > 0.04;
+      setCrouchGrad(g);
+    };
+    syncCrouchSlider();
+  }
 
   const camNearSlider = el("camNearSlider");
   const camNearInput = el("camNearInput");
@@ -4473,6 +5059,7 @@ function bind() {
   window.addEventListener("mousedown", onMouseDown);
   window.addEventListener("mouseup", onMouseUp);
   window.addEventListener("mousemove", onMouseMove);
+  window.addEventListener("wheel", onWheel, { passive: false });
   window.addEventListener("contextmenu", (e) => {
     if (gameplayActive()) e.preventDefault();
   });

@@ -1,6 +1,8 @@
 # Reference debugger UI (Three.js demo)
 
-Interactive block-gun viewmodel tuner with a live Three.js first-person preview.
+Interactive block-gun viewmodel tuner with a live Three.js first-person **range**.
+
+This is a **tech FPS demo that supports the weapon tuner** — not a shipped multiplayer game. The live range is how you prove viewmodel hold, ballistics, and movement feel in a browser. The data model / math / tuner contract stay engine-agnostic so they can later sit on a dedicated host + web client.
 
 Demo poses are meant to be tuned *with* the on-screen tuner — dogfooding the workflow.
 
@@ -18,15 +20,16 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 
 1. **3D viewport** — walkable room, optics table + weapons bench, first-person block guns, cyan aim ray (camera −Z), hip crosshair.
 2. **Range** — circular bullseyes + knockdown silhouette lane; **firing-line sandbags** + stall benches at spawn; side-bay **floodlights with visible floor pools** (~25/80/160/280 m from spawn); **floor chalk lines** + **wall stencil distances** at circular-target ranges (50/100/150/200/300/400 m from the spawn firing line). Wall numbers are meters from spawn, not raw world `|z|`. No floating text on targets.
-3. **Player** (panel closed) — WASD, Shift sprint, **C** crouch toggle / **Z** crouch hold (slower, no sprint, ducked eye), mouse look, **Q/E lean (wall-clamped)**, tiny A/D strafe tilt, RMB ADS, Space hold-breath, LMB fire, **V reload**.
+3. **Player** (panel closed) — WASD, Shift sprint, **C** crouch toggle / **Z** crouch hold / **mouse wheel** analog crouch height (0 stand → 1 sit; sprint+crouch = short slide), mouse look, **Q/E lean (wall-clamped)**, tiny A/D strafe tilt, RMB ADS, LMB fire, **R reload**. **Hold Space** vaults a tagged lip when prompted (tap Space is reserved; no jump yet). ADS + Space = hold-breath only.
 4. **ADS** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), HUD reticles + mag-optic tube/vignette, 3D iron sights. Look sens scales with optic FOV.
-5. **Sway / breath** — procedural `swayRig` after authored hold (header **Sway** toggle). Space hold-breath damps sway ~3s (HUD bar).
-6. **Shooting kit** — **long tracer streaks** + ballistic drop; mags SMG 30 / rifle 20 / sniper 5 (`mag/capacity · ∞`); empty = dry-click. **V** reload (~1.2s / ~2s sniper) with viewmodel dip. Live shots eject **shell casings** (FIFO ~28) and a short **muzzle flash**. Hits spawn **impact decals + sparks** (FIFO ~50). Screen-fixed +pts markers. Cheap Web Audio SFX.
+5. **Sway / breath** — procedural `swayRig` after authored hold (header **Sway** toggle). **ADS + hold Space** hold-breath damps sway ~3s (HUD bar). Hip-fire Space does not hold breath.
+6. **Shooting kit** — **long tracer streaks** + ballistic drop; mags SMG 30 / rifle 20 / sniper 5 (`mag/capacity · ∞`); empty = dry-click. **R** reload (~1.2s / ~2s sniper) with viewmodel dip. Live shots eject **shell casings** (FIFO ~28) and a short **muzzle flash**. Hits spawn **impact decals + sparks** (env/sil FIFO ~50). **Round paper-target holes persist** until the bench **RESET TARGETS** button. Screen-fixed +pts markers. Cheap Web Audio SFX.
 7. **Sim / Arcade + HoB** — **B** cycles **Sim** (default: height-over-bore + ballistic zero so the gravity arc meets the sight ray at **zero distance**) vs **Arcade** (reticle-faithful, vel = camera forward). **`-`/`=`** cycle zero (25/50/100/200/300 m, default 100). Live HoB cm readout; optional aim/bore rays.
 8. **Optics table** — iron / holo / acog / sniper_scope; look + **F** / click to attach. **Host limits:** SMG may use iron/holo/acog; rifle may use iron/sniper_scope. Illegal pickups dim and toast on equip; switching guns falls back to iron if needed.
-9. **Weapons bench** — Example SMG / Example Rifle world props near spawn; look + **F** / click to equip (refreshes optic host rules). **G** gun dialog remains an optional backup.
-10. **Debugger (` / Backquote)** — view/attachment tabs, ads_factor, six-axis editors, Copy JSON. **G** = gun picker.
-11. **Settings (`O`)** — pauses gameplay: game style, **hip reticle** toggle, aim/bore rays, **brightness / gamma** (CSS filter + mild fog lift; defaults **1.30 / 1.18**), **fog** enable + near/far (linear `THREE.Fog`, defaults **ON / 375 / 520**, softer/farther), **PLUGE** grey strip, zero distance, look sens, ADS look mul, controls cheat.
+9. **Weapons bench** — Example SMG / Example Rifle world props near spawn; look + **F** / click to equip (refreshes optic host rules). Red **RESET TARGETS** push-button on the same table: look + **F** / click clears paper holes and stands silhouettes (score unchanged). **G** gun dialog remains an optional backup.
+10. **Movement extras** — analog crouch (wheel / C / Z; Settings crouch-height slider). Sprint into crouch **slides**. **Hold Space** (~0.22s) mantles sandbags, stall benches, tables, and low crates (not bay walls / berm). Sprint into a close lip can auto-start the same vault.
+11. **Debugger (` / Backquote)** — view/attachment tabs, ads_factor, six-axis editors, Copy JSON. **G** = gun picker.
+12. **Settings (`O`)** — pauses gameplay: game style, **hip reticle** toggle, aim/bore rays, **brightness / gamma** (CSS filter + mild fog lift; defaults **1.30 / 1.18**), **fog** enable + near/far (linear `THREE.Fog`, defaults **ON / 375 / 520**, softer/farther), **PLUGE** grey strip, zero distance, look sens, ADS look mul, **crouch height** 0–100%, controls cheat.
 
 ## Hotkeys
 
@@ -36,27 +39,28 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 | O | Settings (options) |
 | G | Gun select |
 | B | Cycle Arcade / Sim game style |
-| C | Crouch toggle |
-| Z | Crouch hold |
-| WASD / Shift | Move / sprint (sprint blocked while crouched) |
+| C | Crouch toggle (on = last wheel depth or full sit) |
+| Z | Crouch hold (release stands unless C is latched) |
+| Mouse wheel | Analog crouch height 0–100% (pointer locked; down = lower). No Ctrl bind. |
+| WASD / Shift | Move / sprint (sprint blocked while crouched; sprint+crouch = slide) |
 | Q / E | Lean (wall-clamped) |
 | RMB | Hold ADS |
-| Space | Hold breath (damp sway) |
+| Hold Space | Vault when `[Hold Space] Vault` is shown (needs forward intent). Tap reserved (no jump yet). |
+| ADS + Space | Hold breath (damp sway). No vault while ADS. Hip-fire Space does nothing if no lip. |
 | `-` / `=` | Cycle zero distance (presets 25–300 m; clamp at ends; mainly Sim) |
-| LMB | Fire (tracers; empty = dry click); LMB on pickup equips |
-| F | Bench pickup — equip looked-at weapon or attach optic (click also works) |
-| V | Reload magazine (not R — R resets silhouettes) |
+| LMB | Fire (tracers; empty = dry click); LMB on pickup equips / resets |
+| F | Bench pickup — weapon / optic / **reset-targets button** (click also works) |
+| R | Reload magazine |
 | Click canvas | Pointer lock |
 | Insert | ADS preview |
 | End / arrows / PgUp/PgDn | Pose / axis / step (panel open) |
 | Esc | Exit lock / close settings / modal / panel |
-| R | Reset silhouette poses |
 
 When the panel is open, gameplay keys do not steal typing from axis inputs.
 
 ## Silhouette lane
 
-Offset to the right of the circular bullseyes: original blocky steel/wood knockdown silhouettes (not a copy of any commercial target art). Zones: **head** (flops back), **pelvis** (kneel / torso drops), **chest** (rocker — needs 3 hits to fully drop). Watch the body move; center-mass alone does not instantly neutralize. **R** resets all silhouette poses (score unchanged). HUD legend: `Silhouette: head / chest×3 / pelvis`.
+Offset to the right of the circular bullseyes: original blocky steel/wood knockdown silhouettes (not a copy of any commercial target art). Zones: **head** (flops back), **pelvis** (kneel / torso drops), **chest** (rocker — needs 3 hits to fully drop). Watch the body move; center-mass alone does not instantly neutralize. The weapons-bench **RESET TARGETS** button (look + **F** / click) stands them back up and peels paper-target holes (score unchanged). HUD legend: `Silhouette: head / chest×3 / pelvis`.
 
 
 ## Arcade vs Sim (game style)

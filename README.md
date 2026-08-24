@@ -4,6 +4,8 @@ Live-tune first-person **weapon hold poses** (hip, ADS, optics, attachments) so 
 
 **Knowledge share for any FPS stack** — Unity, Unreal, Source-likes, custom engines. Not a plugin. Docs + math + schemas + a small reference tuner UI you can rebuild in your own tools.
 
+The browser scene in [`reference/debugger/`](reference/debugger/) is a **tech FPS demo that supports the weapon tuner** — a live range for proving viewmodel hold, ballistics, and feel. It is **not** a shipped multiplayer game. The contracts (schemas, math, tuner UX) stay engine-agnostic so they can later sit on a dedicated host + web client.
+
 ### Start here
 
 | Want… | Go |

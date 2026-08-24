@@ -63,9 +63,9 @@
     <div class="score-hud" id="scoreHud">Score 0</div>
     <div class="ammo-hud" id="ammoHud" aria-live="polite">30/30 · ∞</div>
     <div class="game-style-badge" id="gameStyleBadge" aria-live="polite">SIM</div>
-    <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · <kbd>R</kbd> reset</div>
+    <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · table button resets</div>
     <div id="floatLabels" class="float-labels" aria-hidden="true"></div>
-    <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>F</kbd> bench pickup · <kbd>V</kbd> reload · <kbd>C</kbd>/<kbd>Z</kbd> crouch</div>
+    <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>F</kbd> bench pickup · <kbd>R</kbd> reload · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height</div>
 
     <aside id="debuggerPanel" class="debugger-panel closed" aria-hidden="true">
       <div class="shell-inner">
@@ -155,18 +155,18 @@
               <ul class="keys">
                 <li><kbd>`</kbd> toggle debugger</li>
                 <li><kbd>G</kbd> gun select</li>
-                <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold</li>
-                <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint (blocked while crouched)</li>
+                <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold · mouse wheel crouch height</li>
+                <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint (blocked while crouched; sprint+crouch = slide)</li>
                 <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · RMB ADS</li>
-                <li><kbd>Space</kbd> hold breath (damp sway)</li>
+                <li>Hold <kbd>Space</kbd> vault (when prompted) · ADS + Space = hold breath · tap Space reserved</li>
                 <li><kbd>O</kbd> Settings (options)</li>
                 <li><kbd>B</kbd> cycle Arcade / Sim (game style)</li>
                 <li><kbd>-</kbd>/<kbd>=</kbd> cycle zero distance (Sim)</li>
                 <li>LMB fire (tracers from muzzle; Sim = HoB+zero by default)</li>
-                <li><kbd>V</kbd> reload (mag; R resets silhouettes · <kbd>F</kbd> bench pickup)</li>
+                <li><kbd>R</kbd> reload mag · <kbd>F</kbd> bench pickup / table reset button</li>
                 <li>Click canvas = mouse look</li>
                 <li>Optics table = <kbd>F</kbd>/click attach (SMG: holo/acog · Rifle: sniper · illegal = toast)</li>
-                <li>Weapons bench = <kbd>F</kbd>/click equip Example SMG / Rifle (<kbd>G</kbd> dialog = backup)</li>
+                <li>Weapons bench = <kbd>F</kbd>/click equip Example SMG / Rifle · red <strong>RESET TARGETS</strong> button clears paper holes + stands silhouettes</li>
                 <li><kbd>Insert</kbd> ADS preview · Sway toggle in header</li>
                 <li><kbd>End</kbd> cycle pose</li>
                 <li><kbd>↑</kbd><kbd>↓</kbd> select axis · <kbd>←</kbd><kbd>→</kbd> nudge</li>
@@ -322,14 +322,23 @@
       </div>
 
       <div class="settings-section">
+        <h3>Stance</h3>
+        <label class="slider-row">Crouch height
+          <input type="range" id="crouchHeightSlider" min="0" max="100" step="1" value="0" />
+          <code id="crouchHeightVal">0%</code>
+        </label>
+        <p class="note">0% stand · 100% sit on heels. Mouse wheel while playing (pointer locked) also sets this. Sprint + crouch starts a short slide. No Ctrl bind (browsers steal it).</p>
+      </div>
+
+      <div class="settings-section">
         <h3>Controls cheat sheet</h3>
         <ul class="keys settings-keys">
           <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint</li>
-          <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold</li>
+          <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold · mouse wheel crouch height</li>
           <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · RMB ADS · LMB fire</li>
-          <li><kbd>V</kbd> reload · <kbd>Space</kbd> hold breath · <kbd>B</kbd> Arcade/Sim</li>
+          <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> Arcade/Sim</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
-          <li><kbd>R</kbd> reset silhouettes · <kbd>F</kbd> bench pickup (weapons + optics; <kbd>G</kbd> backup)</li>
+          <li><kbd>F</kbd> bench pickup / reset-targets button (weapons + optics; <kbd>G</kbd> backup)</li>
           <li>Settings: hip reticle · Brightness/Gamma · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
@@ -338,6 +347,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824t9"></script>
+    <script type="module" src="app.js?v=20260824v1"></script>
 </body>
 </html>

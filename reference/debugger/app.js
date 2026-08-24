@@ -31,9 +31,10 @@ const FOV_BY_OPTIC = {
 };
 
 const BALLISTICS = {
-  example_smg: { speed: 62, gravity: 18, life: 1.4, tracerLen: 0.42 },
-  example_rifle: { speed: 95, gravity: 9.5, life: 1.8, tracerLen: 0.55 },
-  sniper_boost: { speed: 120, gravity: 6.5, life: 2.2, tracerLen: 0.65 },
+  // Demo units ≈ meters. .45 ACP-ish SMG vs 7.62×54R-class rifle.
+  example_smg: { speed: 300, gravity: 14, life: 2.0, tracerLen: 0.55 },
+  example_rifle: { speed: 800, gravity: 9.8, life: 2.6, tracerLen: 0.75 },
+  sniper_boost: { speed: 860, gravity: 9.5, life: 3.0, tracerLen: 0.85 },
 };
 
 
@@ -666,23 +667,7 @@ function buildRoom() {
   grid.position.z = -12;
   scene.add(grid);
 
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x12161e, roughness: 1 });
-  const back = new THREE.Mesh(new THREE.BoxGeometry(14, 4, 0.2), wallMat);
-  back.position.set(0, 0.4, -10);
-  scene.add(back);
 
-  for (let i = 0; i < 6; i++) {
-    const box = makeBox(
-      0.4 + Math.random() * 0.5,
-      0.3 + Math.random() * 1.0,
-      0.4 + Math.random() * 0.5,
-      0x222833,
-      (Math.random() - 0.5) * 10,
-      -1.4 + (0.15 + Math.random() * 0.5),
-      -4 - Math.random() * 5
-    );
-    scene.add(box);
-  }
 
   buildOpticsTable();
   buildShootingRange();
@@ -768,7 +753,7 @@ function buildShootingRange() {
     bull.position.set(0, 0.15, z + 0.014);
     const flash = new THREE.Mesh(
       new THREE.CircleGeometry(0.5, 28),
-      new THREE.MeshBasicMaterial({ color: 0xffee88, transparent: true, opacity: 0, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
     );
     flash.position.set(0, 0.15, z + 0.02);
     scene.add(board, ring1, ring2, bull, flash);
@@ -1003,15 +988,15 @@ function fireWeapon() {
 }
 
 function flashTarget(t) {
-  t.hitUntil = performance.now() + 180;
-  if (t.flash) t.flash.material.opacity = 0.85;
+  t.hitUntil = performance.now() + 220;
+  if (t.flash) t.flash.material.opacity = 1;
 }
 
 function updateTracers(dt) {
   const now = performance.now();
   rangeTargets.forEach((t) => {
     if (t.flash) {
-      if (now < t.hitUntil) t.flash.material.opacity = 0.7;
+      if (now < t.hitUntil) t.flash.material.opacity = 1;
       else t.flash.material.opacity = Math.max(0, t.flash.material.opacity - dt * 3);
     }
   });
@@ -1086,8 +1071,8 @@ function updatePlayer(dt) {
     // yaw 0 looks down -Z
     player.pos.x += (mx * cy + mz * sy) * speed * dt;
     player.pos.z += (-mx * sy + mz * cy) * speed * dt;
-    player.pos.x = clamp(player.pos.x, -10, 10);
-    player.pos.z = clamp(player.pos.z, -10, 10);
+    player.pos.x = clamp(player.pos.x, -6, 6);
+    player.pos.z = clamp(player.pos.z, -34, 4);
   }
 
   // View bob

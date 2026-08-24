@@ -756,11 +756,28 @@ function buildShootingRange() {
     scene.add(makeBox(0.08, 1.2 * scale, 0.08, 0x3a4558, x, -0.8, z));
     scene.add(makeBox(0.9 * scale, 0.06, 0.06, 0x3a4558, x, -0.2, z));
 
+    const faceR = 0.45 * scale;
+    const woodThick = 0.036;
+    // Thin wood cylinder body (axis along Z after rotate)
+    const woodDisc = new THREE.Mesh(
+      new THREE.CylinderGeometry(faceR, faceR, woodThick, 28),
+      new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 0.9 })
+    );
+    woodDisc.rotation.x = Math.PI / 2;
+    woodDisc.position.set(x, y, z - woodThick * 0.5);
+    // Painted face toward shooter (+Z)
     const board = new THREE.Mesh(
-      new THREE.CircleGeometry(0.45 * scale, 28),
+      new THREE.CircleGeometry(faceR, 28),
       new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.85 })
     );
-    board.position.set(x, y, z);
+    board.position.set(x, y, z + 0.001);
+    // Explicit wood back facing away from shooter
+    const woodBack = new THREE.Mesh(
+      new THREE.CircleGeometry(faceR, 28),
+      new THREE.MeshStandardMaterial({ color: 0x5a3d26, roughness: 0.9 })
+    );
+    woodBack.rotation.y = Math.PI;
+    woodBack.position.set(x, y, z - woodThick - 0.001);
     const ring1 = new THREE.Mesh(
       new THREE.RingGeometry(0.28 * scale, 0.32 * scale, 28),
       new THREE.MeshBasicMaterial({ color: 0x222833, side: THREE.DoubleSide })
@@ -782,7 +799,7 @@ function buildShootingRange() {
     );
     flash.position.set(x, y, z + 0.02);
 
-    scene.add(board, ring1, ring2, bull, flash);
+    scene.add(woodDisc, board, woodBack, ring1, ring2, bull, flash);
     const labelEl = document.createElement("div");
     labelEl.className = "float-label";
     labelEl.textContent = lane.label;
@@ -792,6 +809,7 @@ function buildShootingRange() {
       mesh: board,
       flash,
       center: new THREE.Vector3(x, y, z),
+      normal: new THREE.Vector3(0, 0, 1),
       labelAnchor: new THREE.Vector3(x, y + 0.55 * scale, z),
       radius: 0.48 * scale,
       bullRadius: 0.06 * scale,
@@ -821,9 +839,25 @@ function worldToScreen(world, out = { x: 0, y: 0, visible: false }) {
   return out;
 }
 
+function hitTargetDisk(prev, curr, t) {
+  const n = t.normal;
+  const center = t.center;
+  const seg = curr.clone().sub(prev);
+  const denom = seg.dot(n);
+  if (Math.abs(denom) < 1e-10) return null;
+  const u = center.clone().sub(prev).dot(n) / denom;
+  if (u < 0 || u > 1) return null;
+  const hit = prev.clone().addScaledVector(seg, u);
+  const radial = hit.clone().sub(center);
+  radial.addScaledVector(n, -radial.dot(n));
+  if (radial.length() > t.radius) return null;
+  return center.clone().add(radial);
+}
+
 function flashTarget(t, hitPos) {
   t.hitUntil = performance.now() + 220;
   if (t.flash) t.flash.material.opacity = 1;
+  // Planar radial distance for ring scoring (hitPos is on the target plane)
   const d = hitPos ? hitPos.distanceTo(t.center) : 0;
   let pts = t.basePts;
   let klass = "edge";
@@ -1102,7 +1136,7 @@ function fireWeapon() {
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   mesh.position.copy(origin).addScaledVector(dir, 0.28);
   scene.add(mesh);
-  tracers.push({ mesh, vel, gravity: bal.gravity, life: bal.life, hit: false });
+  tracers.push({ mesh, vel, gravity: bal.gravity, life: bal.life, hit: false, prev: mesh.position.clone() });
 }
 
 function updateTracers(dt) {
@@ -1117,6 +1151,8 @@ function updateTracers(dt) {
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i];
     tr.life -= dt;
+    // Save position before integrate, then move, then disk-plane hit test
+    const prev = tr.mesh.position.clone();
     // Simple ballistic: vel.y -= g*dt; pos += vel*dt
     tr.vel.y -= tr.gravity * dt;
     tr.mesh.position.addScaledVector(tr.vel, dt);
@@ -1128,18 +1164,20 @@ function updateTracers(dt) {
       );
     }
 
-    // Hit test vs range targets
+    // Accurate planar disk hit test vs range targets
     if (!tr.hit) {
       for (const t of rangeTargets) {
-        const d = tr.mesh.position.distanceTo(t.center);
-        if (d < t.radius) {
+        const hitPt = hitTargetDisk(prev, tr.mesh.position, t);
+        if (hitPt) {
           tr.hit = true;
           tr.life = Math.min(tr.life, 0.02);
-          flashTarget(t, tr.mesh.position.clone());
+          flashTarget(t, hitPt);
           break;
         }
       }
     }
+    if (tr.prev) tr.prev.copy(tr.mesh.position);
+    else tr.prev = tr.mesh.position.clone();
 
     if (tr.life <= 0 || tr.mesh.position.y < -2.5) {
       scene.remove(tr.mesh);

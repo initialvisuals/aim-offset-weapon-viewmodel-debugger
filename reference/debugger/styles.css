@@ -197,10 +197,9 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
 }
 .ammo-cluster {
   pointer-events: none;
-  position: absolute;
-  left: 50%;
-  bottom: 12%;
-  transform: translateX(-50%);
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -252,25 +251,6 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
 .float-popup.outer { color: #d0d6e0; }
 .float-popup.edge { color: #9aa6bd; }
 
-.sil-legend {
-  pointer-events: none;
-  position: absolute;
-  right: 1rem;
-  top: 2.6rem;
-  color: #b8c0d0;
-  font: 500 0.78rem/1.25 ui-sans-serif, system-ui, sans-serif;
-  text-shadow: 0 1px 3px #000;
-  opacity: 0.9;
-}
-.sil-legend kbd {
-  font: 600 0.72rem/1 ui-monospace, monospace;
-  padding: 0.05rem 0.28rem;
-  border: 1px solid #4a5568;
-  border-radius: 3px;
-  background: rgba(20, 24, 32, 0.75);
-  color: #e2e8f0;
-}
-
 .ballistics-bar {
   margin-bottom: 0.75rem; padding: 0.65rem 0.75rem; border: 1px solid var(--line);
   border-radius: 8px; background: var(--bg);
@@ -305,8 +285,6 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
   text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent);
   box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
 }
-.sil-legend { top: 5.15rem; }
-
 .game-style-control {
   display: flex;
   flex-direction: column;

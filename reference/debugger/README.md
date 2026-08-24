@@ -61,7 +61,7 @@ When the panel is open, gameplay keys do not steal typing from axis inputs.
 
 ## Silhouette lane
 
-Offset to the right of the circular bullseyes: original blocky steel/wood knockdown silhouettes (not a copy of any commercial target art). Zones: **head** (flops back), **pelvis** (kneel / torso drops), **chest** (rocker — needs 3 hits to fully drop). Watch the body move; center-mass alone does not instantly neutralize. The weapons-bench **RESET TARGETS** button (look + **F** / click) stands them back up, peels paper-target holes, restores bottles, and clears glass shards (score unchanged). HUD legend: `Silhouette: head / chest×3 / pelvis · berm popups · table resets`.
+Offset to the right of the circular bullseyes: original blocky steel/wood knockdown silhouettes (not a copy of any commercial target art). Zones: **head** (flops back), **pelvis** (kneel / torso drops), **chest** (rocker — needs 3 hits to fully drop). Watch the body move; center-mass alone does not instantly neutralize. The weapons-bench **RESET TARGETS** button (look + **F** / click) stands them back up, peels paper-target holes, restores bottles, and clears glass shards (score unchanged).
 
 ## Berm popups
 

@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "attachments": {
+    "example_smg": {
+      "holo_sight": { "x": 0.0, "y": 0.02, "z": 0.05, "rotX": 0.0, "rotY": 0.0, "rotZ": 0.0 },
+      "foregrip": { "x": 0.0, "y": -0.01, "z": 0.12, "rotX": 0.0, "rotY": 0.0, "rotZ": 0.0 }
+    }
+  }
+}

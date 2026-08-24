@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/initialvisuals/aim-offset-weapon-viewmodel-debugger/schemas/weapon-offset-config.schema.json",
+  "title": "WeaponOffsetConfig",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "weapon", "hip", "ads"],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "weapon": { "type": "string", "minLength": 1 },
+    "hip": { "$ref": "#/$defs/poseOffset" },
+    "ads": { "$ref": "#/$defs/poseOffset" },
+    "ads_holo": { "$ref": "#/$defs/poseOffset" },
+    "ads_acog": { "$ref": "#/$defs/poseOffset" },
+    "ads_sniper_scope": { "$ref": "#/$defs/poseOffset" }
+  },
+  "$defs": {
+    "poseOffset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "rotX": { "type": "number", "description": "Euler radians; project-defined axis meaning" },
+        "rotY": { "type": "number", "description": "Euler radians; often defaults to π/2 if omitted at runtime" },
+        "rotZ": { "type": "number", "description": "Euler radians" }
+      }
+    }
+  }
+}

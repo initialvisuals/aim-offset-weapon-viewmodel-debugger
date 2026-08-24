@@ -1,0 +1,33 @@
+schema_version = 1
+weapon = "example_smg"
+
+[hip]
+x = 0.1043
+y = -0.1688
+z = -0.1953
+rotX = 0.0165
+rotY = 1.5707963267948966
+rotZ = 0.0
+
+[ads]
+x = 0.0084
+y = -0.1343
+z = -0.1887
+rotX = 0.0
+# rotY omitted on purpose — runtimes may default to π/2 (document your choice)
+
+[ads_holo]
+x = 0.0082
+y = -0.1478
+z = -0.1335
+rotX = 0.0115
+rotY = 1.5707963267948966
+rotZ = 0.0
+
+[ads_acog]
+x = 0.0083
+y = -0.15
+z = -0.0724
+rotX = 0.014
+rotY = 1.5707963267948966
+rotZ = -0.003

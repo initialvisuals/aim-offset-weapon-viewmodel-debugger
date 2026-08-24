@@ -594,6 +594,67 @@ const player = {
   fireCooldown: 0,
 };
 
+
+/** World-space range tag (CanvasTexture sprite). Shrinks with distance; sizeAttenuation on. */
+function makeWorldLabel(text) {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  const padX = 28;
+  const padY = 20;
+  const fontSize = 64;
+  const font = `700 ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.font = font;
+  const tw = Math.ceil(ctx.measureText(text).width) + padX * 2;
+  const th = fontSize + padY * 2;
+  canvas.width = Math.max(4, tw);
+  canvas.height = Math.max(4, th);
+  ctx.font = font;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  ctx.lineJoin = "round";
+  ctx.miterLimit = 2;
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = "rgba(0,0,0,0.9)";
+  ctx.strokeText(text, cx, cy);
+  ctx.fillStyle = "#c5cddc";
+  ctx.fillText(text, cx, cy);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  const sprite = new THREE.Sprite(mat);
+  // ~1.35m tall: readable near ≈50m at hip FOV; tiny at ≈400m without ADS zoom.
+  const worldH = 1.35;
+  const aspect = canvas.width / canvas.height;
+  sprite.scale.set(worldH * aspect, worldH, 1);
+  sprite.renderOrder = 2;
+  return sprite;
+}
+
+function disposeWorldLabel(sprite) {
+  if (!sprite) return;
+  if (sprite.parent) sprite.parent.remove(sprite);
+  const mat = sprite.material;
+  if (mat) {
+    if (mat.map) mat.map.dispose();
+    mat.dispose();
+  }
+}
+
+function clearStandingRangeLabels() {
+  for (const t of rangeTargets) disposeWorldLabel(t.labelSprite);
+  for (const sil of silhouetteTargets) disposeWorldLabel(sil.labelSprite);
+  const fl = el("floatLabels");
+  if (fl) fl.querySelectorAll(".float-label").forEach((n) => n.remove());
+}
+
 function makeBox(w, h, d, color, x, y, z) {
   const geo = new THREE.BoxGeometry(w, h, d);
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.65, metalness: 0.15 });
@@ -873,6 +934,7 @@ function buildShootingRange() {
     { z: -250, pts: 22, label: "≈300m" },
     { z: -380, pts: 30, label: "≈400m" },
   ];
+  clearStandingRangeLabels();
   rangeTargets = [];
   silhouetteTargets = [];
   scorePopups.forEach((p) => p.el && p.el.remove());
@@ -946,24 +1008,23 @@ function buildShootingRange() {
     flash.position.set(x, y, z + 0.02);
 
     scene.add(woodDisc, board, woodBack, ring1, ring2, bull, flash);
-    const labelEl = document.createElement("div");
-    labelEl.className = "float-label";
-    labelEl.textContent = lane.label;
-    const host = el("floatLabels");
-    if (host) host.appendChild(labelEl);
+    const labelAnchor = new THREE.Vector3(x, y + 0.55 * scale, z);
+    const labelSprite = makeWorldLabel(lane.label);
+    labelSprite.position.copy(labelAnchor);
+    scene.add(labelSprite);
     rangeTargets.push({
       mesh: board,
       flash,
       center: new THREE.Vector3(x, y, z),
       normal: new THREE.Vector3(0, 0, 1),
-      labelAnchor: new THREE.Vector3(x, y + 0.55 * scale, z),
+      labelAnchor,
       radius: 0.48 * scale,
       bullRadius: 0.06 * scale,
       midRadius: 0.18 * scale,
       outerRadius: 0.32 * scale,
       basePts: lane.pts,
       label: lane.label,
-      labelEl,
+      labelSprite,
       hitUntil: 0,
     });
   });
@@ -987,6 +1048,7 @@ function syncSilhouetteZones(sil) {
   if (sil.headHinge) {
     sil.headHinge.getWorldPosition(_wp);
     sil.labelAnchor.set(_wp.x, _wp.y + 0.28 * sil.scale, _wp.z);
+    if (sil.labelSprite) sil.labelSprite.position.copy(sil.labelAnchor);
   }
 }
 
@@ -1053,11 +1115,10 @@ function createKnockdownSilhouette(x, z, scale, label) {
   headFlash.position.set(0, 0.13 * scale, 0.12 * scale);
   headHinge.add(headFlash);
 
-  const labelEl = document.createElement("div");
-  labelEl.className = "float-label";
-  labelEl.textContent = label;
-  const host = el("floatLabels");
-  if (host) host.appendChild(labelEl);
+  const labelAnchor = new THREE.Vector3(x, -1.35 + hipY + 0.85 * scale, z);
+  const labelSprite = makeWorldLabel(label);
+  labelSprite.position.copy(labelAnchor);
+  scene.add(labelSprite);
 
   const sil = {
     group,
@@ -1078,8 +1139,8 @@ function createKnockdownSilhouette(x, z, scale, label) {
     headTarget: 0,
     scale,
     label,
-    labelEl,
-    labelAnchor: new THREE.Vector3(x, -1.35 + hipY + 0.85 * scale, z),
+    labelSprite,
+    labelAnchor,
     hitUntil: { head: 0, chest: 0, pelvis: 0 },
     zones: [
       { id: "head", center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), radius: 0.13 * scale, pts: 25 },
@@ -1270,19 +1331,7 @@ function flashTarget(t, hitPos) {
 
 function updateScorePopups(dt) {
   const tmp = { x: 0, y: 0, visible: false };
-  // Distance labels — fixed screen size, pinned near target
-  const labelSources = rangeTargets.concat(silhouetteTargets);
-  labelSources.forEach((t) => {
-    if (!t.labelEl) return;
-    worldToScreen(t.labelAnchor || t.center, tmp);
-    if (!tmp.visible) {
-      t.labelEl.style.display = "none";
-      return;
-    }
-    t.labelEl.style.display = "block";
-    t.labelEl.style.left = tmp.x + "px";
-    t.labelEl.style.top = tmp.y + "px";
-  });
+  // Hit markers (+pts) stay screen-fixed HTML; standing range tags are world sprites.
 
   for (let i = scorePopups.length - 1; i >= 0; i--) {
     const p = scorePopups[i];

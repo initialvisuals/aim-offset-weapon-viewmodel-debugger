@@ -203,15 +203,6 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
   overflow: hidden;
   z-index: 5;
 }
-.float-label {
-  position: absolute;
-  transform: translate(-50%, -100%);
-  font: 700 18px/1.1 ui-sans-serif, system-ui, sans-serif;
-  color: #c5cddc;
-  text-shadow: 0 1px 3px #000, 0 0 8px rgba(0,0,0,0.8);
-  white-space: nowrap;
-  opacity: 0.9;
-}
 .float-popup {
   position: absolute;
   transform: translate(-50%, -100%);

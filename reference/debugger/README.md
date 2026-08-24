@@ -1,27 +1,44 @@
-# Reference debugger UI
+# Reference debugger UI (Three.js demo)
 
-Open [`index.html`](index.html) in a browser (no build step).
+Interactive block-gun viewmodel tuner with a live Three.js preview.
+
+## Open it
+
+ES modules + import map need HTTP (not file://). The page loads Three.js from a CDN (network required).
+
+From reference/debugger run:
+
+    python3 -m http.server 8765
+
+Then open http://localhost:8765/ in a browser.
 
 ## What you get
 
-Two tabs that mirror a real in-engine tuner:
+1. 3D viewport — first-person block gun, dim room, cyan aim ray along camera -Z, crosshair.
+2. HUD — Press C for Viewmodel Debugger; G for guns.
+3. Debugger panel (toggle with C) — View tuning and Attachments tabs, ads_factor, six-axis editors, Copy JSON + toast.
+4. Gun select — Guns button or G opens an in-engine style debug picker (example_smg, example_rifle).
 
-1. **View tuning** — weapon hold poses (`hip`, `ads`, optic ADS), ADS blend, six-axis nudge grid, step ladder, copy JSON  
-2. **Attachments** — same axis grid for local attachment offsets  
+## Hotkeys
 
-Hotkeys match the [tuner UX contract](../../docs/03-tuner-ux.md). Math matches [`viewmodel_math.ts`](../viewmodel_math.ts).
+| Key | Action |
+|-----|--------|
+| C | Toggle debugger panel |
+| G | Open gun select dialogue |
+| Insert | Toggle ADS preview |
+| End | Cycle pose |
+| Arrows | Select axis / nudge (panel open) |
+| PgUp/PgDn | Step size |
+| Esc | Close modal / panel |
 
-## How to rebuild in your engine / Unity
+Copy JSON via the Copy buttons (toast on success or failure).
 
-Treat `app.js` as the **state machine** and `index.html` as the **panel layout**:
+## Notes
 
-| Concern | Port to |
-|---------|---------|
-| `state.mode` weapon vs attachment | Two tabs / toolbars |
-| Pose + optic + step dropdowns | Same controls |
-| Six axis rows + selection index | IMGUI / UI Toolkit list |
-| `nudge` + step tables | Input actions |
-| `blendHold` / `adsPose` | Your gameplay viewmodel code |
-| Copy JSON | Clipboard → content files |
+- blendHold(hip, ads_pose(optic), t) drives holdRoot position/rotation (XYZ). Default rotY = pi/2.
+- Axis inputs use input events; switching weapon/pose/attachment resyncs field values.
+- Port this state machine into your engine editor.
+- Unity: EditorWindow / IMGUI tabs + float fields. Unreal: Editor Utility Widget.
 
-Unity sketch: `EditorWindow` or play-mode IMGUI with `GUILayout.Toolbar` for the two tabs, `EditorGUILayout.FloatField` per axis, and `Event.current` for the hotkeys. Unreal: Editor Utility Widget + the same state fields.
+See ../viewmodel_math.ts and ../../docs/03-tuner-ux.md.
+

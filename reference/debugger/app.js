@@ -2,7 +2,6 @@
 
 import * as THREE from "three";
 
-const PI_2 = Math.PI / 2;
 const POSE_KEYS = ["hip", "ads", "ads_holo", "ads_acog", "ads_sniper_scope"];
 const AXIS_DEFS = [
   { id: "x", label: "Pos X", kind: "pos" },
@@ -23,24 +22,24 @@ const OPTIC_LABELS = {
 };
 
 function emptyPose() {
-  return { x: 0, y: 0, z: 0, rotX: 0, rotY: PI_2, rotZ: 0 };
+  return { x: 0, y: 0, z: 0, rotX: 0, rotY: 0, rotZ: 0 };
 }
 
 const db = {
   example_smg: {
     schema_version: 1,
     weapon: "example_smg",
-    hip: { x: 0.1043, y: -0.1688, z: -0.1953, rotX: 0.0165, rotY: PI_2, rotZ: 0 },
-    ads: { x: 0.0084, y: -0.1343, z: -0.1887, rotX: 0, rotY: PI_2, rotZ: 0 },
-    ads_holo: { x: 0.0082, y: -0.1478, z: -0.1335, rotX: 0.0115, rotY: PI_2, rotZ: 0 },
-    ads_acog: { x: 0.0083, y: -0.15, z: -0.0724, rotX: 0.014, rotY: PI_2, rotZ: -0.003 },
+    hip: { x: 0.1043, y: -0.1688, z: -0.1953, rotX: 0.0165, rotY: 0, rotZ: 0 },
+    ads: { x: 0.0084, y: -0.1343, z: -0.1887, rotX: 0, rotY: 0, rotZ: 0 },
+    ads_holo: { x: 0.0082, y: -0.1478, z: -0.1335, rotX: 0.0115, rotY: 0, rotZ: 0 },
+    ads_acog: { x: 0.0083, y: -0.15, z: -0.0724, rotX: 0.014, rotY: 0, rotZ: -0.003 },
   },
   example_rifle: {
     schema_version: 1,
     weapon: "example_rifle",
-    hip: { x: 0.12, y: -0.18, z: -0.22, rotX: 0.02, rotY: PI_2, rotZ: 0 },
-    ads: { x: 0.01, y: -0.14, z: -0.2, rotX: 0, rotY: PI_2, rotZ: 0 },
-    ads_sniper_scope: { x: 0.006, y: -0.155, z: -0.05, rotX: 0.01, rotY: PI_2, rotZ: 0 },
+    hip: { x: 0.12, y: -0.18, z: -0.22, rotX: 0.02, rotY: 0, rotZ: 0 },
+    ads: { x: 0.01, y: -0.14, z: -0.2, rotX: 0, rotY: 0, rotZ: 0 },
+    ads_sniper_scope: { x: 0.006, y: -0.155, z: -0.05, rotX: 0.01, rotY: 0, rotZ: 0 },
   },
 };
 
@@ -88,7 +87,7 @@ function lerp(a, b, t) { return a + (b - a) * t; }
 function resolve(p) {
   return {
     x: p.x, y: p.y, z: p.z,
-    rotX: p.rotX ?? 0, rotY: p.rotY ?? PI_2, rotZ: p.rotZ ?? 0,
+    rotX: p.rotX ?? 0, rotY: p.rotY ?? 0, rotZ: p.rotZ ?? 0,
   };
 }
 function adsPose(cfg, profile) {
@@ -323,7 +322,7 @@ function syncAxisInputsFromPose(isView) {
   AXIS_DEFS.forEach((axis) => {
     const input = root.querySelector(`input[data-axis="${axis.id}"]`);
     if (!input) return;
-    const val = pose[axis.id] ?? (axis.id === "rotY" ? PI_2 : 0);
+    const val = pose[axis.id] ?? 0;
     if (document.activeElement !== input) input.value = String(val);
   });
   updateAxisSelection();

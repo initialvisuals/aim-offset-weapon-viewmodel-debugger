@@ -160,10 +160,10 @@ const state = {
   reloadElapsed: 0,
   /** Active reload duration (sec). */
   reloadDuration: 1.2,
-  /** Viewport CSS brightness (0.5–1.5). Default lifts crushed dark range. */
-  brightness: 1.30,
-  /** Viewport CSS contrast / “gamma” feel (0.8–1.6). */
-  gamma: 1.18,
+  /** Viewport CSS brightness (0.5–1.5). Identity 1.00 = ungraded sRGB. */
+  brightness: 1.00,
+  /** Viewport CSS contrast / “gamma” feel (0.8–1.6). Identity 1.00 = ungraded sRGB. */
+  gamma: 1.00,
   /** Linear distance fog (THREE.Fog) — tunable in Settings (O). */
   fogEnabled: true,
   fogNear: 375,
@@ -989,7 +989,7 @@ function applyDisplayLook() {
 }
 
 function setBrightness(v, { toast = false } = {}) {
-  state.brightness = clamp(parseFloat(v) || 1.30, 0.5, 1.5);
+  state.brightness = clamp(parseFloat(v) || 1.00, 0.5, 1.5);
   applyDisplayLook();
   const slider = el("brightnessSlider");
   const val = el("brightnessVal");
@@ -999,7 +999,7 @@ function setBrightness(v, { toast = false } = {}) {
 }
 
 function setGamma(v, { toast = false } = {}) {
-  state.gamma = clamp(parseFloat(v) || 1.18, 0.8, 1.6);
+  state.gamma = clamp(parseFloat(v) || 1.00, 0.8, 1.6);
   applyDisplayLook();
   const slider = el("gammaSlider");
   const val = el("gammaVal");

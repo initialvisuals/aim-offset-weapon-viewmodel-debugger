@@ -399,7 +399,7 @@ function nudgeSelected(sign) {
 
 /* ---- Three.js scene + player ---- */
 let renderer, camera, scene, holdRoot, gunRoot;
-let opticRoot, gripMesh, aimHelper, muzzleFlash, muzzleSocket, swayRig;
+let opticRoot, gripMesh, muzzleFlash, muzzleSocket, swayRig;
 let tracers = [];
 let playerRoot, leanPivot;
 let pickups = [];
@@ -824,15 +824,6 @@ function initThree() {
   holdRoot = new THREE.Group();
   camera.add(holdRoot);
 
-  aimHelper = new THREE.ArrowHelper(
-    new THREE.Vector3(0, 0, -1),
-    new THREE.Vector3(0, 0, 0),
-    4,
-    0x00ffff,
-    0.08,
-    0.05
-  );
-  camera.add(aimHelper);
 
   buildRoom();
   buildBlockGun(state.weaponId);

@@ -954,6 +954,7 @@ function setHipReticle(on, { toast = false } = {}) {
   const chk = el("chkHipReticle");
   if (chk) chk.checked = state.showHipReticle;
   if (toast) showToast(state.showHipReticle ? "Hip reticle ON" : "Hip reticle OFF");
+  scheduleSaveSettings();
 }
 
 function syncHipReticle() {
@@ -970,6 +971,7 @@ function setAimRays(on, { toast = true } = {}) {
   if (chk) chk.checked = state.showAimRays;
   if (toast) showToast(state.showAimRays ? "Aim/bore rays ON" : "Aim/bore rays OFF");
   updateAimBoreRays();
+  scheduleSaveSettings();
 }
 
 function setZeroDist(m, { toast = false } = {}) {
@@ -981,6 +983,7 @@ function setZeroDist(m, { toast = false } = {}) {
   updateHobReadout();
   updateAimBoreRays();
   if (toast) showToast(`Zero ${state.zeroDist} m`);
+  scheduleSaveSettings();
 }
 
 /** Ballistic zero in meters. Irons are locked at 100; holo / acog / sniper use stored zeroDist. */
@@ -1009,6 +1012,7 @@ function setCamNear(v, { toast = false } = {}) {
   const val = el("camNearVal");
   if (val) val.textContent = state.camNear.toFixed(3);
   if (toast) showToast(`Camera near ${state.camNear}`);
+  scheduleSaveSettings();
 }
 
 function setCamFar(v, { toast = false } = {}) {
@@ -1021,6 +1025,7 @@ function setCamFar(v, { toast = false } = {}) {
   const val = el("camFarVal");
   if (val) val.textContent = String(Math.round(state.camFar));
   if (toast) showToast(`Camera far ${Math.round(state.camFar)}`);
+  scheduleSaveSettings();
 }
 
 /** Apply linear scene fog from Settings; null when disabled. Color tracks bg/clear. */
@@ -1068,6 +1073,7 @@ function setFogEnabled(on, { toast = false } = {}) {
   const chk = el("chkFog");
   if (chk) chk.checked = state.fogEnabled;
   if (toast) showToast(state.fogEnabled ? "Fog ON" : "Fog OFF");
+  scheduleSaveSettings();
 }
 
 function setFogNear(v, { toast = false } = {}) {
@@ -1082,6 +1088,7 @@ function setFogNear(v, { toast = false } = {}) {
   if (farSlider) farSlider.value = String(state.fogFar);
   if (farVal) farVal.textContent = String(Math.round(state.fogFar));
   if (toast) showToast(`Fog near ${Math.round(state.fogNear)}`);
+  scheduleSaveSettings();
 }
 
 function setFogFar(v, { toast = false } = {}) {
@@ -1096,6 +1103,7 @@ function setFogFar(v, { toast = false } = {}) {
   if (nearSlider) nearSlider.value = String(state.fogNear);
   if (nearVal) nearVal.textContent = String(Math.round(state.fogNear));
   if (toast) showToast(`Fog far ${Math.round(state.fogFar)}`);
+  scheduleSaveSettings();
 }
 
 function formatFadeLabel(sec) {
@@ -1129,6 +1137,7 @@ function setHoleCap(v, { toast = false } = {}) {
   trimImpactDecals();
   syncFxSettingsUI();
   if (toast) showToast(`Hole cap ${state.holeCap}`);
+  scheduleSaveSettings();
 }
 
 function setCasingCap(v, { toast = false } = {}) {
@@ -1138,6 +1147,7 @@ function setCasingCap(v, { toast = false } = {}) {
   trimSpentSlugs();
   syncFxSettingsUI();
   if (toast) showToast(`Casing cap ${state.casingCap}`);
+  scheduleSaveSettings();
 }
 
 function setHoleFade(v, { toast = false } = {}) {
@@ -1146,6 +1156,7 @@ function setHoleFade(v, { toast = false } = {}) {
   expireImpactDecals();
   syncFxSettingsUI();
   if (toast) showToast(state.holeFade <= 0 ? "Hole fade off (FIFO)" : `Hole fade ${state.holeFade}s`);
+  scheduleSaveSettings();
 }
 
 function setCasingFade(v, { toast = false } = {}) {
@@ -1154,6 +1165,7 @@ function setCasingFade(v, { toast = false } = {}) {
   expireCasings();
   syncFxSettingsUI();
   if (toast) showToast(state.casingFade <= 0 ? "Casing fade off (cap)" : `Casing fade ${state.casingFade}s`);
+  scheduleSaveSettings();
 }
 
 function wrapHour(h) {
@@ -1622,6 +1634,7 @@ function setTimeOfDay(v, { toast = false } = {}) {
   if (slider && document.activeElement !== slider) slider.value = String(state.timeOfDay);
   if (val) val.textContent = formatClock(state.timeOfDay);
   if (toast) showToast("Time " + formatClock(state.timeOfDay));
+  scheduleSaveSettings();
 }
 
 /** Map Settings brightness/gamma → CSS filter on #view3d + mild fog/bg/light lift. */
@@ -1724,6 +1737,7 @@ function setGodRays(v, { toast = false } = {}) {
   state.godRays = Number.isFinite(n) ? n : GOD_RAYS_DEFAULT;
   syncGodRaysUI();
   if (toast) showToast(`God rays ${state.godRays.toFixed(2)}`);
+  scheduleSaveSettings();
 }
 
 function syncBloomUI() {
@@ -1739,6 +1753,7 @@ function setBloom(v, { toast = false } = {}) {
   state.bloom = Number.isFinite(n) ? n : BLOOM_DEFAULT;
   syncBloomUI();
   if (toast) showToast(`Bloom ${state.bloom.toFixed(2)}`);
+  scheduleSaveSettings();
 }
 
 function syncDitherUI() {
@@ -1754,6 +1769,7 @@ function setDither(v, { toast = false } = {}) {
   state.dither = Number.isFinite(n) ? n : DITHER_DEFAULT;
   syncDitherUI();
   if (toast) showToast(`Dither ${state.dither.toFixed(3)}`);
+  scheduleSaveSettings();
 }
 
 function syncAdsDofUI() {
@@ -1775,6 +1791,7 @@ function setAdsDofTaps(v, { toast = false } = {}) {
   state.adsDofTaps = Number.isFinite(n) ? n : ADS_DOF_TAPS_DEFAULT;
   syncAdsDofUI();
   if (toast) showToast(`DOF taps ${state.adsDofTaps}`);
+  scheduleSaveSettings();
 }
 
 function setAdsDofRadius(v, { toast = false } = {}) {
@@ -1782,6 +1799,7 @@ function setAdsDofRadius(v, { toast = false } = {}) {
   state.adsDofRadius = Number.isFinite(n) ? n : ADS_DOF_RADIUS;
   syncAdsDofUI();
   if (toast) showToast(`DOF blur ${state.adsDofRadius.toFixed(4)}`);
+  scheduleSaveSettings();
 }
 
 function syncBarrelHeatUI() {
@@ -1798,6 +1816,7 @@ function setBarrelHeat(v, { toast = false } = {}) {
   syncBarrelHeatUI();
   applyBarrelHeatVisual();
   if (toast) showToast(`Barrel heat ${state.barrelHeat.toFixed(2)}`);
+  scheduleSaveSettings();
 }
 
 function syncSunSizeUI() {
@@ -1814,6 +1833,7 @@ function setSunSize(v, { toast = false } = {}) {
   updateSkyDome(0);
   syncSunSizeUI();
   if (toast) showToast("Sun size " + state.sunSize.toFixed(2) + "\u00b0");
+  scheduleSaveSettings();
 }
 
 function syncSunPunchUI() {
@@ -1831,6 +1851,7 @@ function setSunPunch(v, { toast = false } = {}) {
   updateSkyDome(0);
   syncSunPunchUI();
   if (toast) showToast("Sun disc " + state.sunPunch.toFixed(2));
+  scheduleSaveSettings();
 }
 
 
@@ -1848,6 +1869,7 @@ function setClouds(v, { toast = false } = {}) {
   if (skyMat) skyMat.uniforms.cloudAmt.value = state.clouds;
   syncCloudsUI();
   if (toast) showToast(`Clouds ${state.clouds.toFixed(2)}`);
+  scheduleSaveSettings();
 }
 
 function syncConcreteWearUI() {
@@ -1864,6 +1886,7 @@ function setConcreteWear(v, { toast = false } = {}) {
   uConcreteWear.value = state.concreteWear;
   syncConcreteWearUI();
   if (toast) showToast(`Concrete wear ${state.concreteWear.toFixed(2)}`);
+  scheduleSaveSettings();
 }
 
 function setLightMul(key, v, { toast = false } = {}) {
@@ -1873,6 +1896,7 @@ function setLightMul(key, v, { toast = false } = {}) {
   syncLightMulUI(key);
   const meta = LIGHT_MUL_UI[key];
   if (toast && meta) showToast(`${meta.label} ${state[key].toFixed(2)}×`);
+  scheduleSaveSettings();
 }
 
 function setBrightness(v, { toast = false } = {}) {
@@ -1883,6 +1907,7 @@ function setBrightness(v, { toast = false } = {}) {
   if (slider) slider.value = String(state.brightness);
   if (val) val.textContent = state.brightness.toFixed(2);
   if (toast) showToast(`Brightness ${state.brightness.toFixed(2)}`);
+  scheduleSaveSettings();
 }
 
 function setGamma(v, { toast = false } = {}) {
@@ -1893,6 +1918,7 @@ function setGamma(v, { toast = false } = {}) {
   if (slider) slider.value = String(state.gamma);
   if (val) val.textContent = state.gamma.toFixed(2);
   if (toast) showToast(`Gamma ${state.gamma.toFixed(2)}`);
+  scheduleSaveSettings();
 }
 
 function setPluge(on, { toast = false } = {}) {
@@ -1901,6 +1927,7 @@ function setPluge(on, { toast = false } = {}) {
   const chk = el("chkPluge");
   if (chk) chk.checked = state.showPluge;
   if (toast) showToast(state.showPluge ? "PLUGE strip ON" : "PLUGE strip OFF");
+  scheduleSaveSettings();
 }
 
 function syncSettingsUI() {
@@ -1984,7 +2011,9 @@ function syncSettingsUI() {
   syncSunPunchUI();
   syncCloudsUI();
   syncConcreteWearUI();
+  syncBarrelHeatUI();
   syncFxSettingsUI();
+  syncCrouchSlider();
 }
 
 function renderGunList() {
@@ -2438,6 +2467,165 @@ const player = {
   camRecoilP: 0,
   camRecoilY: 0,
 };
+
+/* ---- Settings persist (localStorage) ---- */
+const SETTINGS_VERSION = 1;
+const SETTINGS_STORAGE_KEY = "aimOffset.settings";
+const SETTINGS_SAVE_DEBOUNCE_MS = 150;
+
+/** O-panel tuners only. Ephemeral gameplay (ammo, ads, reload, heat energy, lock) stays out. */
+const SETTINGS_FIELDS = [
+  { key: "hobZero", src: "state", type: "bool" },
+  { key: "zeroDist", src: "state", type: "num" },
+  { key: "camNear", src: "state", type: "num" },
+  { key: "camFar", src: "state", type: "num" },
+  { key: "showAimRays", src: "state", type: "bool" },
+  { key: "showHipReticle", src: "state", type: "bool" },
+  { key: "brightness", src: "state", type: "num" },
+  { key: "gamma", src: "state", type: "num" },
+  { key: "fogEnabled", src: "state", type: "bool" },
+  { key: "fogNear", src: "state", type: "num" },
+  { key: "fogFar", src: "state", type: "num" },
+  { key: "showPluge", src: "state", type: "bool" },
+  { key: "timeOfDay", src: "state", type: "num" },
+  { key: "lightAmbMul", src: "state", type: "num" },
+  { key: "lightFillMul", src: "state", type: "num" },
+  { key: "lightHemiMul", src: "state", type: "num" },
+  { key: "lightKeyMul", src: "state", type: "num" },
+  { key: "lightRimMul", src: "state", type: "num" },
+  { key: "lightMoonMul", src: "state", type: "num" },
+  { key: "exposureMul", src: "state", type: "num" },
+  { key: "holeCap", src: "state", type: "num" },
+  { key: "casingCap", src: "state", type: "num" },
+  { key: "concreteWear", src: "state", type: "num" },
+  { key: "holeFade", src: "state", type: "num" },
+  { key: "casingFade", src: "state", type: "num" },
+  { key: "godRays", src: "state", type: "num" },
+  { key: "bloom", src: "state", type: "num" },
+  { key: "dither", src: "state", type: "num" },
+  { key: "adsDofTaps", src: "state", type: "num" },
+  { key: "adsDofRadius", src: "state", type: "num" },
+  { key: "barrelHeat", src: "state", type: "num" },
+  { key: "sunSize", src: "state", type: "num" },
+  { key: "sunPunch", src: "state", type: "num" },
+  { key: "clouds", src: "state", type: "num" },
+  { key: "crouchGrad", src: "state", type: "num" },
+  { key: "crouchLastDepth", src: "state", type: "num" },
+  { key: "lookSens", src: "player", type: "num" },
+  { key: "adsLookMul", src: "player", type: "num" },
+];
+
+function settingsHost(src) {
+  return src === "player" ? player : state;
+}
+
+function collectSettingsBlob() {
+  const blob = { settingsVersion: SETTINGS_VERSION };
+  for (const f of SETTINGS_FIELDS) {
+    blob[f.key] = settingsHost(f.src)[f.key];
+  }
+  return blob;
+}
+
+/** Shipped constants — captured before localStorage hydrate. */
+const SETTINGS_SHIPPED = collectSettingsBlob();
+
+let settingsSaveTimer = 0;
+let settingsHydrating = false;
+
+function saveSettingsNow() {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(collectSettingsBlob()));
+  } catch (err) {
+    /* quota / private mode */
+  }
+}
+
+function scheduleSaveSettings() {
+  if (settingsHydrating) return;
+  if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(() => {
+    settingsSaveTimer = 0;
+    saveSettingsNow();
+  }, SETTINGS_SAVE_DEBOUNCE_MS);
+}
+
+function applySettingsBlob(blob) {
+  if (!blob || typeof blob !== "object") return;
+  if (blob.settingsVersion !== SETTINGS_VERSION) return;
+  for (const f of SETTINGS_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(blob, f.key)) continue;
+    const raw = blob[f.key];
+    if (f.type === "bool") {
+      if (typeof raw !== "boolean") continue;
+      settingsHost(f.src)[f.key] = raw;
+    } else {
+      const n = typeof raw === "number" ? raw : Number(raw);
+      if (!Number.isFinite(n)) continue;
+      settingsHost(f.src)[f.key] = n;
+    }
+  }
+  if (state.crouchGrad > 0.04) state.crouchToggled = true;
+  else if (state.crouchGrad < 0.02) state.crouchToggled = false;
+}
+
+function loadPersistedSettings() {
+  settingsHydrating = true;
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return;
+    applySettingsBlob(JSON.parse(raw));
+  } catch (err) {
+    /* keep code defaults */
+  } finally {
+    settingsHydrating = false;
+  }
+}
+
+/** Push current state into scene / sliders / HUD after a reset (scene already exists). */
+function applySettingsSideEffects() {
+  setGameStyle(state.hobZero, { toast: false });
+  setHipReticle(state.showHipReticle, { toast: false });
+  setAimRays(state.showAimRays, { toast: false });
+  setZeroDist(state.zeroDist, { toast: false });
+  applyCameraClip();
+  applyDisplayLook();
+  if (skyMat && skyMat.uniforms && skyMat.uniforms.cloudAmt) {
+    skyMat.uniforms.cloudAmt.value = state.clouds;
+  }
+  uConcreteWear.value = state.concreteWear ?? CONCRETE_WEAR_DEFAULT;
+  applyBarrelHeatVisual();
+  setCrouchGrad(state.crouchGrad, { remember: false });
+  trimImpactDecals();
+  expireImpactDecals();
+  trimCasings();
+  trimSpentSlugs();
+  expireCasings();
+  syncSettingsUI();
+}
+
+function resetSettingsToShipped() {
+  settingsHydrating = true;
+  try {
+    applySettingsBlob(SETTINGS_SHIPPED);
+    applySettingsSideEffects();
+  } finally {
+    settingsHydrating = false;
+  }
+  saveSettingsNow();
+  showToast("Settings reset to defaults");
+}
+
+function copySettingsJson() {
+  if (settingsSaveTimer) {
+    clearTimeout(settingsSaveTimer);
+    settingsSaveTimer = 0;
+    saveSettingsNow();
+  }
+  return copyText(JSON.stringify(collectSettingsBlob(), null, 2), "Copied settings JSON");
+}
+
+loadPersistedSettings();
 
 
 /** Subtle chalk/wood range marker lines on the floor (no floating text). */
@@ -3037,6 +3225,7 @@ function setCrouchGrad(g, { remember = true } = {}) {
     state.crouchToggled = false;
   }
   syncCrouchSlider();
+  scheduleSaveSettings();
 }
 
 function addLeanSolid(obj) {
@@ -7340,6 +7529,7 @@ function setGameStyle(sim, { toast = true } = {}) {
         : "Arcade: reticle-faithful aim"
     );
   }
+  scheduleSaveSettings();
 }
 
 function toggleGameStyle() {
@@ -9603,6 +9793,10 @@ function bind() {
   // Settings overlay controls
   const btnSettingsClose = el("btnSettingsClose");
   if (btnSettingsClose) btnSettingsClose.onclick = () => setSettingsOpen(false);
+  const btnSettingsReset = el("btnSettingsReset");
+  if (btnSettingsReset) btnSettingsReset.onclick = () => resetSettingsToShipped();
+  const btnSettingsCopy = el("btnSettingsCopy");
+  if (btnSettingsCopy) btnSettingsCopy.onclick = () => copySettingsJson();
   const settingsModal = el("settingsModal");
   if (settingsModal) {
     settingsModal.addEventListener("click", (e) => {
@@ -9635,6 +9829,7 @@ function bind() {
       player.lookSens = LOOK_SENS_BASE * (pct / 100);
       const lookVal = el("lookSensVal");
       if (lookVal) lookVal.textContent = `${Math.round(pct)}%`;
+      scheduleSaveSettings();
     };
   }
   const adsMulSlider = el("adsLookMulSlider");
@@ -9644,6 +9839,7 @@ function bind() {
       player.adsLookMul = ADS_LOOK_MUL_BASE * (pct / 100);
       const adsVal = el("adsLookMulVal");
       if (adsVal) adsVal.textContent = `${player.adsLookMul.toFixed(2)}×`;
+      scheduleSaveSettings();
     };
   }
   const adsDofTapsSlider = el("adsDofTapsSlider");
@@ -9813,6 +10009,7 @@ function bind() {
   syncAmmoForLoadout({ refill: true });
   updateFireModeHud();
   updateHudHint();
+  syncSettingsUI();
   initThree();
   refresh();
 }

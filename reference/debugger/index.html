@@ -235,7 +235,11 @@
         <h2 id="settingsTitle">Settings</h2>
         <button type="button" id="btnSettingsClose" title="Esc / O">Close</button>
       </header>
-      <p class="hint">Press <kbd>O</kbd> anytime to open or close. Gameplay pauses while open.</p>
+      <p class="hint">Press <kbd>O</kbd> anytime to open or close. Gameplay pauses while open. Tuners persist in this browser.</p>
+      <div class="settings-actions">
+        <button type="button" id="btnSettingsReset">Reset defaults</button>
+        <button type="button" id="btnSettingsCopy">Copy settings</button>
+      </div>
 
       <div class="settings-section">
         <h3>Game style</h3>
@@ -452,7 +456,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + dither + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + dither + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
         </ul>
       </div>
     </div>
@@ -460,6 +464,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v26"></script>
+    <script type="module" src="app.js?v=20260824v27"></script>
 </body>
 </html>

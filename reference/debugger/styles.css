@@ -467,7 +467,16 @@ body[data-game-style="arcade"] button.toggle[aria-pressed="true"] {
 .settings-dialog .hint {
   color: var(--muted);
   font-size: 0.8rem;
+  margin: 0 0 0.55rem;
+}
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
   margin: 0 0 0.85rem;
+}
+.settings-actions button {
+  font-size: 0.82rem;
 }
 .settings-dialog .hint kbd {
   font-family: var(--mono);

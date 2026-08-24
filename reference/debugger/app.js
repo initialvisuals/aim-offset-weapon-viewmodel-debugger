@@ -1524,10 +1524,12 @@ let opticRoot, gripMesh, muzzleFlash, muzzleSocket, ejectionPort, swayRig, magMe
 let tracers = [];
 /** Short-lived bullet spark bursts (MeshBasic quads). */
 let impactSparks = [];
+/** Electrical spark cards from shot-out flood bulbs. */
+let bulbSparks = [];
 /** World impact marks — FIFO capped (walls / berm / silhouettes). */
 let impactDecals = [];
 const IMPACT_DECAL_MAX = 50;
-/** Round paper-target holes — persist until table reset (not in the FIFO TTL pool). */
+/** Paper-target holes — persist until table reset (not in the FIFO TTL pool). */
 let paperDecals = [];
 const PAPER_DECAL_MAX = 280;
 const _decalParentQ = new THREE.Quaternion();
@@ -1556,13 +1558,24 @@ let _shardGeo = null;
 const MUZZLE_FLASH_MS = 80;
 let _casingGeo = null;
 let _casingMat = null;
-let _impactScorchTex = null;
+let _holePunchMaps = [];
+let _holeScuffMaps = [];
+const IMPACT_HOLE_VARIANTS = 10;
 let _impactDecalGeo = null;
 let _impactSparkGeo = null;
+let _bulbSparkGeo = null;
+let _bulbSparkTexWhite = null;
+let _bulbSparkTexCyan = null;
 const _impactN = new THREE.Vector3();
 const _impactSeg = new THREE.Vector3();
 const _impactUp = new THREE.Vector3(0, 0, 1);
 const _sparkAxis = new THREE.Vector3(0, 1, 0);
+const _sparkMtx = new THREE.Matrix4();
+const _sparkX = new THREE.Vector3();
+const _sparkY = new THREE.Vector3();
+const _sparkZ = new THREE.Vector3();
+const _sparkToCam = new THREE.Vector3();
+const _bulbSparkOrigin = new THREE.Vector3();
 let playerRoot, leanPivot;
 /** Meshes lean probes may hit (walls, berm, crates, solid props) — never player/viewmodel. */
 let leanSolids = [];
@@ -3832,7 +3845,11 @@ function shootOutFlood(fx, hitPos, normal) {
   if (fx.pool) fx.pool.visible = false;
   if (fx.core) fx.core.visible = false;
   const n = normal || new THREE.Vector3(0, 0, 1);
-  spawnImpactFX(hitPos || fx.zone.center, n, "punch");
+  if (fx.lamp) fx.lamp.getWorldPosition(_bulbSparkOrigin);
+  else if (hitPos) _bulbSparkOrigin.copy(hitPos);
+  else if (fx.zone && fx.zone.center) _bulbSparkOrigin.copy(fx.zone.center);
+  spawnImpactDecal(_bulbSparkOrigin, n, "punch");
+  spawnBulbSparks(_bulbSparkOrigin);
   sfx.play("glass");
 }
 
@@ -4070,6 +4087,7 @@ function resetRangeTargets() {
   restoreFloodlights();
   restoreBeerBottles();
   clearGlassShards();
+  clearBulbSparks();
   clearPaperDecals();
   showToast("Targets reset");
 }
@@ -4826,21 +4844,74 @@ function fireWeapon() {
 
 
 /* ---- Impact decals + bullet sparks (cheap, no external textures) ---- */
-function getImpactScorchTexture() {
-  if (_impactScorchTex) return _impactScorchTex;
-  _impactScorchTex = makeCanvasTexture((ctx, size) => {
-    const cx = size * 0.5;
-    const g = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
-    g.addColorStop(0, "rgba(18,14,10,0.9)");
-    g.addColorStop(0.35, "rgba(28,22,16,0.65)");
-    g.addColorStop(0.7, "rgba(20,16,12,0.25)");
-    g.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, size);
-  }, 64);
-  _impactScorchTex.wrapS = _impactScorchTex.wrapT = THREE.ClampToEdgeWrapping;
-  _impactScorchTex.repeat.set(1, 1);
-  return _impactScorchTex;
+function _holeHash(n) {
+  const x = Math.sin(n * 127.1) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** Hard-edged warped blob — terminal outline + rim chips, not a soft radial disc. */
+function drawImpactHole(ctx, size, punch, variant) {
+  const cx = size * 0.5;
+  const cy = size * 0.5;
+  ctx.clearRect(0, 0, size, size);
+  const s = variant * 1.847 + (punch ? 0.31 : 2.17);
+  const verts = 22;
+  const baseR = size * (punch ? 0.22 : 0.26);
+  ctx.beginPath();
+  for (let i = 0; i < verts; i++) {
+    const a = (i / verts) * Math.PI * 2;
+    const wobble =
+      0.11 * Math.sin(a * 2 + s) +
+      0.07 * Math.sin(a * 5 + s * 1.73) +
+      0.045 * Math.sin(a * 9 + s * 0.61);
+    const jag = (_holeHash(variant * 13.3 + i * 7.1) - 0.5) * 0.16;
+    const r = Math.max(size * 0.12, baseR * (1 + wobble + jag));
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = punch ? "rgba(6,5,4,0.96)" : "rgba(14,11,9,0.84)";
+  ctx.fill();
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 1.15;
+  ctx.strokeStyle = punch ? "rgba(0,0,0,1)" : "rgba(5,4,3,0.95)";
+  ctx.stroke();
+  const chips = punch ? 3 : 5;
+  for (let k = 0; k < chips; k++) {
+    const a = (k / chips) * Math.PI * 2 + s * 0.4;
+    const rr = baseR * (0.88 + _holeHash(s + k) * 0.12);
+    ctx.beginPath();
+    ctx.ellipse(
+      cx + Math.cos(a) * rr,
+      cy + Math.sin(a) * rr,
+      1.4 + _holeHash(s * 2 + k) * 1.6,
+      0.7 + _holeHash(s * 3 + k) * 0.9,
+      a,
+      0,
+      Math.PI * 2
+    );
+    ctx.fillStyle = "rgba(0,0,0,0.9)";
+    ctx.fill();
+  }
+}
+
+function getImpactHoleTexture(isPunch) {
+  const pool = isPunch ? _holePunchMaps : _holeScuffMaps;
+  if (!pool.length) {
+    for (let v = 0; v < IMPACT_HOLE_VARIANTS; v++) {
+      const punch = !!isPunch;
+      const variant = v;
+      const tex = makeCanvasTexture((ctx, size) => {
+        drawImpactHole(ctx, size, punch, variant);
+      }, 64);
+      tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.repeat.set(1, 1);
+      pool.push(tex);
+    }
+  }
+  return pool[(Math.random() * pool.length) | 0];
 }
 
 function getImpactDecalGeo() {
@@ -4903,6 +4974,149 @@ function spawnImpactSparks(pos, normal) {
   }
 }
 
+function getBulbSparkGeo() {
+  if (!_bulbSparkGeo) _bulbSparkGeo = new THREE.PlaneGeometry(1, 1);
+  return _bulbSparkGeo;
+}
+
+/** Tiny hot-dot card: white or cyan core, transparent rim. 16x16 so 8 is not too crunchy. */
+function makeSparkCardTexture(kind) {
+  const size = 16;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, size, size);
+  const cx = size * 0.5;
+  const cy = size * 0.5;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.46);
+  if (kind === "cyan") {
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.22, "rgba(190,255,255,1)");
+    g.addColorStop(0.5, "rgba(70,220,255,0.55)");
+    g.addColorStop(1, "rgba(0,40,70,0)");
+  } else {
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.28, "rgba(235,248,255,0.95)");
+    g.addColorStop(0.58, "rgba(190,210,230,0.35)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+  }
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  if ("colorSpace" in tex) tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function getBulbSparkTexture(cyan) {
+  if (cyan) {
+    if (!_bulbSparkTexCyan) _bulbSparkTexCyan = makeSparkCardTexture("cyan");
+    return _bulbSparkTexCyan;
+  }
+  if (!_bulbSparkTexWhite) _bulbSparkTexWhite = makeSparkCardTexture("white");
+  return _bulbSparkTexWhite;
+}
+
+/** Face camera as much as possible with local Y stretched along velocity. */
+function orientSparkCard(mesh, vel) {
+  _sparkY.copy(vel);
+  if (_sparkY.lengthSq() < 1e-10) {
+    if (camera) mesh.lookAt(camera.position);
+    return;
+  }
+  _sparkY.normalize();
+  if (camera) {
+    camera.getWorldPosition(_sparkToCam);
+    _sparkToCam.sub(mesh.position);
+  } else {
+    _sparkToCam.set(0, 0, 1);
+  }
+  _sparkX.copy(_sparkY).cross(_sparkToCam);
+  if (_sparkX.lengthSq() < 1e-10) {
+    mesh.quaternion.setFromUnitVectors(_sparkAxis, _sparkY);
+    return;
+  }
+  _sparkX.normalize();
+  _sparkZ.copy(_sparkX).cross(_sparkY).normalize();
+  _sparkMtx.makeBasis(_sparkX, _sparkY, _sparkZ);
+  mesh.quaternion.setFromRotationMatrix(_sparkMtx);
+}
+
+/** ~3 stretched white/cyan cards at a dying flood lamp head. */
+function spawnBulbSparks(pos) {
+  if (!scene || !pos) return;
+  const n = 3 + ((Math.random() * 3) | 0);
+  const geo = getBulbSparkGeo();
+  for (let i = 0; i < n; i++) {
+    const useCyan = i === 0 ? false : i === 1 ? true : Math.random() < 0.5;
+    const life = 0.25 + Math.random() * 0.3;
+    const w = 0.01 + Math.random() * 0.01;
+    const len = 0.08 + Math.random() * 0.08;
+    const mat = new THREE.MeshBasicMaterial({
+      map: getBulbSparkTexture(useCyan),
+      color: useCyan ? 0xa8ffff : 0xffffff,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    if ("toneMapped" in mat) mat.toneMapped = false;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 8;
+    mesh.position.copy(pos);
+    mesh.scale.set(w, len, 1);
+    const vel = new THREE.Vector3(
+      Math.random() - 0.5,
+      Math.random() * 0.55,
+      Math.random() - 0.5
+    );
+    if (vel.lengthSq() < 1e-6) vel.set(0, 1, 0);
+    vel.normalize();
+    vel.multiplyScalar(2.4 + Math.random() * 3.4);
+    vel.y += 1.1 + Math.random() * 1.7;
+    orientSparkCard(mesh, vel);
+    scene.add(mesh);
+    bulbSparks.push({
+      mesh,
+      vel,
+      life,
+      maxLife: life,
+      width: w,
+      length: len,
+    });
+  }
+}
+
+function updateBulbSparks(dt) {
+  for (let i = bulbSparks.length - 1; i >= 0; i--) {
+    const s = bulbSparks[i];
+    s.life -= dt;
+    s.vel.y -= CASING_GRAVITY * dt;
+    s.mesh.position.addScaledVector(s.vel, dt);
+    orientSparkCard(s.mesh, s.vel);
+    const t = Math.max(0, s.life / s.maxLife);
+    s.mesh.material.opacity = t;
+    s.mesh.scale.set(s.width, s.length * (0.72 + 0.28 * t), 1);
+    if (s.life <= 0) {
+      scene.remove(s.mesh);
+      s.mesh.material.dispose();
+      bulbSparks.splice(i, 1);
+    }
+  }
+}
+
+function clearBulbSparks() {
+  for (const s of bulbSparks) {
+    if (s.mesh && s.mesh.parent) s.mesh.parent.remove(s.mesh);
+    if (s.mesh && s.mesh.material) s.mesh.material.dispose();
+  }
+  bulbSparks = [];
+}
+
 /**
  * Dark scorch / punch mark as a small plane on the surface.
  * kind: "punch" (targets) | "scuff" (floor / berm / walls).
@@ -4912,10 +5126,10 @@ function makeImpactDecalMesh(isPunch) {
   return new THREE.Mesh(
     getImpactDecalGeo(),
     new THREE.MeshBasicMaterial({
-      map: getImpactScorchTexture(),
+      map: getImpactHoleTexture(isPunch),
       color: isPunch ? 0x1a1a1a : 0x14100c,
       transparent: true,
-      opacity: isPunch ? 0.72 : 0.55,
+      opacity: isPunch ? 0.9 : 0.78,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -4,
@@ -4930,8 +5144,8 @@ function recycleDecalFrom(list, isPunch) {
   if (mesh.parent) mesh.parent.remove(mesh);
   mesh.userData.bermPopup = null;
   mesh.material.color.setHex(isPunch ? 0x1a1a1a : 0x14100c);
-  mesh.material.map = getImpactScorchTexture();
-  mesh.material.opacity = isPunch ? 0.72 : 0.55;
+  mesh.material.map = getImpactHoleTexture(isPunch);
+  mesh.material.opacity = isPunch ? 0.9 : 0.78;
   mesh.material.needsUpdate = true;
   return mesh;
 }
@@ -4942,8 +5156,8 @@ function spawnImpactDecal(pos, normal, kind, opts) {
   const paper = !!(opts && opts.paperTarget && opts.parent);
   const parent = (opts && opts.parent && opts.parent.isObject3D) ? opts.parent : null;
   const size = isPunch
-    ? 0.07 + Math.random() * 0.05
-    : 0.11 + Math.random() * 0.12;
+    ? 0.032 + Math.random() * 0.018
+    : 0.044 + Math.random() * 0.028;
   let mesh;
   if (paper) {
     if (paperDecals.length >= PAPER_DECAL_MAX) mesh = recycleDecalFrom(paperDecals, isPunch);
@@ -4959,8 +5173,8 @@ function spawnImpactDecal(pos, normal, kind, opts) {
     mesh.userData.bermPopup = (opts && opts.bermPopup) || null;
   }
   orientFlatToNormal(mesh, normal);
-  mesh.scale.set(size, size * (0.75 + Math.random() * 0.5), 1);
-  mesh.rotateZ((Math.random() - 0.5) * Math.PI);
+  mesh.scale.set(size, size * (0.7 + Math.random() * 0.62), 1);
+  mesh.rotateZ(Math.random() * Math.PI * 2);
   if (parent) {
     parent.updateWorldMatrix(true, false);
     _decalLocal.copy(pos).addScaledVector(_impactN, paper ? 0.005 : 0.012);
@@ -5631,6 +5845,7 @@ function updatePlayer(dt) {
   updateCasings(dt);
   updateGlassShards(dt);
   updateImpactFX(dt);
+  updateBulbSparks(dt);
   updateSilhouettes(dt);
   updateBermPopups(dt);
   updateScorePopups(dt);

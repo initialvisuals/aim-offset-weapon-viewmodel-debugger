@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aim Offset / Viewmodel Tuner — Reference UI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!--
+    REFERENCE DEBUGGER STRUCTURE
+    ============================
+    Two tabs mirror the production tuner contract:
+      1) View tuning  → weapon hold poses (hip / ads / optic ADS)
+      2) Attachments  → per-attachment local offsets
+
+    Rebuild this layout in Unity (EditorWindow / IMGUI), Unreal (UMG /
+    Editor Utility), egui, etc. Wire the same state machine; only widgets change.
+
+    Hotkeys (when this page is focused):
+      Tab modes via UI · Insert ADS preview · End cycle pose ·
+      ↑↓ axis · ←→ nudge · PgUp/PgDn step · C copy JSON
+  -->
+  <main class="shell">
+    <header class="top">
+      <div>
+        <h1>Viewmodel Tuner</h1>
+        <p class="sub">Reference UI — port this structure into your engine</p>
+      </div>
+      <div class="meta">
+        <label>Weapon
+          <select id="weaponSelect"></select>
+        </label>
+        <button type="button" id="btnAds" class="toggle" aria-pressed="false" title="Insert">ADS preview</button>
+        <button type="button" id="btnCopy" title="C / Copy">Copy JSON</button>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tab-view" aria-selected="true" aria-controls="panel-view">View tuning</button>
+      <button role="tab" id="tab-att" aria-selected="false" aria-controls="panel-att">Attachments</button>
+    </nav>
+
+    <section id="panel-view" class="panel" role="tabpanel" data-mode="weapon">
+      <div class="row-bar">
+        <label>Pose
+          <select id="poseSelect"></select>
+        </label>
+        <label>Optic profile
+          <select id="opticSelect">
+            <option value="iron">Iron</option>
+            <option value="holo">Holo</option>
+            <option value="acog">Acog</option>
+            <option value="sniper_scope">Sniper scope</option>
+          </select>
+        </label>
+        <label>Step
+          <select id="stepSelect">
+            <option value="micro">MICRO</option>
+            <option value="fine" selected>FINE</option>
+            <option value="med">MED</option>
+            <option value="coarse">COARSE</option>
+          </select>
+        </label>
+        <div class="blend">
+          <span>ads_factor</span>
+          <input type="range" id="adsFactor" min="0" max="1" step="0.01" value="0" />
+          <code id="adsFactorVal">0.00</code>
+        </div>
+      </div>
+
+      <div class="split">
+        <div class="axes" id="viewAxes"></div>
+        <aside class="preview">
+          <h2>Live hold (blended)</h2>
+          <pre id="holdPreview"></pre>
+          <h2>Hotkeys</h2>
+          <ul class="keys">
+            <li><kbd>Insert</kbd> toggle ADS preview</li>
+            <li><kbd>End</kbd> cycle pose</li>
+            <li><kbd>↑</kbd><kbd>↓</kbd> select axis</li>
+            <li><kbd>←</kbd><kbd>→</kbd> nudge</li>
+            <li><kbd>PgUp</kbd><kbd>PgDn</kbd> step size</li>
+            <li><kbd>C</kbd> copy weapon JSON</li>
+          </ul>
+          <p class="note">Composition: camera → authored hold → procedural (off here) → attachments.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section id="panel-att" class="panel hidden" role="tabpanel" hidden data-mode="attachment">
+      <div class="row-bar">
+        <label>Attachment
+          <select id="attSelect"></select>
+        </label>
+        <label>Step
+          <select id="attStepSelect">
+            <option value="micro">MICRO</option>
+            <option value="fine" selected>FINE</option>
+            <option value="med">MED</option>
+            <option value="coarse">COARSE</option>
+          </select>
+        </label>
+        <button type="button" id="btnCopyAtt">Copy attachment JSON</button>
+      </div>
+      <div class="split">
+        <div class="axes" id="attAxes"></div>
+        <aside class="preview">
+          <h2>Attachment local</h2>
+          <pre id="attPreview"></pre>
+          <p class="note">Same six-axis grid as view tuning. In-engine: parent to socket, apply this as local TRS.</p>
+        </aside>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <span>Structural reference only — no meshes, no engine runtime.</span>
+      <a href="../viewmodel_math.ts">viewmodel_math.ts</a>
+      ·
+      <a href="../../docs/03-tuner-ux.md">tuner UX doc</a>
+      ·
+      <a href="../../docs/07-math.md">math</a>
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

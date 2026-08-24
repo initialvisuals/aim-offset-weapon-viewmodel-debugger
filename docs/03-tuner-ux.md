@@ -48,3 +48,7 @@ Show at minimum:
 ## Clipboard format
 
 Prefer a single JSON object matching the weapon config (poses nested under pose keys) so tools and ports can share tunes. TOML on disk is fine; JSON on the clipboard is easy to paste into chat, PRs, and importers.
+
+## Reference UI
+
+A browser two-tab structural demo lives at [`reference/debugger/`](../reference/debugger/) (`View tuning` + `Attachments`). Use it as a layout/state checklist when rebuilding in Unity or a custom engine.

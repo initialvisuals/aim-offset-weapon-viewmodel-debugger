@@ -91,7 +91,7 @@ Whatever you choose, **document it**, then use aim-offset tuning so the **visibl
 | [`docs/05-engine-glue.md`](docs/05-engine-glue.md) | Unity / Unreal / custom checklists |
 | [`docs/06-contracts-and-gotchas.md`](docs/06-contracts-and-gotchas.md) | Axes, defaults, retune hazards |
 | [`docs/07-math.md`](docs/07-math.md) | Shared formulas (lerp, slerp, optic select, aim vs muzzle) |
-| [`reference/`](reference/) | Portable TypeScript math module |
+| [`reference/`](reference/) | Math module + [two-tab debugger UI](reference/debugger/) |
 | [`schemas/`](schemas/) | JSON Schema |
 | [`examples/`](examples/) | Generic TOML/JSON samples |
 
@@ -103,6 +103,7 @@ Whatever you choose, **document it**, then use aim-offset tuning so the **visibl
 4. Add the [tuner UX](docs/03-tuner-ux.md) (IMGUI, egui, UMG, Editor window — your call).
 5. Keep [contracts](docs/06-contracts-and-gotchas.md) taped above your monitor.
 6. Implement against [math](docs/07-math.md) / [`reference/viewmodel_math.ts`](reference/viewmodel_math.ts).
+7. Open the [reference debugger](reference/debugger/index.html) to see the two-tab tool structure.
 
 ## What this is not
 

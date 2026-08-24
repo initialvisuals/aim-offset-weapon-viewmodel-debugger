@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260824v28" />
   <script type="importmap">
     {
       "imports": {
@@ -16,6 +16,14 @@
 <body class="app-shell" data-game-style="sim">
   <div class="viewport-wrap">
     <canvas id="view3d"></canvas>
+    <div id="perfOverlay" class="perf-overlay" hidden aria-hidden="true">
+      <div>fps <span id="perfFps">0</span></div>
+      <div>ms <span id="perfMs">0.0</span></div>
+      <div>meshes <span id="perfMeshes">0</span></div>
+      <div>decals <span id="perfDecals">0</span></div>
+      <div>shells <span id="perfShells">0</span></div>
+      <div>slugs <span id="perfSlugs">0</span></div>
+    </div>
     <div id="plugeOverlay" class="pluge-overlay" hidden aria-hidden="true">
       <div class="pluge-swatch" style="background:#000000" title="Black"><span>Black</span></div>
       <div class="pluge-swatch" style="background:#404040" title="Low"><span>Low</span></div>
@@ -82,6 +90,7 @@
             <button type="button" id="btnSettings" title="O">Settings…</button>
             <button type="button" id="btnAds" class="toggle" aria-pressed="false" title="Insert">ADS preview</button>
             <button type="button" id="btnSway" class="toggle" aria-pressed="true" title="Toggle viewmodel sway">Sway</button>
+            <button type="button" id="btnPerf" class="toggle" aria-pressed="false" title="Toggle performance overlay">Perf</button>
             <button type="button" id="btnCopy" title="Copy JSON">Copy JSON</button>
             <button type="button" id="btnCloseDbg" title="`">Close</button>
           </div>
@@ -464,6 +473,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v27"></script>
+    <script type="module" src="app.js?v=20260824v28"></script>
 </body>
 </html>

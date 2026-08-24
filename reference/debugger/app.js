@@ -303,6 +303,8 @@ const state = {
   fogFar: 520,
   /** Overlay Black/Low/Mid/High/White strip on viewport corner. */
   showPluge: false,
+  /** Debugger performance HUD (backtick panel Perf toggle). Default off. */
+  showPerf: false,
   /** Hours 0–24. Default evening matches the dusk range look. */
   timeOfDay: 18.5,
   /** Scene-light multipliers on the current ToD bases (1.00 = authored). */
@@ -2487,6 +2489,7 @@ const SETTINGS_FIELDS = [
   { key: "fogNear", src: "state", type: "num" },
   { key: "fogFar", src: "state", type: "num" },
   { key: "showPluge", src: "state", type: "bool" },
+  { key: "showPerf", src: "state", type: "bool" },
   { key: "timeOfDay", src: "state", type: "num" },
   { key: "lightAmbMul", src: "state", type: "num" },
   { key: "lightFillMul", src: "state", type: "num" },
@@ -2596,6 +2599,7 @@ function applySettingsSideEffects() {
   uConcreteWear.value = state.concreteWear ?? CONCRETE_WEAR_DEFAULT;
   applyBarrelHeatVisual();
   setCrouchGrad(state.crouchGrad, { remember: false });
+  setPerfOverlay(!!state.showPerf, { toast: false });
   trimImpactDecals();
   expireImpactDecals();
   trimCasings();
@@ -6121,6 +6125,7 @@ function restoreCameraLayers() {
 }
 
 function renderScene() {
+  _perfMeshes = 0;
   const amount = adsDofAmount();
   const bloomOn = bloomWanted();
   const ditherOn = ditherWanted();
@@ -6132,6 +6137,7 @@ function renderScene() {
     restoreCameraLayers();
     renderer.setRenderTarget(dest);
     renderer.render(scene, camera);
+    snapshotPerfMeshes();
   } else {
     const prevAutoClear = renderer.autoClear;
     const prevShadowAuto = renderer.shadowMap.autoUpdate;
@@ -6143,6 +6149,7 @@ function renderScene() {
     renderer.autoClear = true;
     renderer.setRenderTarget(dest);
     renderer.render(scene, camera);
+    snapshotPerfMeshes();
 
     camera.layers.set(VIEWMODEL_LAYER);
     scene.background = null;
@@ -9417,13 +9424,100 @@ function fireFlash() {
   player.flashUntil = performance.now() + ms;
 }
 
+
+/* ---- Debugger performance overlay ---- */
+const PERF_WINDOW_SEC = 0.35;
+let _perfMeshes = 0;
+let _perfAcc = 0;
+let _perfFrames = 0;
+let _perfFps = 0;
+let _perfMs = 0;
+let _perfNodes = null;
+
+function perfNodes() {
+  if (_perfNodes) return _perfNodes;
+  _perfNodes = {
+    root: el("perfOverlay"),
+    fps: el("perfFps"),
+    ms: el("perfMs"),
+    meshes: el("perfMeshes"),
+    decals: el("perfDecals"),
+    shells: el("perfShells"),
+    slugs: el("perfSlugs"),
+  };
+  return _perfNodes;
+}
+
+function perfTint(fps) {
+  if (fps < 30) return "#ff4444";
+  if (fps < 60) return "#ff8c00";
+  if (fps > 75) return "#6ea8ff";
+  return "#ffffff";
+}
+
+function setPerfOverlay(on, { toast = false } = {}) {
+  const next = !!on;
+  const changed = state.showPerf !== next;
+  state.showPerf = next;
+  const n = perfNodes();
+  if (n.root) {
+    n.root.hidden = !state.showPerf;
+    n.root.setAttribute("aria-hidden", state.showPerf ? "false" : "true");
+  }
+  const btn = el("btnPerf");
+  if (btn) btn.setAttribute("aria-pressed", state.showPerf ? "true" : "false");
+  if (!state.showPerf) {
+    _perfAcc = 0;
+    _perfFrames = 0;
+  }
+  if (toast) showToast(state.showPerf ? "Perf overlay ON" : "Perf overlay OFF");
+  if (changed) scheduleSaveSettings();
+}
+
+function snapshotPerfMeshes() {
+  if (!state.showPerf || !renderer || !renderer.info || !renderer.info.render) return;
+  _perfMeshes += renderer.info.render.calls | 0;
+}
+
+function updatePerfOverlay(rawDt) {
+  if (!state.showPerf) return;
+  const n = perfNodes();
+  if (!n.root) return;
+  const dt = Number(rawDt);
+  if (Number.isFinite(dt) && dt > 0) {
+    _perfAcc += dt;
+    _perfFrames += 1;
+    if (_perfAcc >= PERF_WINDOW_SEC) {
+      _perfMs = (_perfAcc / _perfFrames) * 1000;
+      _perfFps = 1000 / _perfMs;
+      _perfAcc = 0;
+      _perfFrames = 0;
+      const tint = perfTint(_perfFps);
+      if (n.fps) {
+        n.fps.textContent = _perfFps.toFixed(0);
+        n.fps.style.color = tint;
+      }
+      if (n.ms) {
+        n.ms.textContent = _perfMs.toFixed(1);
+        n.ms.style.color = tint;
+      }
+    }
+  }
+  if (n.meshes) n.meshes.textContent = String(_perfMeshes);
+  if (n.decals) n.decals.textContent = String(impactDecals.length + paperDecals.length);
+  if (n.shells) n.shells.textContent = String(casings.length);
+  if (n.slugs) n.slugs.textContent = String(spentSlugs.length);
+}
+
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
   updatePlayer(dt);
   updateKeyLightShadow();
   updateSkyDome(dt);
   renderScene();
+  updatePerfOverlay(rawDt);
 }
 
 function refresh(syncInputs = true) {
@@ -9758,6 +9852,11 @@ function bind() {
       showToast(state.swayEnabled ? "Sway ON" : "Sway OFF (clean tuning)");
     };
   }
+  const perfBtn = el("btnPerf");
+  if (perfBtn) {
+    perfBtn.onclick = () => setPerfOverlay(!state.showPerf, { toast: true });
+  }
+  setPerfOverlay(!!state.showPerf, { toast: false });
   const zeroSel = el("zeroDistSelect");
   if (zeroSel) {
     zeroSel.value = String(state.zeroDist);

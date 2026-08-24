@@ -2048,18 +2048,21 @@ function getFloodPoolTexture(kind = "outer") {
 }
 
 function makeFloodPoolMaterial(map) {
+  // depthTest:false so pools stay visible with renderer logarithmicDepthBuffer + transparent floor;
+  // prefer this over disabling log depth globally. NormalBlending + high opacity for reliability.
   const mat = new THREE.MeshBasicMaterial({
     map,
+    color: 0xffc878,
     transparent: true,
+    opacity: 0.75,
+    depthTest: false,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    opacity: 1,
+    blending: THREE.NormalBlending,
     side: THREE.DoubleSide,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
   });
   if ("toneMapped" in mat) mat.toneMapped = false;
+  // Helps transparent materials under logarithmicDepthBuffer when available (r152+).
+  if ("forceSinglePass" in mat) mat.forceSinglePass = true;
   return mat;
 }
 
@@ -2129,11 +2132,12 @@ function makeFloodlight(x, z, opts = {}) {
   group.add(light);
   light.userData.floodIntBase = intensity;
 
-  // High-contrast additive floor pool under the fixture (visual only — no raycast / lean).
+  // Unmissable floor pool under the fixture (visual only — no raycast / lean).
+  // radius 10–16, y=0.04, inward 4–6; depthTest:false + renderOrder 1000 vs log-depth/transparent fights.
   const poolR = opts.poolRadius != null ? opts.poolRadius : 14;
   const poolInward = opts.poolInward != null ? opts.poolInward : 5;
   const poolX = inward * poolInward;
-  const poolY = 0.03;
+  const poolY = 0.04;
   const poolZ = opts.poolZ != null ? opts.poolZ : 0; // under the light, not aimZ*0.35 downrange
 
   const pool = new THREE.Mesh(
@@ -2142,7 +2146,7 @@ function makeFloodlight(x, z, opts = {}) {
   );
   pool.rotation.x = -Math.PI / 2;
   pool.position.set(poolX, poolY, poolZ);
-  pool.renderOrder = 3;
+  pool.renderOrder = 1000;
   pool.raycast = () => {};
   group.add(pool);
 
@@ -2155,7 +2159,7 @@ function makeFloodlight(x, z, opts = {}) {
     );
     core.rotation.x = -Math.PI / 2;
     core.position.set(poolX, poolY + 0.005, poolZ);
-    core.renderOrder = 4;
+    core.renderOrder = 1001;
     core.raycast = () => {};
     group.add(core);
   }
@@ -2166,16 +2170,29 @@ function makeFloodlight(x, z, opts = {}) {
 /** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m — PointLights + fake pools. */
 function buildRangeFloodlights() {
   floodLights = [];
-  // PointLight intensity/distance sized to read on MeshStandard; additive radial discs sell the spill.
-  // Nearest post bumped (~18 m) so spawn looking downrange sees an obvious warm pool; others 12–16 m.
+  // PointLight intensity/distance sized to read on MeshStandard; soft radial discs sell the spill.
+  // Pool radii 10–16 m under fixture; nearest post gets an unmissable warm disc from spawn.
   const posts = [
-    { x: -9.2, z: -25, intensity: 48, distance: 45, poolRadius: 18, poolCoreRadius: 6.5, poolInward: 5.5 },
+    { x: -9.2, z: -25, intensity: 48, distance: 45, poolRadius: 16, poolCoreRadius: 5.5, poolInward: 5.5 },
     { x: 9.4, z: -80, intensity: 58, distance: 52, poolRadius: 15, poolCoreRadius: 5, poolInward: 5.2 },
     { x: -9.2, z: -160, intensity: 68, distance: 56, poolRadius: 14, poolCoreRadius: 4.5, poolInward: 5 },
-    { x: 9.4, z: -280, intensity: 78, distance: 60, poolRadius: 13, poolCoreRadius: 4.2, poolInward: 5 },
+    { x: 9.4, z: -280, intensity: 78, distance: 60, poolRadius: 12, poolCoreRadius: 4, poolInward: 5 },
   ];
+  let first = true;
   for (const p of posts) {
     const { group, light } = makeFloodlight(p.x, p.z, p);
+    if (first) {
+      // TODO removable — temporary 3 m bright marker so playtest can confirm flood group is in the scene.
+      const marker = new THREE.Mesh(
+        new THREE.BoxGeometry(0.8, 3, 0.8),
+        new THREE.MeshBasicMaterial({ color: 0xff6600, toneMapped: false })
+      );
+      marker.position.set(0, 1.5, 0); // first flood base world x=-9.2,z=-25
+      marker.userData.debugFloodMarker = true;
+      marker.raycast = () => {};
+      group.add(marker);
+      first = false;
+    }
     addLeanSolid(group);
     floodLights.push(light);
   }

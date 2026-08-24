@@ -147,8 +147,8 @@ const state = {
   gamma: 1.18,
   /** Linear distance fog (THREE.Fog) — tunable in Settings (O). */
   fogEnabled: true,
-  fogNear: 90,
-  fogFar: 430,
+  fogNear: 375,
+  fogFar: 520,
   /** Overlay Black/Low/Mid/High/White strip on viewport corner. */
   showPluge: false,
 };
@@ -627,9 +627,9 @@ function setCamFar(v, { toast = false } = {}) {
 /** Apply linear scene fog from Settings; null when disabled. Color tracks bg/clear. */
 function applyFog() {
   if (!scene) return;
-  const near = clamp(Number(state.fogNear) || 90, 20, 200);
-  let far = clamp(Number(state.fogFar) || 430, 150, 500);
-  if (far <= near) far = Math.min(500, near + 10);
+  const near = clamp(Number(state.fogNear) || 375, 20, 450);
+  let far = clamp(Number(state.fogFar) || 520, 200, 650);
+  if (far <= near) far = Math.min(650, near + 10);
   state.fogNear = near;
   state.fogFar = far;
 
@@ -1964,6 +1964,7 @@ function updateOpticVisibility() {
 function refreshOpticsTableAvailability() {
   if (!pickups || !pickups.length) return;
   pickups.forEach((p) => {
+    if (!p.userData.opticId) return;
     const ok = weaponAllowsOptic(p.userData.opticId);
     p.userData.allowed = ok;
     p.traverse((o) => {
@@ -2026,6 +2027,7 @@ function buildRoom() {
   }
 
   buildOpticsTable();
+  buildWeaponsBench();
   buildRangeProps();
   buildFiringLineStall();
   try {
@@ -2095,6 +2097,99 @@ function buildOpticsTable() {
     pickups.push(group);
   });
   refreshOpticsTableAvailability();
+}
+
+/** Compact world prop reuse of buildBlockGun silhouettes (scaled for bench). */
+function makeWeaponBenchProp(style) {
+  const g = new THREE.Group();
+  g.name = "weaponProp_" + style;
+  const poly = GUN_MAT.polymer;
+  const polyD = GUN_MAT.polymerDark;
+  const metal = GUN_MAT.metal;
+  const dark = GUN_MAT.darkMetal;
+  const isRifle = style === "example_rifle";
+  if (isRifle) {
+    g.add(makeBox(0.048, 0.078, 0.18, 0x5a4634, 0.008, -0.012, 0.195, poly));
+    g.add(makeBox(0.06, 0.074, 0.27, 0x6e7a8c, 0, 0.004, 0.02, metal));
+    g.add(makeBox(0.056, 0.05, 0.21, 0x323840, 0, 0.006, -0.22, poly));
+    g.add(makeCyl(0.009, 0.013, 0.38, 0x1e2430, 0, 0.022, -0.52, Math.PI / 2, 0, 0, 12, dark));
+    g.add(makeBox(0.034, 0.145, 0.048, 0x2e343e, 0, -0.118, 0.0, polyD));
+    const pistol = makeBox(0.034, 0.096, 0.046, 0x2a3038, 0, -0.085, 0.1, poly);
+    pistol.rotation.x = 0.22;
+    g.add(pistol);
+  } else {
+    g.add(makeBox(0.04, 0.055, 0.09, 0x2e343e, 0.01, -0.008, 0.128, poly));
+    g.add(makeBox(0.056, 0.068, 0.17, 0x6e7a8c, 0, 0.002, 0.01, metal));
+    g.add(makeBox(0.048, 0.046, 0.115, 0x323840, 0, 0.004, -0.13, poly));
+    g.add(makeCyl(0.0085, 0.012, 0.2, 0x1e2430, 0, 0.016, -0.28, Math.PI / 2, 0, 0, 12, dark));
+    g.add(makeBox(0.036, 0.115, 0.048, 0x2e343e, 0, -0.102, 0.01, polyD));
+    const pistol = makeBox(0.032, 0.084, 0.04, 0x2a3038, 0, -0.078, 0.07, poly);
+    pistol.rotation.x = 0.28;
+    g.add(pistol);
+  }
+  return g;
+}
+
+/** Second table near spawn/optics area with Example SMG + Rifle pickups. */
+function buildWeaponsBench() {
+  const tableY = -0.85;
+  const tableZ = -0.35;
+  const tableX = 1.95;
+  const woodTex = makeWoodTexture();
+  const topMat = new THREE.MeshStandardMaterial({
+    map: woodTex,
+    color: 0xb89872,
+    roughness: 0.74,
+    metalness: 0.04,
+  });
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.055, 0.52), topMat);
+  top.position.set(tableX, tableY, tableZ);
+  top.castShadow = true;
+  top.receiveShadow = true;
+  const apron = makeBox(1.18, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ + 0.24);
+  const apronB = makeBox(1.18, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ - 0.24);
+  const legMat = 0x2e241c;
+  const legL = makeBox(0.06, 0.55, 0.06, legMat, tableX - 0.48, tableY - 0.3, tableZ - 0.18);
+  const legR = makeBox(0.06, 0.55, 0.06, legMat, tableX + 0.48, tableY - 0.3, tableZ - 0.18);
+  const legL2 = makeBox(0.06, 0.55, 0.06, legMat, tableX - 0.48, tableY - 0.3, tableZ + 0.18);
+  const legR2 = makeBox(0.06, 0.55, 0.06, legMat, tableX + 0.48, tableY - 0.3, tableZ + 0.18);
+  scene.add(top, apron, apronB, legL, legR, legL2, legR2);
+  registerLeanSolid(top);
+  registerLeanSolid(apron);
+  registerLeanSolid(apronB);
+  registerLeanSolid(legL);
+  registerLeanSolid(legR);
+  registerLeanSolid(legL2);
+  registerLeanSolid(legR2);
+
+  const defs = [
+    { id: "example_smg", label: "Example SMG", x: tableX - 0.28 },
+    { id: "example_rifle", label: "Example Rifle", x: tableX + 0.28 },
+  ];
+  defs.forEach((d) => {
+    const group = new THREE.Group();
+    group.position.set(d.x, tableY + 0.1, tableZ);
+    const prop = makeWeaponBenchProp(d.id);
+    prop.scale.setScalar(0.42);
+    prop.rotation.y = 0.55;
+    prop.rotation.x = -0.08;
+    group.add(prop);
+    const highlight = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.02, 0.18),
+      new THREE.MeshBasicMaterial({ color: 0x6ea8ff, transparent: true, opacity: 0.0 })
+    );
+    highlight.position.y = 0.01;
+    group.add(highlight);
+    group.userData = {
+      weaponId: d.id,
+      label: d.label,
+      highlight,
+      baseY: tableY + 0.1,
+      allowed: true,
+    };
+    scene.add(group);
+    pickups.push(group);
+  });
 }
 
 function buildShootingRange() {
@@ -3816,8 +3911,8 @@ function updatePickupHover() {
   let found = null;
   for (const h of hits) {
     let o = h.object;
-    while (o && !o.userData.opticId) o = o.parent;
-    if (o && o.userData.opticId) {
+    while (o && !(o.userData.opticId || o.userData.weaponId)) o = o.parent;
+    if (o && (o.userData.opticId || o.userData.weaponId)) {
       // proximity: also require near table
       const dx = o.position.x - player.pos.x;
       const dz = o.position.z - player.pos.z;
@@ -3842,18 +3937,28 @@ function updateEquipPrompt() {
   const prompt = el("equipPrompt");
   if (!prompt) return;
   if (state.lookPickup && gameplayActive()) {
-    const id = state.lookPickup.userData.opticId;
-    const label = state.lookPickup.userData.label;
-    const equipped = state.optic === id;
-    const allowed = weaponAllowsOptic(id);
+    const pu = state.lookPickup.userData;
+    const label = pu.label;
     prompt.hidden = false;
-    if (!allowed) {
-      const w = (WEAPON_META[state.weaponId] && WEAPON_META[state.weaponId].label) || state.weaponId;
-      prompt.textContent = `${label} — not available on ${w}`;
-    } else if (equipped) {
-      prompt.textContent = `Looking at ${label} (equipped)`;
+    if (pu.weaponId) {
+      const equipped = state.weaponId === pu.weaponId;
+      if (equipped) {
+        prompt.textContent = `Looking at ${label} (equipped)`;
+      } else {
+        prompt.textContent = `[F] Equip ${label}  ·  click to equip`;
+      }
     } else {
-      prompt.textContent = `[E] Equip ${label}  ·  click to equip`;
+      const id = pu.opticId;
+      const equipped = state.optic === id;
+      const allowed = weaponAllowsOptic(id);
+      if (!allowed) {
+        const w = (WEAPON_META[state.weaponId] && WEAPON_META[state.weaponId].label) || state.weaponId;
+        prompt.textContent = `${label} — not available on ${w}`;
+      } else if (equipped) {
+        prompt.textContent = `Looking at ${label} (equipped)`;
+      } else {
+        prompt.textContent = `[F] Attach ${label}  ·  click to equip`;
+      }
     }
   } else {
     prompt.hidden = true;
@@ -3909,13 +4014,23 @@ function updateHudHint() {
   } else if (state.panelOpen) {
     hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
   } else {
-    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd> crouch · <kbd>Z</kbd> hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire · <kbd>V</kbd> reload`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd> crouch · <kbd>Z</kbd> hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>F</kbd> bench pickup · RMB ADS · <kbd>Space</kbd> breath · LMB fire · <kbd>V</kbd> reload · <kbd>G</kbd> guns`;
   }
 }
 
 function tryEquipLooked() {
   if (!state.lookPickup) return;
-  const id = state.lookPickup.userData.opticId;
+  const pu = state.lookPickup.userData;
+  if (pu.weaponId) {
+    if (state.weaponId === pu.weaponId) {
+      showToast((pu.label || pu.weaponId) + " already equipped");
+      return;
+    }
+    equipWeapon(pu.weaponId);
+    return;
+  }
+  const id = pu.opticId;
+  if (!id) return;
   if (!weaponAllowsOptic(id)) {
     const w = (WEAPON_META[state.weaponId] && WEAPON_META[state.weaponId].label) || state.weaponId;
     showToast((OPTIC_LABELS[id] || id) + " not available on " + w, true);
@@ -4023,22 +4138,21 @@ function onKeyDown(e) {
       e.preventDefault();
     }
     if (code === "KeyQ") input.leanLeft = true;
-    if (code === "KeyE") {
-      input.leanRight = true;
-      if (state.lookPickup && !e.repeat) tryEquipLooked();
-    }
+    if (code === "KeyE") input.leanRight = true;
     if (k === " " || code === "Space") {
       input.holdBreath = true;
       e.preventDefault();
     }
-    if (k === "f" || k === "F") {
+    // F = bench pickup (weapons + optics); E is lean only; G remains gun dialog backup
+    if ((k === "f" || k === "F") && !e.repeat) {
       if (state.lookPickup) tryEquipLooked();
+      e.preventDefault();
     }
     if ((k === "r" || k === "R") && !e.repeat) {
       resetSilhouettes();
       e.preventDefault();
     }
-    // V = reVload (R is silhouette reset; F is optic equip)
+    // V = reVload (R is silhouette reset; F is bench pickup equip)
     if ((code === "KeyV" || k === "v" || k === "V") && !e.repeat) {
       beginReload();
       e.preventDefault();

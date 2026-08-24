@@ -16,16 +16,17 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 
 ## What you get
 
-1. **3D viewport** — walkable room, optics table, first-person block guns, cyan aim ray (camera −Z), hip crosshair.
+1. **3D viewport** — walkable room, optics table + weapons bench, first-person block guns, cyan aim ray (camera −Z), hip crosshair.
 2. **Range** — circular bullseyes + knockdown silhouette lane; **firing-line sandbags** + stall benches at spawn; side-bay **floodlights with visible floor pools** (~25/80/160/280 m from spawn); **floor chalk lines** + **wall stencil distances** at circular-target ranges (50/100/150/200/300/400 m from the spawn firing line). Wall numbers are meters from spawn, not raw world `|z|`. No floating text on targets.
 3. **Player** (panel closed) — WASD, Shift sprint, **C** crouch toggle / **Z** crouch hold (slower, no sprint, ducked eye), mouse look, **Q/E lean (wall-clamped)**, tiny A/D strafe tilt, RMB ADS, Space hold-breath, LMB fire, **V reload**.
 4. **ADS** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), HUD reticles + mag-optic tube/vignette, 3D iron sights. Look sens scales with optic FOV.
 5. **Sway / breath** — procedural `swayRig` after authored hold (header **Sway** toggle). Space hold-breath damps sway ~3s (HUD bar).
 6. **Shooting kit** — **long tracer streaks** + ballistic drop; mags SMG 30 / rifle 20 / sniper 5 (`mag/capacity · ∞`); empty = dry-click. **V** reload (~1.2s / ~2s sniper) with viewmodel dip. Live shots eject **shell casings** (FIFO ~28) and a short **muzzle flash**. Hits spawn **impact decals + sparks** (FIFO ~50). Screen-fixed +pts markers. Cheap Web Audio SFX.
 7. **Sim / Arcade + HoB** — **B** cycles **Sim** (default: height-over-bore + ballistic zero so the gravity arc meets the sight ray at **zero distance**) vs **Arcade** (reticle-faithful, vel = camera forward). **`-`/`=`** cycle zero (25/50/100/200/300 m, default 100). Live HoB cm readout; optional aim/bore rays.
-8. **Optics table** — iron / holo / acog / sniper_scope; look + click or E to equip. **Host limits:** SMG may use iron/holo/acog; rifle may use iron/sniper_scope. Illegal pickups dim and toast on equip; switching guns falls back to iron if needed.
-9. **Debugger (` / Backquote)** — view/attachment tabs, ads_factor, six-axis editors, Copy JSON. **G** = gun picker.
-10. **Settings (`O`)** — pauses gameplay: game style, **hip reticle** toggle, aim/bore rays, **brightness / gamma** (CSS filter + mild fog lift; defaults **1.30 / 1.18**), **fog** enable + near/far (linear `THREE.Fog`, defaults **ON / 90 / 430**), **PLUGE** grey strip, zero distance, look sens, ADS look mul, controls cheat.
+8. **Optics table** — iron / holo / acog / sniper_scope; look + **F** / click to attach. **Host limits:** SMG may use iron/holo/acog; rifle may use iron/sniper_scope. Illegal pickups dim and toast on equip; switching guns falls back to iron if needed.
+9. **Weapons bench** — Example SMG / Example Rifle world props near spawn; look + **F** / click to equip (refreshes optic host rules). **G** gun dialog remains an optional backup.
+10. **Debugger (` / Backquote)** — view/attachment tabs, ads_factor, six-axis editors, Copy JSON. **G** = gun picker.
+11. **Settings (`O`)** — pauses gameplay: game style, **hip reticle** toggle, aim/bore rays, **brightness / gamma** (CSS filter + mild fog lift; defaults **1.30 / 1.18**), **fog** enable + near/far (linear `THREE.Fog`, defaults **ON / 375 / 520**, softer/farther), **PLUGE** grey strip, zero distance, look sens, ADS look mul, controls cheat.
 
 ## Hotkeys
 
@@ -38,12 +39,13 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 | C | Crouch toggle |
 | Z | Crouch hold |
 | WASD / Shift | Move / sprint (sprint blocked while crouched) |
-| Q / E | Lean (wall-clamped); E also equips looked-at optic (if weapon allows) |
+| Q / E | Lean (wall-clamped) |
 | RMB | Hold ADS |
 | Space | Hold breath (damp sway) |
 | `-` / `=` | Cycle zero distance (presets 25–300 m; clamp at ends; mainly Sim) |
 | LMB | Fire (tracers; empty = dry click); LMB on pickup equips |
-| V | Reload magazine (not R — R resets silhouettes; F equips optic) |
+| F | Bench pickup — equip looked-at weapon or attach optic (click also works) |
+| V | Reload magazine (not R — R resets silhouettes) |
 | Click canvas | Pointer lock |
 | Insert | ADS preview |
 | End / arrows / PgUp/PgDn | Pose / axis / step (panel open) |
@@ -79,7 +81,7 @@ Real guns put the barrel below the optic, so the bore line and the sight line ar
 | Show aim/bore rays | Ballistics / Settings | **OFF** — cyan sight, amber launch |
 | Show hip reticle | Settings | **ON** — 3px hip crosshair (ADS HUD unchanged) |
 | Brightness / Gamma | Settings | **1.30 / 1.18** — CSS `brightness()`/`contrast()` on `#view3d` + mild fog/bg lift |
-| Fog | Settings | **ON** — linear `THREE.Fog` near **90** / far **430**; color tracks bg/clear |
+| Fog | Settings | **ON** — linear `THREE.Fog` near **375** / far **520** (gentler; near 20–450, far 200–650); color tracks bg/clear |
 | Show PLUGE strip | Settings | **OFF** — Black/Low/Mid/High/White overlay (unfiltered) |
 | HoB readout | Live cm | Signed: + = muzzle below sight ray |
 

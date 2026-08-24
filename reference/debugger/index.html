@@ -65,7 +65,7 @@
     <div class="game-style-badge" id="gameStyleBadge" aria-live="polite">SIM</div>
     <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · <kbd>R</kbd> reset</div>
     <div id="floatLabels" class="float-labels" aria-hidden="true"></div>
-    <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>V</kbd> reload · <kbd>C</kbd>/<kbd>Z</kbd> crouch</div>
+    <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>F</kbd> bench pickup · <kbd>V</kbd> reload · <kbd>C</kbd>/<kbd>Z</kbd> crouch</div>
 
     <aside id="debuggerPanel" class="debugger-panel closed" aria-hidden="true">
       <div class="shell-inner">
@@ -163,9 +163,10 @@
                 <li><kbd>B</kbd> cycle Arcade / Sim (game style)</li>
                 <li><kbd>-</kbd>/<kbd>=</kbd> cycle zero distance (Sim)</li>
                 <li>LMB fire (tracers from muzzle; Sim = HoB+zero by default)</li>
-                <li><kbd>V</kbd> reload (mag; R resets silhouettes · F equips optic)</li>
+                <li><kbd>V</kbd> reload (mag; R resets silhouettes · <kbd>F</kbd> bench pickup)</li>
                 <li>Click canvas = mouse look</li>
-                <li>Table pickups = equip optic (SMG: holo/acog · Rifle: sniper · illegal = toast)</li>
+                <li>Optics table = <kbd>F</kbd>/click attach (SMG: holo/acog · Rifle: sniper · illegal = toast)</li>
+                <li>Weapons bench = <kbd>F</kbd>/click equip Example SMG / Rifle (<kbd>G</kbd> dialog = backup)</li>
                 <li><kbd>Insert</kbd> ADS preview · Sway toggle in header</li>
                 <li><kbd>End</kbd> cycle pose</li>
                 <li><kbd>↑</kbd><kbd>↓</kbd> select axis · <kbd>←</kbd><kbd>→</kbd> nudge</li>
@@ -269,12 +270,12 @@
         <h3>Fog</h3>
         <label class="check-row"><input type="checkbox" id="chkFog" checked /> Fog enabled</label>
         <label class="slider-row">Near
-          <input type="range" id="fogNearSlider" min="20" max="200" step="1" value="90" />
-          <code id="fogNearVal">90</code>
+          <input type="range" id="fogNearSlider" min="20" max="450" step="1" value="375" />
+          <code id="fogNearVal">375</code>
         </label>
         <label class="slider-row">Far
-          <input type="range" id="fogFarSlider" min="150" max="500" step="1" value="430" />
-          <code id="fogFarVal">430</code>
+          <input type="range" id="fogFarSlider" min="200" max="650" step="1" value="520" />
+          <code id="fogFarVal">520</code>
         </label>
         <p class="note">Linear distance fog (<code>THREE.Fog</code>). Color tracks clear/background. Density (<code>FogExp2</code>) not exposed yet.</p>
       </div>
@@ -328,7 +329,7 @@
           <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · RMB ADS · LMB fire</li>
           <li><kbd>V</kbd> reload · <kbd>Space</kbd> hold breath · <kbd>B</kbd> Arcade/Sim</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
-          <li><kbd>R</kbd> reset silhouettes · <kbd>F</kbd>/<kbd>E</kbd> equip optic (weapon-host limited)</li>
+          <li><kbd>R</kbd> reset silhouettes · <kbd>F</kbd> bench pickup (weapons + optics; <kbd>G</kbd> backup)</li>
           <li>Settings: hip reticle · Brightness/Gamma · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
@@ -337,6 +338,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824t8"></script>
+    <script type="module" src="app.js?v=20260824t9"></script>
 </body>
 </html>

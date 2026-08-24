@@ -2820,6 +2820,11 @@ function createBermPopupFigure(x, z, yUp, yDown, scale) {
     hideAt: 0,
     nextAt: now + 0.6 + Math.random() * 2.5,
     knocked: false,
+    homeX: x,
+    xOffset: 0,
+    xMin: x - 1.2,
+    xMax: x + 1.2,
+    xJitterMax: 1.0,
     zones: [
       { id: "head", center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), radius: headR * 1.05, pts: 50 },
       { id: "chest", center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), radius: 0.18 * s, pts: 20 },
@@ -2830,7 +2835,56 @@ function createBermPopupFigure(x, z, yUp, yDown, scale) {
   return fig;
 }
 
+function clearBermPopupDecals(fig) {
+  if (!fig) return;
+  for (let i = impactDecals.length - 1; i >= 0; i--) {
+    const mesh = impactDecals[i];
+    if (!mesh) continue;
+    let attached = !!(mesh.userData && mesh.userData.bermPopup === fig);
+    if (!attached && fig.group) {
+      let p = mesh.parent;
+      while (p) {
+        if (p === fig.group) { attached = true; break; }
+        p = p.parent;
+      }
+    }
+    if (!attached) continue;
+    if (mesh.parent) mesh.parent.remove(mesh);
+    if (mesh.material) mesh.material.dispose();
+    mesh.userData.bermPopup = null;
+    impactDecals.splice(i, 1);
+  }
+}
+
+function applyBermPopupXJitter(fig) {
+  clearBermPopupDecals(fig);
+  if (!fig || !fig.group) return;
+  const home = fig.homeX;
+  const lo = fig.xMin;
+  const hi = fig.xMax;
+  const maxOff = fig.xJitterMax || 1.0;
+  const prev = fig.xOffset || 0;
+  let off = prev;
+  let x = home + off;
+  for (let n = 0; n < 8; n++) {
+    off = (Math.random() * 2 - 1) * maxOff;
+    x = home + off;
+    if (x < lo) x = lo;
+    if (x > hi) x = hi;
+    off = x - home;
+    let crowded = false;
+    for (const other of bermPopupTargets) {
+      if (other === fig || !other.group) continue;
+      if (Math.abs(other.group.position.x - x) < 1.5) { crowded = true; break; }
+    }
+    if (!crowded && (Math.abs(off - prev) >= 0.25 || n === 7)) break;
+  }
+  fig.xOffset = off;
+  fig.group.position.x = home + off;
+}
+
 function scheduleBermPopup(fig, now, extra = 0) {
+  clearBermPopupDecals(fig);
   fig.phase = "down";
   fig.lift = 0;
   fig.knocked = false;
@@ -2858,6 +2912,17 @@ function buildBermPopupFigures() {
     const yUp = crestTop + 0.07 - shoulderTopRel;
     const yDown = crestTop - 0.48 - headTopRel;
     const fig = createBermPopupFigure(x, z, yUp, yDown, scale);
+    fig.homeX = x;
+    fig.xOffset = 0;
+    const margin = 0.40 * scale;
+    fig.xMin = x0 - w * 0.5 + margin;
+    fig.xMax = x0 + w * 0.5 - margin;
+    if (fig.xMin > fig.xMax) {
+      fig.xMin = x0;
+      fig.xMax = x0;
+    }
+    const slack = Math.max(0, Math.min(fig.homeX - fig.xMin, fig.xMax - fig.homeX));
+    fig.xJitterMax = Math.min(1.2, Math.max(0.4, slack));
     fig.nextAt = now + 0.9 + i * 2.4 + Math.random() * 2.8;
     bermPopupTargets.push(fig);
   });
@@ -2895,6 +2960,7 @@ function updateBermPopups(dt) {
   for (const fig of bermPopupTargets) {
     if (fig.phase === "down") {
       if (now >= fig.nextAt) {
+        applyBermPopupXJitter(fig);
         fig.phase = "rising";
         fig.animT = 0;
         fig.animDur = bermPopupAnimDur();
@@ -4299,6 +4365,7 @@ function makeImpactDecalMesh(isPunch) {
 function recycleDecalFrom(list, isPunch) {
   const mesh = list.shift();
   if (mesh.parent) mesh.parent.remove(mesh);
+  mesh.userData.bermPopup = null;
   mesh.material.color.setHex(isPunch ? 0x1a1a1a : 0x14100c);
   mesh.material.map = getImpactScorchTexture();
   mesh.material.opacity = isPunch ? 0.72 : 0.55;
@@ -4310,7 +4377,7 @@ function spawnImpactDecal(pos, normal, kind, opts) {
   if (!scene || !pos) return;
   const isPunch = kind === "punch";
   const paper = !!(opts && opts.paperTarget && opts.parent);
-  const parent = paper ? opts.parent : null;
+  const parent = (opts && opts.parent && opts.parent.isObject3D) ? opts.parent : null;
   const size = isPunch
     ? 0.07 + Math.random() * 0.05
     : 0.11 + Math.random() * 0.12;
@@ -4320,30 +4387,32 @@ function spawnImpactDecal(pos, normal, kind, opts) {
     else mesh = makeImpactDecalMesh(isPunch);
     mesh.renderOrder = 3;
     mesh.userData.paperPersist = true;
+    mesh.userData.bermPopup = null;
   } else {
     if (impactDecals.length >= IMPACT_DECAL_MAX) mesh = recycleDecalFrom(impactDecals, isPunch);
     else mesh = makeImpactDecalMesh(isPunch);
     mesh.renderOrder = 3;
     mesh.userData.paperPersist = false;
+    mesh.userData.bermPopup = (opts && opts.bermPopup) || null;
   }
   orientFlatToNormal(mesh, normal);
   mesh.scale.set(size, size * (0.75 + Math.random() * 0.5), 1);
   mesh.rotateZ((Math.random() - 0.5) * Math.PI);
-  if (parent && parent.isObject3D) {
+  if (parent) {
     parent.updateWorldMatrix(true, false);
-    _decalLocal.copy(pos).addScaledVector(_impactN, 0.005);
+    _decalLocal.copy(pos).addScaledVector(_impactN, paper ? 0.005 : 0.012);
     parent.worldToLocal(_decalLocal);
     mesh.position.copy(_decalLocal);
     parent.getWorldQuaternion(_decalParentQ);
     _decalWorldQ.copy(mesh.quaternion);
     mesh.quaternion.copy(_decalParentQ).invert().multiply(_decalWorldQ);
     parent.add(mesh);
-    paperDecals.push(mesh);
   } else {
     mesh.position.copy(pos).addScaledVector(_impactN, 0.012);
     scene.add(mesh);
-    impactDecals.push(mesh);
   }
+  if (paper) paperDecals.push(mesh);
+  else impactDecals.push(mesh);
 }
 
 function spawnImpactFX(pos, normal, kind, opts) {
@@ -4505,10 +4574,15 @@ function updateTracers(dt) {
           });
         } else if (best.kind === "sil") {
           flashSilhouetteZone(best.sil, best.zone, best.hit);
-          spawnImpactFX(best.hit, best.normal, "punch");
+          spawnImpactFX(best.hit, best.normal, "punch", {
+            parent: (best.sil.plates && best.sil.plates[best.zone.id]) || best.sil.group,
+          });
         } else if (best.kind === "berm") {
           flashBermPopupZone(best.fig, best.zone, best.hit);
-          spawnImpactFX(best.hit, best.normal, "punch");
+          spawnImpactFX(best.hit, best.normal, "punch", {
+            parent: best.fig.group,
+            bermPopup: best.fig,
+          });
         } else if (best.kind === "flood") {
           shootOutFlood(best.fixture, best.hit, best.normal);
         } else {

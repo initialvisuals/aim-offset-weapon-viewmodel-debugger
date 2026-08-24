@@ -64,7 +64,7 @@ Offset to the right of the circular bullseyes: original blocky steel/wood knockd
 
 ## Berm popups
 
-Two–three dark steel/cardboard figures sit on the **410 m berm peaks**, slightly behind the crest so from spawn you only see **head and shoulders**. They stay down, then independently pop up for ~1.5–3.5 s (2–8 s between pops). Head **50** / shoulder-chest **20**. Hit knocks them down until the next random pop; table reset drops them and reshuffles timers (score stays). Extra-good shooters only.
+Two–three dark steel/cardboard figures sit on the **410 m berm peaks**, slightly behind the crest so from spawn you only see **head and shoulders**. They stay down, then independently pop up for ~1.5–3.5 s (2–8 s between pops), each time jittering a bit along that peak so the same X cannot be pre-aimed. Head **50** / shoulder-chest **20**. Hit knocks them down until the next random pop; table reset drops them and reshuffles timers (score stays). Extra-good shooters only.
 
 ## Flood lamps
 

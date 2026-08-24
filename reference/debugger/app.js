@@ -517,16 +517,24 @@ function makeOpticMesh(profile) {
     const tip = makeBox(0.009, 0.005, 0.009, 0xffaa66, 0, 0.039, -0.14);
     g.add(rearBase, notchL, notchR, frontBase, post, tip);
   } else if (profile === "holo") {
-    // Short window — peripheral frame when ADS; HUD red-dot overlay is primary reticle
-    const mount = makeBox(0.042, 0.012, 0.05, 0x2a3140, 0, 0.006, 0);
-    const body = makeBox(0.058, 0.048, 0.052, 0x2a8f6a, 0, 0.036, 0);
-    const frameL = makeBox(0.008, 0.036, 0.04, 0x1e6b50, -0.025, 0.04, 0);
-    const frameR = makeBox(0.008, 0.036, 0.04, 0x1e6b50, 0.025, 0.04, 0);
-    const frameTop = makeBox(0.058, 0.008, 0.04, 0x1e6b50, 0, 0.06, 0);
-    const hood = makeBox(0.056, 0.01, 0.014, 0x16553f, 0, 0.062, -0.02);
-    const glass = makeLensGlass(0.018, 0.16);
-    glass.position.set(0, 0.04, -0.02);
-    g.add(mount, body, frameL, frameR, frameTop, hood, glass);
+    // EOTech XPS3-ish: compact black hood, open rear window, see-through glass
+    const blk = 0x12151a;
+    const blk2 = 0x1c2129;
+    const mount = makeBox(0.046, 0.01, 0.055, blk2, 0, 0.005, 0.005);
+    // Side walls + top hood (rear open toward shooter)
+    const sideL = makeBox(0.006, 0.042, 0.05, blk, -0.028, 0.032, -0.005);
+    const sideR = makeBox(0.006, 0.042, 0.05, blk, 0.028, 0.032, -0.005);
+    const top = makeBox(0.062, 0.007, 0.05, blk, 0, 0.055, -0.005);
+    // Open front aperture (rim only) so glass is see-through
+    const frontBot = makeBox(0.062, 0.006, 0.006, blk, 0, 0.012, -0.03);
+    const frontL = makeBox(0.006, 0.042, 0.006, blk, -0.028, 0.032, -0.03);
+    const frontR = makeBox(0.006, 0.042, 0.006, blk, 0.028, 0.032, -0.03);
+    const glass = makeLensGlass(0.02, 0.1);
+    glass.material.color.setHex(0xb0c4d8);
+    glass.position.set(0, 0.032, -0.028);
+    const batt = makeBox(0.018, 0.028, 0.028, blk2, 0.04, 0.03, 0.0);
+    const hoodLip = makeBox(0.062, 0.005, 0.01, blk, 0, 0.056, 0.02);
+    g.add(mount, sideL, sideR, top, frontBot, frontL, frontR, glass, batt, hoodLip);
   } else if (profile === "acog") {
     // Longer tube + eye relief; open aperture; HUD chevron when ADS
     const mount = makeBox(0.038, 0.014, 0.09, 0x3a4558, 0, 0.007, 0.01);
@@ -1240,7 +1248,7 @@ function updateHudHint() {
     hint.textContent = "";
     hint.innerHTML = `Debugger open — <kbd>C</kbd> close · <kbd>G</kbd> guns`;
   } else {
-    hint.innerHTML = `<kbd>C</kbd> Debugger · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Alt</kbd> breath · LMB fire (aim=camera)`;
+    hint.innerHTML = `<kbd>C</kbd> Debugger · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire (aim=camera)`;
   }
 }
 
@@ -1327,10 +1335,6 @@ function onKeyDown(e) {
       if (state.lookPickup && !e.repeat) tryEquipLooked();
     }
     if (k === " " || code === "Space") {
-      fireWeapon();
-      e.preventDefault();
-    }
-    if (code === "AltLeft" || code === "AltRight") {
       input.holdBreath = true;
       e.preventDefault();
     }
@@ -1403,7 +1407,7 @@ function onKeyUp(e) {
   if (code === "ShiftLeft" || code === "ShiftRight") input.sprint = false;
   if (code === "KeyQ") input.leanLeft = false;
   if (code === "KeyE") input.leanRight = false;
-  if (code === "AltLeft" || code === "AltRight") input.holdBreath = false;
+  if (code === "Space") input.holdBreath = false;
 }
 
 function onMouseDown(e) {

@@ -88,3 +88,7 @@ Unity, Unreal, custom engines — same loop. Only the glue changes (see [engine 
 3. **Explicit contracts** for forward axis and rotation labels.
 4. **Optic-specific ADS poses** over endless FOV hacks.
 5. **Sight picture ↔ impact** whenever you advertise precision.
+
+## Math
+
+Formulas and a portable TypeScript module: [07-math.md](07-math.md), [`reference/viewmodel_math.ts`](../reference/viewmodel_math.ts).

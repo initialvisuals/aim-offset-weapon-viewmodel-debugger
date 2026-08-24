@@ -90,6 +90,8 @@ Whatever you choose, **document it**, then use aim-offset tuning so the **visibl
 | [`docs/04-frame-pipeline.md`](docs/04-frame-pipeline.md) | Pseudocode for one frame |
 | [`docs/05-engine-glue.md`](docs/05-engine-glue.md) | Unity / Unreal / custom checklists |
 | [`docs/06-contracts-and-gotchas.md`](docs/06-contracts-and-gotchas.md) | Axes, defaults, retune hazards |
+| [`docs/07-math.md`](docs/07-math.md) | Shared formulas (lerp, slerp, optic select, aim vs muzzle) |
+| [`reference/`](reference/) | Portable TypeScript math module |
 | [`schemas/`](schemas/) | JSON Schema |
 | [`examples/`](examples/) | Generic TOML/JSON samples |
 
@@ -100,6 +102,7 @@ Whatever you choose, **document it**, then use aim-offset tuning so the **visibl
 3. Implement the [frame pipeline](docs/04-frame-pipeline.md) in your engine.
 4. Add the [tuner UX](docs/03-tuner-ux.md) (IMGUI, egui, UMG, Editor window — your call).
 5. Keep [contracts](docs/06-contracts-and-gotchas.md) taped above your monitor.
+6. Implement against [math](docs/07-math.md) / [`reference/viewmodel_math.ts`](reference/viewmodel_math.ts).
 
 ## What this is not
 
@@ -107,7 +110,7 @@ Whatever you choose, **document it**, then use aim-offset tuning so the **visibl
 - Not a dump of any proprietary game project
 - Not mesh / animation / IP packs
 
-Optional tiny language cores or engine adapters can come later if people want them. The portable value is the **workflow + schema**.
+The portable value is the **workflow + schema + math**. Engine UI adapters can come later; the formulas are already here.
 
 ## License
 

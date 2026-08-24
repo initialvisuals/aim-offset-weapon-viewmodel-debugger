@@ -1391,6 +1391,93 @@ function makeBarrel(r, h, x, y, z, color = 0x3d4a3a) {
   return mesh;
 }
 
+/** Tan canvas bag — simple stacked boxes for the firing-line stall. */
+function makeSandbagMat(color) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.93,
+    metalness: 0.02,
+  });
+}
+
+function makeSandbag(w, h, d, x, y, z, rotY, color) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), makeSandbagMat(color));
+  mesh.position.set(x, y, z);
+  mesh.rotation.y = rotY || 0;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/**
+ * Brick-pattern stack sitting on the floor at (cx, cz).
+ * Slight size/yaw variation so it reads as bags, not one crate.
+ */
+function makeSandbagStack(cx, cz, opts = {}) {
+  const group = new THREE.Group();
+  group.position.set(cx, FLOOR_Y, cz);
+  group.rotation.y = opts.rotY || 0;
+  const bagW = opts.bagW != null ? opts.bagW : 0.50;
+  const bagH = opts.bagH != null ? opts.bagH : 0.155;
+  const bagD = opts.bagD != null ? opts.bagD : 0.30;
+  const rows = opts.rows != null ? opts.rows : 5;
+  const cols = opts.cols != null ? opts.cols : 2;
+  const tans = [0xcbb58a, 0xc2aa7c, 0xd4c094, 0xb89d70, 0xc8b082];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const brick = (r % 2) * 0.10;
+      const w = bagW * (0.96 + ((r + c) % 3) * 0.025);
+      const d = bagD * (0.94 + ((r * 2 + c) % 3) * 0.03);
+      const lx = ((r + c) % 2) * 0.025 - 0.012;
+      const ly = bagH * 0.5 + r * bagH * 0.97;
+      const lz = (c - (cols - 1) * 0.5) * (bagD * 0.90) + brick;
+      const yaw = ((r * 3 + c * 5) % 7 - 3) * 0.035;
+      const color = tans[(r + c * 3) % tans.length];
+      group.add(makeSandbag(w, bagH, d, lx, ly, lz, yaw, color));
+    }
+  }
+  return group;
+}
+
+/** Low timber rest in front of bags — short, side-bay only (not a lane barrier). */
+function makeStallBench(cx, cz, seatW = 1.1) {
+  const group = new THREE.Group();
+  group.position.set(cx, FLOOR_Y, cz);
+  const woodTex = makeWoodTexture();
+  const plank = new THREE.MeshStandardMaterial({
+    map: woodTex,
+    color: 0x9a7548,
+    roughness: 0.86,
+    metalness: 0.04,
+  });
+  const postMat = new THREE.MeshStandardMaterial({
+    map: woodTex,
+    color: 0x6e5030,
+    roughness: 0.9,
+    metalness: 0.03,
+  });
+  const seatH = 0.065;
+  const seatD = 0.20;
+  const seatY = 0.40;
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(seatW, seatH, seatD), plank);
+  seat.position.set(0, seatY, 0);
+  seat.castShadow = true;
+  seat.receiveShadow = true;
+  group.add(seat);
+  const legH = seatY - seatH * 0.5;
+  const inset = seatW * 0.38;
+  for (const dx of [-inset, inset]) {
+    for (const dz of [-0.06, 0.06]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.055, legH, 0.055), postMat);
+      leg.position.set(dx, legH * 0.5, dz);
+      leg.castShadow = true;
+      leg.receiveShadow = true;
+      group.add(leg);
+    }
+  }
+  return group;
+}
+
 /** Optional matOpts: { roughness, metalness } — metal vs polymer separation on guns. */
 function makeBox(w, h, d, color, x, y, z, matOpts = null) {
   const geo = new THREE.BoxGeometry(w, h, d);
@@ -1781,6 +1868,7 @@ function buildRoom() {
 
   buildOpticsTable();
   buildRangeProps();
+  buildFiringLineStall();
   try {
     buildRangeFloodlights();
   } catch (err) {
@@ -2038,6 +2126,19 @@ function buildRangeProps() {
   ];
   for (const place of placements) place();
 }
+
+/** Firing-line stall near spawn: side sandbags + low benches so the bay reads as a stall, not an empty road. */
+function buildFiringLineStall() {
+  // z ~0 to -4, |x| ~3.2 — inside the ±5.5 rails, clear of optic table (~±0.83 / z~-1.6)
+  // and the walkable lane center. Flood pools start ~25 m downrange.
+  addLeanSolid(makeSandbagStack(-3.15, -0.20, { rotY: 0.04 }));
+  addLeanSolid(makeSandbagStack(-3.28, -2.35, { rotY: -0.06 }));
+  addLeanSolid(makeSandbagStack(3.18, -0.35, { rotY: -0.05 }));
+  addLeanSolid(makeSandbagStack(3.32, -2.50, { rotY: 0.07 }));
+  addLeanSolid(makeStallBench(-3.20, -3.35, 1.15));
+  addLeanSolid(makeStallBench(3.24, -3.48, 1.12));
+}
+
 
 /** Shared radial CanvasTextures for fake flood floor pools (warm spill). */
 let _floodPoolTex = null;

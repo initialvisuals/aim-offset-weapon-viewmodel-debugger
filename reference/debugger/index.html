@@ -270,6 +270,27 @@
       </div>
 
       <div class="settings-section">
+        <h3>FX</h3>
+        <label class="slider-row">Hole cap
+          <input type="range" id="holeCapSlider" min="20" max="400" step="1" value="120" />
+          <code id="holeCapVal">120</code>
+        </label>
+        <label class="slider-row">Casing cap
+          <input type="range" id="casingCapSlider" min="10" max="250" step="1" value="80" />
+          <code id="casingCapVal">80</code>
+        </label>
+        <label class="slider-row">Hole fade (s)
+          <input type="range" id="holeFadeSlider" min="0" max="60" step="1" value="18" />
+          <code id="holeFadeVal">18s</code>
+        </label>
+        <label class="slider-row">Casing fade (s)
+          <input type="range" id="casingFadeSlider" min="0" max="60" step="1" value="12" />
+          <code id="casingFadeVal">12s</code>
+        </label>
+        <p class="note">Env / silhouette holes FIFO-cap and optionally expire. Paper-target holes stay until table reset. Berm popups still clear on hide. Casings sleep, then expire (0 = until the cap recycles). Lowering a cap trims oldest immediately.</p>
+      </div>
+
+      <div class="settings-section">
         <h3>Lighting</h3>
         <label class="slider-row">Clock
           <input type="range" id="todSlider" min="0" max="24" step="0.05" value="18.5" />
@@ -379,7 +400,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / reset-targets button (weapons + optics; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · Lighting (clock + intensities) · Fog near/far · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + intensities) · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -387,6 +408,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v13"></script>
+    <script type="module" src="app.js?v=20260824v14"></script>
 </body>
 </html>

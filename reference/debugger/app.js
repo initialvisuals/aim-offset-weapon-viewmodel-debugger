@@ -228,6 +228,14 @@ const state = {
   lightMoonMul: 1,
   /** Multiplier on ToD ACES exposure (1.00 = authored clock). */
   exposureMul: 1,
+  /** Env/scuff + non-paper punch hole FIFO cap. Paper holes use PAPER_DECAL_MAX. */
+  holeCap: 120,
+  /** Brass casing FIFO cap. */
+  casingCap: 80,
+  /** Seconds after spawn before env/scuff holes despawn. 0 = FIFO only. */
+  holeFade: 18,
+  /** Seconds after a casing sleeps before despawn. 0 = stay until cap recycles. */
+  casingFade: 12,
 };
 
 const LOOK_SENS_BASE = 0.0022;
@@ -932,6 +940,63 @@ function setFogFar(v, { toast = false } = {}) {
   if (toast) showToast(`Fog far ${Math.round(state.fogFar)}`);
 }
 
+function formatFadeLabel(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return "never";
+  return `${Math.round(n)}s`;
+}
+
+function syncFxSettingsUI() {
+  const holeCapSlider = el("holeCapSlider");
+  const holeCapVal = el("holeCapVal");
+  if (holeCapSlider && document.activeElement !== holeCapSlider) holeCapSlider.value = String(state.holeCap);
+  if (holeCapVal) holeCapVal.textContent = String(Math.round(state.holeCap));
+  const casingCapSlider = el("casingCapSlider");
+  const casingCapVal = el("casingCapVal");
+  if (casingCapSlider && document.activeElement !== casingCapSlider) casingCapSlider.value = String(state.casingCap);
+  if (casingCapVal) casingCapVal.textContent = String(Math.round(state.casingCap));
+  const holeFadeSlider = el("holeFadeSlider");
+  const holeFadeVal = el("holeFadeVal");
+  if (holeFadeSlider && document.activeElement !== holeFadeSlider) holeFadeSlider.value = String(state.holeFade);
+  if (holeFadeVal) holeFadeVal.textContent = formatFadeLabel(state.holeFade);
+  const casingFadeSlider = el("casingFadeSlider");
+  const casingFadeVal = el("casingFadeVal");
+  if (casingFadeSlider && document.activeElement !== casingFadeSlider) casingFadeSlider.value = String(state.casingFade);
+  if (casingFadeVal) casingFadeVal.textContent = formatFadeLabel(state.casingFade);
+}
+
+function setHoleCap(v, { toast = false } = {}) {
+  state.holeCap = Math.round(clamp(parseFloat(v), IMPACT_DECAL_CAP_MIN, IMPACT_DECAL_CAP_MAX));
+  if (!Number.isFinite(state.holeCap)) state.holeCap = IMPACT_DECAL_MAX;
+  trimImpactDecals();
+  syncFxSettingsUI();
+  if (toast) showToast(`Hole cap ${state.holeCap}`);
+}
+
+function setCasingCap(v, { toast = false } = {}) {
+  state.casingCap = Math.round(clamp(parseFloat(v), CASING_CAP_MIN, CASING_CAP_MAX));
+  if (!Number.isFinite(state.casingCap)) state.casingCap = CASING_MAX;
+  trimCasings();
+  syncFxSettingsUI();
+  if (toast) showToast(`Casing cap ${state.casingCap}`);
+}
+
+function setHoleFade(v, { toast = false } = {}) {
+  state.holeFade = Math.round(clamp(parseFloat(v), 0, HOLE_FADE_MAX));
+  if (!Number.isFinite(state.holeFade)) state.holeFade = HOLE_FADE_SEC;
+  expireImpactDecals();
+  syncFxSettingsUI();
+  if (toast) showToast(state.holeFade <= 0 ? "Hole fade off (FIFO)" : `Hole fade ${state.holeFade}s`);
+}
+
+function setCasingFade(v, { toast = false } = {}) {
+  state.casingFade = Math.round(clamp(parseFloat(v), 0, CASING_FADE_MAX));
+  if (!Number.isFinite(state.casingFade)) state.casingFade = CASING_FADE_SEC;
+  expireCasings();
+  syncFxSettingsUI();
+  if (toast) showToast(state.casingFade <= 0 ? "Casing fade off (cap)" : `Casing fade ${state.casingFade}s`);
+}
+
 function wrapHour(h) {
   const x = Number(h);
   if (!Number.isFinite(x)) return TOD_DEFAULT;
@@ -1343,6 +1408,8 @@ function syncSettingsUI() {
   if (todVal) todVal.textContent = formatClock(state.timeOfDay);
 
   Object.keys(LIGHT_MUL_UI).forEach(syncLightMulUI);
+
+  syncFxSettingsUI();
 }
 
 function renderGunList() {
@@ -1622,12 +1689,17 @@ let tracers = [];
 let impactSparks = [];
 /** Electrical spark cards from shot-out flood bulbs. */
 let bulbSparks = [];
-/** World impact marks — FIFO capped (walls / berm / silhouettes). */
+/** World impact marks — FIFO capped (walls / berm / silhouettes). Live cap in Settings. */
 let impactDecals = [];
-const IMPACT_DECAL_MAX = 50;
+const IMPACT_DECAL_MAX = 120;
+const IMPACT_DECAL_CAP_MIN = 20;
+const IMPACT_DECAL_CAP_MAX = 400;
+/** Seconds after spawn; 0 = FIFO only. Paper holes never use this TTL. */
+const HOLE_FADE_SEC = 18;
+const HOLE_FADE_MAX = 60;
 /** Paper-target holes — persist until table reset (not in the FIFO TTL pool). */
 let paperDecals = [];
-const PAPER_DECAL_MAX = 280;
+const PAPER_DECAL_MAX = 400;
 const _decalParentQ = new THREE.Quaternion();
 const _decalWorldQ = new THREE.Quaternion();
 const _decalLocal = new THREE.Vector3();
@@ -1640,9 +1712,13 @@ const VAULT_MIN_H = 0.38;
 const VAULT_MAX_H = 1.18;
 const VAULT_REACH = 1.45;
 const FLOOR_Y = -1.4;
-/** Ejected brass casings — FIFO-capped, sleep after one damped floor bounce. */
+/** Ejected brass casings — FIFO-capped, sleep after bounce, then optional TTL. */
 let casings = [];
-const CASING_MAX = 28;
+const CASING_MAX = 80;
+const CASING_CAP_MIN = 10;
+const CASING_CAP_MAX = 250;
+const CASING_FADE_SEC = 12;
+const CASING_FADE_MAX = 60;
 const CASING_GRAVITY = 12;
 /** Breakable beer bottles on the 15–25 m side benches. */
 let beerBottles = [];
@@ -3481,9 +3557,7 @@ function clearBermPopupDecals(fig) {
       }
     }
     if (!attached) continue;
-    if (mesh.parent) mesh.parent.remove(mesh);
-    if (mesh.material) mesh.material.dispose();
-    mesh.userData.bermPopup = null;
+    disposeImpactDecal(mesh);
     impactDecals.splice(i, 1);
   }
 }
@@ -4972,6 +5046,38 @@ function retireCasing(c) {
   if (c && c.mesh && c.mesh.parent) c.mesh.parent.remove(c.mesh);
 }
 
+function liveCasingCap() {
+  return Math.round(clamp(Number(state.casingCap) || CASING_MAX, CASING_CAP_MIN, CASING_CAP_MAX));
+}
+
+function liveCasingFade() {
+  const n = Number(state.casingFade);
+  return Number.isFinite(n) ? Math.max(0, n) : CASING_FADE_SEC;
+}
+
+function trimCasings() {
+  const cap = liveCasingCap();
+  while (casings.length > cap) {
+    const rec = casings.shift();
+    retireCasing(rec);
+  }
+}
+
+function expireCasings(nowMs) {
+  const fade = liveCasingFade();
+  if (fade <= 0) return;
+  const now = nowMs != null ? nowMs : performance.now();
+  const ttl = fade * 1000;
+  for (let i = casings.length - 1; i >= 0; i--) {
+    const c = casings[i];
+    if (!c || !c.sleeping || !c.sleepAt) continue;
+    if (now - c.sleepAt >= ttl) {
+      retireCasing(c);
+      casings.splice(i, 1);
+    }
+  }
+}
+
 /** Spawn a cheap brass casing from the receiver ejection port (live shots only). */
 function spawnCasing() {
   if (!scene || !ejectionPort || !camera) return;
@@ -4981,8 +5087,9 @@ function spawnCasing() {
   if (_right.lengthSq() < 1e-8) _right.set(1, 0, 0);
   else _right.normalize();
 
+  const cap = liveCasingCap();
   let rec;
-  if (casings.length >= CASING_MAX) {
+  if (casings.length >= cap) {
     rec = casings.shift();
     retireCasing(rec);
   } else {
@@ -4992,6 +5099,7 @@ function spawnCasing() {
       angVel: new THREE.Vector3(),
       bounced: false,
       sleeping: false,
+      sleepAt: 0,
     };
     rec.mesh.castShadow = false;
     rec.mesh.receiveShadow = true;
@@ -5011,12 +5119,15 @@ function spawnCasing() {
   );
   rec.bounced = false;
   rec.sleeping = false;
+  rec.sleepAt = 0;
+  if (rec.mesh) rec.mesh.visible = true;
   scene.add(rec.mesh);
   casings.push(rec);
 }
 
 function updateCasings(dt) {
   const floorY = FLOOR_Y + 0.016; // ~half of scaled casing height
+  const now = performance.now();
   for (let i = 0; i < casings.length; i++) {
     const c = casings[i];
     if (c.sleeping) continue;
@@ -5038,9 +5149,11 @@ function updateCasings(dt) {
         c.vel.set(0, 0, 0);
         c.angVel.set(0, 0, 0);
         c.sleeping = true;
+        c.sleepAt = now;
       }
     }
   }
+  expireCasings(now);
 }
 
 /** Mild horizontal walk (SMG AUTO). Pattern index resets after RECOIL_RESET_MS idle. */
@@ -5434,7 +5547,8 @@ function clearBulbSparks() {
 /**
  * Dark scorch / punch mark as a small plane on the surface.
  * kind: "punch" (targets) | "scuff" (floor / berm / walls).
- * Caps at IMPACT_DECAL_MAX via FIFO recycle.
+ * Env/scuff + non-paper punches cap via Settings hole cap (FIFO) + optional TTL.
+ * Sticky paper-target holes persist until table reset (PAPER_DECAL_MAX only).
  */
 function makeImpactDecalMesh(isPunch) {
   return new THREE.Mesh(
@@ -5453,10 +5567,52 @@ function makeImpactDecalMesh(isPunch) {
   );
 }
 
+function liveHoleCap() {
+  return Math.round(clamp(Number(state.holeCap) || IMPACT_DECAL_MAX, IMPACT_DECAL_CAP_MIN, IMPACT_DECAL_CAP_MAX));
+}
+
+function liveHoleFade() {
+  const n = Number(state.holeFade);
+  return Number.isFinite(n) ? Math.max(0, n) : HOLE_FADE_SEC;
+}
+
+function disposeImpactDecal(mesh) {
+  if (!mesh) return;
+  if (mesh.parent) mesh.parent.remove(mesh);
+  if (mesh.material) mesh.material.dispose();
+  if (mesh.userData) mesh.userData.bermPopup = null;
+}
+
+function trimImpactDecals() {
+  const cap = liveHoleCap();
+  while (impactDecals.length > cap) {
+    const mesh = impactDecals.shift();
+    disposeImpactDecal(mesh);
+  }
+}
+
+function expireImpactDecals(nowMs) {
+  const fade = liveHoleFade();
+  if (fade <= 0) return;
+  const now = nowMs != null ? nowMs : performance.now();
+  const ttl = fade * 1000;
+  for (let i = impactDecals.length - 1; i >= 0; i--) {
+    const mesh = impactDecals[i];
+    if (!mesh || (mesh.userData && mesh.userData.paperPersist)) continue;
+    const born = (mesh.userData && mesh.userData.born) || 0;
+    if (now - born >= ttl) {
+      disposeImpactDecal(mesh);
+      impactDecals.splice(i, 1);
+    }
+  }
+}
+
 function recycleDecalFrom(list, isPunch) {
   const mesh = list.shift();
   if (mesh.parent) mesh.parent.remove(mesh);
+  mesh.visible = true;
   mesh.userData.bermPopup = null;
+  mesh.userData.born = performance.now();
   mesh.material.color.setHex(isPunch ? 0x1a1a1a : 0x14100c);
   mesh.material.map = getImpactHoleTexture(isPunch);
   mesh.material.opacity = isPunch ? 0.9 : 0.78;
@@ -5480,7 +5636,8 @@ function spawnImpactDecal(pos, normal, kind, opts) {
     mesh.userData.paperPersist = true;
     mesh.userData.bermPopup = null;
   } else {
-    if (impactDecals.length >= IMPACT_DECAL_MAX) mesh = recycleDecalFrom(impactDecals, isPunch);
+    const cap = liveHoleCap();
+    if (impactDecals.length >= cap) mesh = recycleDecalFrom(impactDecals, isPunch);
     else mesh = makeImpactDecalMesh(isPunch);
     mesh.renderOrder = 3;
     mesh.userData.paperPersist = false;
@@ -5502,6 +5659,8 @@ function spawnImpactDecal(pos, normal, kind, opts) {
     mesh.position.copy(pos).addScaledVector(_impactN, 0.012);
     scene.add(mesh);
   }
+  mesh.visible = true;
+  mesh.userData.born = performance.now();
   if (paper) paperDecals.push(mesh);
   else impactDecals.push(mesh);
 }
@@ -5578,6 +5737,7 @@ function updateImpactFX(dt) {
       impactSparks.splice(i, 1);
     }
   }
+  expireImpactDecals();
 }
 
 function updateTracers(dt) {
@@ -6825,6 +6985,16 @@ function bind() {
     slider.oninput = (e) => setLightMul(key, e.target.value);
     syncLightMulUI(key);
   });
+
+  const holeCapSlider = el("holeCapSlider");
+  if (holeCapSlider) holeCapSlider.oninput = (e) => setHoleCap(e.target.value);
+  const casingCapSlider = el("casingCapSlider");
+  if (casingCapSlider) casingCapSlider.oninput = (e) => setCasingCap(e.target.value);
+  const holeFadeSlider = el("holeFadeSlider");
+  if (holeFadeSlider) holeFadeSlider.oninput = (e) => setHoleFade(e.target.value);
+  const casingFadeSlider = el("casingFadeSlider");
+  if (casingFadeSlider) casingFadeSlider.oninput = (e) => setCasingFade(e.target.value);
+  syncFxSettingsUI();
 
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);

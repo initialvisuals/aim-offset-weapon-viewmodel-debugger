@@ -2013,6 +2013,56 @@ function buildRangeProps() {
   for (const place of placements) place();
 }
 
+/** Shared radial CanvasTextures for fake flood floor pools (warm spill). */
+let _floodPoolTex = null;
+let _floodPoolCoreTex = null;
+
+function makeFloodPoolRadialTexture(centerAlpha = 0.85) {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const c = size * 0.5;
+  const g = ctx.createRadialGradient(c, c, 0, c, c, c);
+  // Center warm #ffe2b0 → edge alpha 0 so AdditiveBlending reads as a bright pool, not a grey smudge.
+  g.addColorStop(0, `rgba(255, 226, 176, ${centerAlpha})`);
+  g.addColorStop(0.28, `rgba(255, 210, 140, ${centerAlpha * 0.55})`);
+  g.addColorStop(0.55, `rgba(255, 185, 100, ${centerAlpha * 0.22})`);
+  g.addColorStop(0.82, `rgba(255, 170, 80, ${centerAlpha * 0.06})`);
+  g.addColorStop(1, "rgba(255, 226, 176, 0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function getFloodPoolTexture(kind = "outer") {
+  if (kind === "core") {
+    if (!_floodPoolCoreTex) _floodPoolCoreTex = makeFloodPoolRadialTexture(0.95);
+    return _floodPoolCoreTex;
+  }
+  if (!_floodPoolTex) _floodPoolTex = makeFloodPoolRadialTexture(0.85);
+  return _floodPoolTex;
+}
+
+function makeFloodPoolMaterial(map) {
+  const mat = new THREE.MeshBasicMaterial({
+    map,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    opacity: 1,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+  if ("toneMapped" in mat) mat.toneMapped = false;
+  return mat;
+}
+
 /**
  * Cheap range floodlight: steel post + arm + glowing fixture head.
  * Uses a warm PointLight (reliable on MeshStandard) plus a large soft fake
@@ -2079,27 +2129,36 @@ function makeFloodlight(x, z, opts = {}) {
   group.add(light);
   light.userData.floodIntBase = intensity;
 
-  // Soft fake lit pool on the floor (visual only — no raycast / lean).
-  const poolW = opts.poolW != null ? opts.poolW : 22;
-  const poolD = opts.poolD != null ? opts.poolD : 16;
-  const aimZ = opts.aimZ != null ? opts.aimZ - z : -22;
+  // High-contrast additive floor pool under the fixture (visual only — no raycast / lean).
+  const poolR = opts.poolRadius != null ? opts.poolRadius : 14;
+  const poolInward = opts.poolInward != null ? opts.poolInward : 5;
+  const poolX = inward * poolInward;
+  const poolY = 0.03;
+  const poolZ = opts.poolZ != null ? opts.poolZ : 0; // under the light, not aimZ*0.35 downrange
+
   const pool = new THREE.Mesh(
-    new THREE.PlaneGeometry(poolW, poolD),
-    new THREE.MeshBasicMaterial({
-      color: 0xffd9a8,
-      transparent: true,
-      opacity: opts.poolOpacity != null ? opts.poolOpacity : 0.16,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-      side: THREE.DoubleSide,
-    })
+    new THREE.CircleGeometry(poolR, 48),
+    makeFloodPoolMaterial(getFloodPoolTexture("outer"))
   );
   pool.rotation.x = -Math.PI / 2;
-  pool.position.set(inward * 5.5, 0.02, aimZ * 0.35);
+  pool.position.set(poolX, poolY, poolZ);
+  pool.renderOrder = 3;
   pool.raycast = () => {};
   group.add(pool);
+
+  // Tighter hot core so the spill stays readable from spawn.
+  const coreR = opts.poolCoreRadius != null ? opts.poolCoreRadius : poolR * 0.32;
+  if (coreR > 0.5) {
+    const core = new THREE.Mesh(
+      new THREE.CircleGeometry(coreR, 32),
+      makeFloodPoolMaterial(getFloodPoolTexture("core"))
+    );
+    core.rotation.x = -Math.PI / 2;
+    core.position.set(poolX, poolY + 0.005, poolZ);
+    core.renderOrder = 4;
+    core.raycast = () => {};
+    group.add(core);
+  }
 
   return { group, light };
 }
@@ -2107,12 +2166,13 @@ function makeFloodlight(x, z, opts = {}) {
 /** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m — PointLights + fake pools. */
 function buildRangeFloodlights() {
   floodLights = [];
-  // PointLight intensity/distance sized to read on MeshStandard; pool discs sell the spill.
+  // PointLight intensity/distance sized to read on MeshStandard; additive radial discs sell the spill.
+  // Nearest post bumped (~18 m) so spawn looking downrange sees an obvious warm pool; others 12–16 m.
   const posts = [
-    { x: -9.2, z: -25, aimZ: -48, intensity: 48, distance: 45, poolW: 20, poolD: 14, poolOpacity: 0.18 },
-    { x: 9.4, z: -80, aimZ: -108, intensity: 58, distance: 52, poolW: 22, poolD: 16, poolOpacity: 0.16 },
-    { x: -9.2, z: -160, aimZ: -200, intensity: 68, distance: 56, poolW: 24, poolD: 18, poolOpacity: 0.15 },
-    { x: 9.4, z: -280, aimZ: -335, intensity: 78, distance: 60, poolW: 26, poolD: 18, poolOpacity: 0.14 },
+    { x: -9.2, z: -25, intensity: 48, distance: 45, poolRadius: 18, poolCoreRadius: 6.5, poolInward: 5.5 },
+    { x: 9.4, z: -80, intensity: 58, distance: 52, poolRadius: 15, poolCoreRadius: 5, poolInward: 5.2 },
+    { x: -9.2, z: -160, intensity: 68, distance: 56, poolRadius: 14, poolCoreRadius: 4.5, poolInward: 5 },
+    { x: 9.4, z: -280, intensity: 78, distance: 60, poolRadius: 13, poolCoreRadius: 4.2, poolInward: 5 },
   ];
   for (const p of posts) {
     const { group, light } = makeFloodlight(p.x, p.z, p);

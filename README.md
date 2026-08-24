@@ -1,8 +1,33 @@
 # Aim Offset / Weapon Viewmodel Debugger
 
-**Engine-agnostic docs, schemas, and examples** for live first-person weapon pose tuning — hip fire, iron ADS, optic-specific ADS, and attachment mounts.
+Live-tune first-person **weapon hold poses** (hip, ADS, optics, attachments) so the gun on screen keeps the same promise as your bullets.
 
-This is a **general knowledge-share module** for FPS work in any engine (Unity, Unreal, Source-likes, custom / personal engines). It is not a drop-in plugin or a standalone app. The portable value is the **problem framing, data model, tuner workflow, and frame pipeline** so you can build the same tool inside *your* game.
+**Knowledge share for any FPS stack** — Unity, Unreal, Source-likes, custom engines. Not a plugin. Docs + math + schemas + a small reference tuner UI you can rebuild in your own tools.
+
+### Start here
+
+| Want… | Go |
+|-------|-----|
+| The problem in plain language | [Overview](docs/01-overview.md) |
+| Formulas that render on GitHub | [Math reference](docs/07-math.md) |
+| Clickable two-tab tuner layout | [Reference debugger](reference/debugger/) (`index.html`) |
+| Data shape / JSON Schema | [Data model](docs/02-data-model.md) · [schemas/](schemas/) |
+| Hotkeys & panel contract | [Tuner UX](docs/03-tuner-ux.md) |
+| Unity / Unreal / custom checklist | [Engine glue](docs/05-engine-glue.md) |
+
+### Share blurb (copy/paste)
+
+> FPS games often lie quietly: the camera aims one way, the iron sights sit another, and the muzzle / tracer tells a third story. This repo is an engine-agnostic knowledge share for **aim-offset / viewmodel tuning** — the data model, math, tuner workflow, and a small two-tab reference UI — so sight picture and trajectory stay honest. Works as a blueprint for Unity, Unreal, or a personal engine.
+
+### What’s in the box
+
+- Problem framing: camera aim vs viewmodel vs muzzle / trajectory  
+- Philosophy: iron-sight accuracy promise, aesthetics vs honesty, all-FPS  
+- Schemas + generic JSON/TOML examples  
+- Portable math module (TypeScript)  
+- Browser **View tuning / Attachments** reference debugger  
+
+---
 
 ## Why this exists
 

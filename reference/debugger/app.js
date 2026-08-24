@@ -627,7 +627,7 @@ function applyDisplayLook() {
   if (fillLight) fillLight.intensity = FILL_INT_BASE * lightMul;
   if (rimLight) rimLight.intensity = RIM_INT_BASE * lightMul;
   for (const L of floodLights) {
-    const base = (L.userData && L.userData.floodIntBase) || 2000;
+    const base = (L.userData && L.userData.floodIntBase) || 55;
     L.intensity = base * lightMul;
   }
 
@@ -917,7 +917,7 @@ function nudgeSelected(sign) {
 let renderer, camera, scene, holdRoot, gunRoot;
 /** Kept so Settings brightness/gamma can nudge intensities + fog. */
 let hemiLight, ambLight, keyLight, fillLight, rimLight;
-/** Side-bay SpotLights (no shadows) so the long lane reads at night. */
+/** Side-bay flood PointLights (+ fake floor pools) so the long lane reads at night. */
 let floodLights = [];
 const SCENE_BG_BASE = 0x1c2430;
 const HEMI_INT_BASE = 0.78;
@@ -1722,7 +1722,7 @@ function buildRoom() {
   const floorTex = makeDirtConcreteTexture(6, 50);
   const floorMat = new THREE.MeshStandardMaterial({
     map: floorTex,
-    color: 0xd8e0ea,
+    color: 0xe6eef6,
     roughness: 0.92,
     metalness: 0.04,
   });
@@ -2014,10 +2014,9 @@ function buildRangeProps() {
 }
 
 /**
- * Cheap range floodlight: steel post + arm + fixture head, plus a warm SpotLight
- * aimed at the lane floor / targets. Shadows off to stay cheap.
- * Three.js r170 SpotLight intensity is candela (physical); pools need ~1e3–4e3 cd
- * with decay=2 so a ~15–40 m floor pool still reads against the key fill.
+ * Cheap range floodlight: steel post + arm + glowing fixture head.
+ * Uses a warm PointLight (reliable on MeshStandard) plus a large soft fake
+ * floor pool disc so lanes read even when realtime lights struggle vs fog/albedo.
  */
 function makeFloodlight(x, z, opts = {}) {
   const inward = x >= 0 ? -1 : 1;
@@ -2033,7 +2032,7 @@ function makeFloodlight(x, z, opts = {}) {
     roughness: 0.48,
     metalness: 0.55,
     emissive: 0xffc070,
-    emissiveIntensity: 0.42,
+    emissiveIntensity: 0.9,
   });
 
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.12, 8), steelDark);
@@ -2071,30 +2070,49 @@ function makeFloodlight(x, z, opts = {}) {
 
   group.add(base, post, arm, head, lamp);
 
-  const intensity = opts.intensity != null ? opts.intensity : 2000;
-  const distance = opts.distance != null ? opts.distance : 70;
-  // angle ~0.9 rad (~52°), soft penumbra; decay 2 matches physical SpotLight falloff.
-  const light = new THREE.SpotLight(0xffe0b8, intensity, distance, 0.9, 0.7, 2);
+  const intensity = opts.intensity != null ? opts.intensity : 55;
+  const distance = opts.distance != null ? opts.distance : 50;
+  // PointLight reads more reliably than Spot on dark MeshStandard + fog.
+  const light = new THREE.PointLight(0xffe0b8, intensity, distance, 2);
   light.castShadow = false;
   light.position.set(headX, headY - 0.06, -0.04);
-  const aimZ = opts.aimZ != null ? opts.aimZ - z : -22;
-  // Toward lane center on the floor (group y=0 == FLOOR_Y), side-aimed so spawn VM isn’t washed.
-  light.target.position.set(inward * 7.5, 0.05, aimZ);
   group.add(light);
-  group.add(light.target);
   light.userData.floodIntBase = intensity;
+
+  // Soft fake lit pool on the floor (visual only — no raycast / lean).
+  const poolW = opts.poolW != null ? opts.poolW : 22;
+  const poolD = opts.poolD != null ? opts.poolD : 16;
+  const aimZ = opts.aimZ != null ? opts.aimZ - z : -22;
+  const pool = new THREE.Mesh(
+    new THREE.PlaneGeometry(poolW, poolD),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd9a8,
+      transparent: true,
+      opacity: opts.poolOpacity != null ? opts.poolOpacity : 0.16,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+      side: THREE.DoubleSide,
+    })
+  );
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.set(inward * 5.5, 0.02, aimZ * 0.35);
+  pool.raycast = () => {};
+  group.add(pool);
+
   return { group, light };
 }
 
-/** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m — 4 extra lights, no shadows. */
+/** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m — PointLights + fake pools. */
 function buildRangeFloodlights() {
   floodLights = [];
-  // Intensities in candela (r170); distance sized for ~15–40 m readable floor pools.
+  // PointLight intensity/distance sized to read on MeshStandard; pool discs sell the spill.
   const posts = [
-    { x: -9.2, z: -25, aimZ: -48, intensity: 1600, distance: 52 },
-    { x: 9.4, z: -80, aimZ: -108, intensity: 2100, distance: 68 },
-    { x: -9.2, z: -160, aimZ: -200, intensity: 2700, distance: 82 },
-    { x: 9.4, z: -280, aimZ: -335, intensity: 3400, distance: 100 },
+    { x: -9.2, z: -25, aimZ: -48, intensity: 48, distance: 45, poolW: 20, poolD: 14, poolOpacity: 0.18 },
+    { x: 9.4, z: -80, aimZ: -108, intensity: 58, distance: 52, poolW: 22, poolD: 16, poolOpacity: 0.16 },
+    { x: -9.2, z: -160, aimZ: -200, intensity: 68, distance: 56, poolW: 24, poolD: 18, poolOpacity: 0.15 },
+    { x: 9.4, z: -280, aimZ: -335, intensity: 78, distance: 60, poolW: 26, poolD: 18, poolOpacity: 0.14 },
   ];
   for (const p of posts) {
     const { group, light } = makeFloodlight(p.x, p.z, p);

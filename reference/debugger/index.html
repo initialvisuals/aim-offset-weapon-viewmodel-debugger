@@ -349,6 +349,11 @@
           <code id="bloomVal">0.22</code>
         </label>
         <p class="note">HDR glow on floods, muzzle, sun, hot barrels, and tracers. Walls and floor stay put. Independent of god rays. 0 = skip the pass.</p>
+        <label class="slider-row">Dither
+          <input type="range" id="ditherSlider" min="0" max="0.08" step="0.001" value="0.025" />
+          <code id="ditherVal">0.025</code>
+        </label>
+        <p class="note">Final-output noise floor after tone map. Hides banding without a grain look. Night lifts crushed scene a hair; sky stays black. 0 = skip the pass.</p>
         <label class="slider-row">Barrel heat
           <input type="range" id="barrelHeatSlider" min="0" max="2" step="0.01" value="1.00" />
           <code id="barrelHeatVal">1.00</code>
@@ -447,7 +452,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + dither + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -455,6 +460,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v25"></script>
+    <script type="module" src="app.js?v=20260824v26"></script>
 </body>
 </html>

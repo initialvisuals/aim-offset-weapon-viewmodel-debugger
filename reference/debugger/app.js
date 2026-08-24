@@ -184,6 +184,9 @@ const GOD_RAYS_STEPS = 48;
 const GOD_RAYS_DEFAULT = 0.9;
 /** Settings default; 0 skips the pass. */
 const BLOOM_DEFAULT = 0.22;
+/** Final-output IGN dither after ACES (luma units). 0 skips the pass. */
+const DITHER_DEFAULT = 0.025;
+const DITHER_MAX = 0.08;
 /** Mesh sun angular diameter (degrees). Real sun ~0.53; default a hair smaller. */
 const SUN_SIZE_DEFAULT = 0.45;
 /** HDR mul on ToD sun color for the mesh disc. 1.4 just kisses bloom threshold. */
@@ -325,6 +328,8 @@ const state = {
   godRays: GOD_RAYS_DEFAULT,
   /** HDR bloom (0 = off, 2 = strong). Independent of god rays. */
   bloom: BLOOM_DEFAULT,
+  /** Post-tonemap dither / noise floor (0 = off, 0.08 = strong). */
+  dither: DITHER_DEFAULT,
   /** ADS viewmodel DOF ring taps (plus center + half-radius inner ring). */
   adsDofTaps: ADS_DOF_TAPS_DEFAULT,
   /** ADS viewmodel DOF disc radius (UV x) at ads=1. */
@@ -1736,6 +1741,21 @@ function setBloom(v, { toast = false } = {}) {
   if (toast) showToast(`Bloom ${state.bloom.toFixed(2)}`);
 }
 
+function syncDitherUI() {
+  const n = state.dither ?? DITHER_DEFAULT;
+  const slider = el("ditherSlider");
+  const val = el("ditherVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(3);
+}
+
+function setDither(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, DITHER_MAX);
+  state.dither = Number.isFinite(n) ? n : DITHER_DEFAULT;
+  syncDitherUI();
+  if (toast) showToast(`Dither ${state.dither.toFixed(3)}`);
+}
+
 function syncAdsDofUI() {
   const taps = state.adsDofTaps ?? ADS_DOF_TAPS_DEFAULT;
   const tapsSlider = el("adsDofTapsSlider");
@@ -1958,6 +1978,7 @@ function syncSettingsUI() {
 
   syncGodRaysUI();
   syncBloomUI();
+  syncDitherUI();
   syncAdsDofUI();
   syncSunSizeUI();
   syncSunPunchUI();
@@ -2221,6 +2242,8 @@ let adsDof = null;
 let godRays = null;
 /** HDR scene RT + 3-mip dual-filter bloom (Jimenez-style). */
 let hdrBloom = null;
+/** Full-res HalfFloat capture for post-ACES IGN dither onto the 8-bit backbuffer. */
+let outputDither = null;
 /** Kept so Settings brightness/gamma can nudge intensities + fog. */
 let hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight;
 let sunDisc = null;
@@ -5911,7 +5934,8 @@ function restoreCameraLayers() {
 function renderScene() {
   const amount = adsDofAmount();
   const bloomOn = bloomWanted();
-  const dest = bloomOn ? hdrBloom.sceneRT : null;
+  const ditherOn = ditherWanted();
+  const dest = bloomOn ? hdrBloom.sceneRT : (ditherOn ? outputDither.rt : null);
   const prevTM = renderer.toneMapping;
   if (bloomOn) renderer.toneMapping = THREE.NoToneMapping;
 
@@ -5954,14 +5978,16 @@ function renderScene() {
     restoreCameraLayers();
   }
 
+  const out = ditherOn ? outputDither.rt : null;
   if (bloomOn) {
     renderer.toneMapping = prevTM;
-    renderBloom();
+    renderBloom(out);
   } else {
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(out);
     renderer.toneMapping = prevTM;
   }
-  renderGodRays();
+  renderGodRays(out);
+  if (ditherOn) renderOutputDither();
 }
 
 /* ---- Volumetric sun shafts (god rays) ----
@@ -6371,7 +6397,7 @@ function godRaysWanted() {
   return !!pickNightFlood();
 }
 
-function renderGodRays() {
+function renderGodRays(dest = null) {
   if (!godRays || !renderer || !scene || !camera) return;
   if (!godRaysWanted()) return;
 
@@ -6456,7 +6482,7 @@ function renderGodRays() {
   godRays.historyValid = true;
 
   godRays.compositeMat.uniforms.tVolume.value = godRays.historyRT.texture;
-  renderer.setRenderTarget(null);
+  renderer.setRenderTarget(dest);
   renderer.autoClear = false;
   renderer.setClearColor(godRays._clear, prevClearAlpha);
   renderer.render(godRays.fsScene, godRays.fsCam);
@@ -6470,8 +6496,9 @@ function renderGodRays() {
  * UnrealBloomPass fights logarithmicDepthBuffer / ACES and milks LDR.
  * Capture the scene (and ADS composite) to a HalfFloat RT with tone
  * mapping off, bright-pass at threshold ~1, dual-filter pyramid, then
- * add and ACES onto the backbuffer. God rays still composite after.
- * Slider 0 skips the capture so the direct ACES path stays untouched.
+ * add and ACES onto the backbuffer (or the dither capture). God rays
+ * still composite after. Slider 0 skips the capture so the direct
+ * ACES path stays untouched.
  */
 function makeBloomTarget(withDepth) {
   const rt = new THREE.WebGLRenderTarget(1, 1, {
@@ -6689,7 +6716,7 @@ function blitBloom(mat, target) {
   renderer.render(hdrBloom.fsScene, hdrBloom.fsCam);
 }
 
-function renderBloom() {
+function renderBloom(dest = null) {
   if (!hdrBloom || !renderer) return;
   const prevAutoClear = renderer.autoClear;
   renderer.getClearColor(hdrBloom._clear);
@@ -6726,8 +6753,132 @@ function renderBloom() {
   hdrBloom.compositeMat.uniforms.tBloom.value = low.texture;
   hdrBloom.compositeMat.uniforms.intensity.value = state.bloom;
   renderer.setClearColor(hdrBloom._clear, prevClearAlpha);
-  blitBloom(hdrBloom.compositeMat, null);
+  blitBloom(hdrBloom.compositeMat, dest);
 
+  renderer.autoClear = prevAutoClear;
+}
+
+/* ---- Final-output IGN dither ----
+ * After ACES (and bloom / shafts), capture in HalfFloat so the noise
+ * floor hits before 8-bit quantization. Animated IGN, not grain.
+ * Night: slightly stronger dither + a tiny toe on residual scene luma;
+ * true-black sky stays black.
+ */
+function ditherWanted() {
+  return !!(outputDither && (state.dither ?? 0) > 1e-4);
+}
+
+function ditherNightAmt() {
+  const pal = sampleTod(state.timeOfDay);
+  const path = sunPath(state.timeOfDay);
+  const fromElev = clamp((6 - path.elevDeg) / 10, 0, 1);
+  const fromClock = clamp((0.12 - (pal.sunI || 0)) / 0.12, 0, 1);
+  return Math.max(fromElev, fromClock);
+}
+
+function initOutputDither() {
+  const rt = new THREE.WebGLRenderTarget(1, 1, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    type: THREE.HalfFloatType,
+    format: THREE.RGBAFormat,
+    depthBuffer: true,
+    stencilBuffer: false,
+  });
+  rt.texture.colorSpace = THREE.LinearSRGBColorSpace;
+
+  const material = new THREE.ShaderMaterial({
+    name: "OutputDither",
+    uniforms: {
+      tInput: { value: null },
+      amount: { value: DITHER_DEFAULT },
+      nightAmt: { value: 0 },
+      frame: { value: 0 },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tInput;
+      uniform float amount;
+      uniform float nightAmt;
+      uniform float frame;
+      varying vec2 vUv;
+
+      float ign(vec2 p) {
+        return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+      }
+
+      void main() {
+        vec3 c = texture2D(tInput, vUv).rgb;
+        float luma = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+
+        // Toe only on pixels that already have some scene light — sky at 0 stays 0.
+        float gate = smoothstep(0.003, 0.040, luma);
+        float toe = nightAmt * 0.016 * luma / (luma + 0.05);
+        toe *= (1.0 - smoothstep(0.10, 0.38, luma));
+        c += vec3(toe * gate);
+
+        float n = ign(gl_FragCoord.xy);
+        n = fract(n + frame * 0.61803398875);
+        float n2 = ign(gl_FragCoord.xy + vec2(19.19, 47.47));
+        n2 = fract(n2 + frame * 0.38196601125);
+        float tri = n + n2 - 1.0;
+
+        float amp = amount * (1.0 + nightAmt * 0.45);
+        amp *= 1.0 - 0.30 * smoothstep(0.45, 0.95, luma);
+        c += vec3(tri * amp);
+
+        gl_FragColor = vec4(c, 1.0);
+        #include <colorspace_fragment>
+      }
+    `,
+    fog: false,
+    toneMapped: false,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  quad.frustumCulled = false;
+  const fsScene = new THREE.Scene();
+  fsScene.add(quad);
+  const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  outputDither = { rt, material, quad, fsScene, fsCam, frame: 0 };
+  resizeOutputDither();
+}
+
+function resizeOutputDither() {
+  if (!outputDither || !renderer) return;
+  const canvas = el("view3d");
+  const wrap = canvas && canvas.parentElement;
+  const w = (wrap && wrap.clientWidth) || (canvas && canvas.clientWidth) || window.innerWidth;
+  const h = (wrap && wrap.clientHeight) || (canvas && canvas.clientHeight) || window.innerHeight;
+  const pr = renderer.getPixelRatio();
+  const fw = Math.max(1, Math.floor(w * pr));
+  const fh = Math.max(1, Math.floor(h * pr));
+  outputDither.rt.setSize(fw, fh);
+}
+
+function renderOutputDither() {
+  if (!outputDither || !renderer) return;
+  const amt = state.dither ?? 0;
+  if (amt <= 1e-4) return;
+  const u = outputDither.material.uniforms;
+  u.tInput.value = outputDither.rt.texture;
+  u.amount.value = amt;
+  u.nightAmt.value = ditherNightAmt();
+  outputDither.frame = (outputDither.frame + 1) % 4096;
+  u.frame.value = outputDither.frame;
+  const prevAutoClear = renderer.autoClear;
+  renderer.autoClear = true;
+  renderer.setRenderTarget(null);
+  renderer.render(outputDither.fsScene, outputDither.fsCam);
   renderer.autoClear = prevAutoClear;
 }
 
@@ -6814,6 +6965,7 @@ function initThree() {
   initAdsDof();
   initGodRays();
   initHdrBloom();
+  initOutputDither();
   resize();
   applyDisplayLook();
   const ro = new ResizeObserver(() => resize());
@@ -6833,6 +6985,7 @@ function resize() {
   resizeAdsDof();
   resizeGodRays();
   resizeHdrBloom();
+  resizeOutputDither();
 }
 
 function applyAttachmentOffsets() {
@@ -9580,6 +9733,12 @@ function bind() {
     bloomSlider.oninput = (e) => setBloom(e.target.value);
   }
   syncBloomUI();
+  const ditherSlider = el("ditherSlider");
+  if (ditherSlider) {
+    ditherSlider.value = String(state.dither);
+    ditherSlider.oninput = (e) => setDither(e.target.value);
+  }
+  syncDitherUI();
   const barrelHeatSlider = el("barrelHeatSlider");
   if (barrelHeatSlider) {
     barrelHeatSlider.value = String(state.barrelHeat);

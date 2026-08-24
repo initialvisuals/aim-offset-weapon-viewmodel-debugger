@@ -18,7 +18,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 
 1. **3D viewport** — walkable room, optics table, procedural shooting range (circular bullseye lanes + side knockdown silhouette lane), first-person block guns, cyan aim ray (camera −Z), crosshair.
 2. **Player controls** (panel closed) — WASD, Shift sprint, mouse look, Q/E lean (full roll + lateral offset), tiny A/D strafe tilt only (~2.5% of lean max), RMB ADS, Alt hold-breath, LMB/Space fire.
-3. **ADS presentation** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), screen-space HUD reticle (holo dot / ACOG chevron / sniper mil-cross), peripheral tube frame + vignette for magnified optics. Iron uses 3D front-post / rear-notch geometry. Attachment offsets still move the optic mesh on the gun for hip/inspection.
+3. **ADS presentation** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), screen-space HUD reticle (holo dot / ACOG chevron / sniper mil-cross), peripheral tube frame + vignette for magnified optics. Iron uses 3D front-post / rear-notch geometry. Attachment offsets still move the optic mesh on the gun for hip/inspection. **Look sens scales with optic FOV** (and `adsFactor`) so sniper ~10° is ~9× slower angular than hip; optional `ADS_LOOK_MUL` / `player.adsLookMul` fine-tune on top.
 4. **Sway + recoil** — procedural on a `swayRig` *after* the authored hold pose (never baked into hip/ADS JSON). Header **Sway** toggle (default ON); turn OFF for clean aim-offset tuning.
 5. **Hold breath (Alt)** — damps sway for up to ~3s (HUD stamina bar); release/exhaust recovers with a brief overshoot.
 6. **Shooting** — tracers spawn at the muzzle and travel along **camera aim** (Policy A) with simple ballistic drop (`vel.y -= g·dt`). SMG drops more / slower; rifle flatter; sniper scope fastest/flattest. Hits flash range targets; **+pts hit markers** stay screen-fixed HTML overlays. Range distance is marked by **subtle ground lines** across the lane floor at the circular-target distances (~50/100/150/200/300/400m) — no floating text on targets. Cheap Web Audio SFX (fire / hit / bullseye / miss) unlock on first gesture.
@@ -51,6 +51,7 @@ Offset to the right of the circular bullseyes: original blocky steel/wood knockd
 ## Notes
 
 - `blendHold(hip, ads_pose(optic), t)` → `holdRoot`; sway/recoil → child `swayRig`. Default `rotY` = 0.
+- Look sensitivity: `lookSens * (effectiveFov / fovHip) * adsLookMul * ADS_LOOK_MUL[optic]` (blended by `adsFactor`); hold-breath multiplies ~0.65 after. Hip feel unchanged; full sniper ADS ≈ 10/90 of hip angular rate.
 - Tracer policy: spawn at muzzle, initial direction = camera forward, gravity per weapon/optic (documents aim-offset vs barrel + drop).
 - Port this state machine into your engine editor (Unity EditorWindow / Unreal EUW).
 

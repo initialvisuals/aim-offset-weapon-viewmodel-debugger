@@ -30,6 +30,14 @@ const FOV_BY_OPTIC = {
   sniper_scope: 10,
 };
 
+/** Optional fine-tune after FOV-matched ADS look scale (defaults 1 = pure FOV ratio). */
+const ADS_LOOK_MUL = {
+  iron: 1,
+  holo: 1,
+  acog: 1,
+  sniper_scope: 1,
+};
+
 const BALLISTICS = {
   // Demo units ≈ meters. .45 ACP-ish SMG vs 7.62×54R-class rifle.
   example_smg: { speed: 300, gravity: 14, life: 3.2, tracerLen: 0.55 },
@@ -576,7 +584,8 @@ const player = {
   moveSpeed: 3.2,
   sprintMul: 1.65,
   lookSens: 0.0022,
-  adsLookMul: 0.5,
+  // Global ADS coefficient on top of FOV scale (1 = hip feel × FOV ratio only).
+  adsLookMul: 1,
   leanMax: 0.5,
   leanSpring: 8,
   leanLerp: 0.1,
@@ -1998,7 +2007,14 @@ function onMouseUp(e) {
 function onMouseMove(e) {
   if (!document.pointerLockElement) return;
   if (!gameplayActive()) return;
-  let adsMul = (input.ads || state.adsFactor > 0.5) ? player.adsLookMul : 1;
+  // FOV-matched ADS look: angular sens scales with zoom so far targets stay controllable.
+  // adsMul ≈ effectiveFov/fovHip (iron·holo ~0.67, acog ~0.28, sniper ~0.11), then
+  // player.adsLookMul (global) × ADS_LOOK_MUL[optic] (per-optic fine-tune, default 1).
+  const adsT = state.adsPreview ? 1 : state.adsFactor;
+  const effectiveFov = lerp(player.fovHip, adsFovForOptic(state.optic), adsT);
+  let adsMul = (effectiveFov / player.fovHip) * player.adsLookMul;
+  const opticMul = ADS_LOOK_MUL[state.optic] ?? 1;
+  adsMul *= lerp(1, opticMul, adsT);
   if (state.holdBreath && state.breathLeft > 0) adsMul *= 0.65;
   const sens = player.lookSens * adsMul;
   player.yaw -= e.movementX * sens;

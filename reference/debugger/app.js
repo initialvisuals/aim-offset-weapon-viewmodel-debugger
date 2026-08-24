@@ -3054,13 +3054,32 @@ function fireWeapon() {
   const bal = ballisticForWeapon();
   const vel = dir.clone().multiplyScalar(bal.speed);
 
-  const geo = new THREE.CylinderGeometry(0.007, 0.007, bal.tracerLen, 6);
-  const mat = new THREE.MeshBasicMaterial({ color: 0xffe08a });
+  // Visual only: thicker/longer additive streak (hit tests still use mesh.position).
+  const tracerLen = bal.tracerLen * 1.4;
+  const tracerR = 0.016;
+  const geo = new THREE.CylinderGeometry(tracerR * 0.75, tracerR, tracerLen, 8);
+  geo.translate(0, -tracerLen * 0.28, 0);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffe8a0,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   mesh.position.copy(origin).addScaledVector(dir, 0.28);
   scene.add(mesh);
-  tracers.push({ mesh, vel, gravity: bal.gravity, life: bal.life, hit: false, prev: mesh.position.clone() });
+  tracers.push({
+    mesh,
+    vel,
+    gravity: bal.gravity,
+    life: bal.life,
+    maxLife: bal.life,
+    hit: false,
+    prev: mesh.position.clone(),
+  });
 }
 
 
@@ -3327,6 +3346,9 @@ function updateTracers(dt) {
     }
     if (tr.prev) tr.prev.copy(tr.mesh.position);
     else tr.prev = tr.mesh.position.clone();
+
+    const maxLife = tr.maxLife || 1;
+    tr.mesh.material.opacity = Math.max(0, tr.life / maxLife);
 
     if (tr.life <= 0 || tr.mesh.position.y < -2.5) {
       if (!tr.hit) {

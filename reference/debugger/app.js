@@ -170,6 +170,12 @@ const RECOIL_RESET_MS = 200;
 const VIEWMODEL_LAYER = 1;
 /** Disc radius (UV x) at ads=1 on the half-res viewmodel RT. Hint, not milk. */
 const ADS_DOF_RADIUS = 0.0028;
+const ADS_DOF_RADIUS_MIN = 0;
+const ADS_DOF_RADIUS_MAX = 0.012;
+/** Ring tap count (plus center + inner ring). Settings default. */
+const ADS_DOF_TAPS_DEFAULT = 12;
+const ADS_DOF_TAPS_MIN = 4;
+const ADS_DOF_TAPS_MAX = 24;
 /** Hold-breath multiplies near-blur (Space during ADS). */
 const ADS_DOF_BREATH_MUL = 1.6;
 /** Half-res volumetric sun-shaft march steps (shadow-map occluded). */
@@ -319,6 +325,10 @@ const state = {
   godRays: GOD_RAYS_DEFAULT,
   /** HDR bloom (0 = off, 2 = strong). Independent of god rays. */
   bloom: BLOOM_DEFAULT,
+  /** ADS viewmodel DOF ring taps (plus center + half-radius inner ring). */
+  adsDofTaps: ADS_DOF_TAPS_DEFAULT,
+  /** ADS viewmodel DOF disc radius (UV x) at ads=1. */
+  adsDofRadius: ADS_DOF_RADIUS,
   /** Barrel heat glow mul (0 = off, 2 = strong). Default 1. */
   barrelHeat: BARREL_HEAT_DEFAULT,
   /** Mesh sun angular diameter in degrees (real sun ~0.53). */
@@ -1726,6 +1736,34 @@ function setBloom(v, { toast = false } = {}) {
   if (toast) showToast(`Bloom ${state.bloom.toFixed(2)}`);
 }
 
+function syncAdsDofUI() {
+  const taps = state.adsDofTaps ?? ADS_DOF_TAPS_DEFAULT;
+  const tapsSlider = el("adsDofTapsSlider");
+  const tapsVal = el("adsDofTapsVal");
+  if (tapsSlider && document.activeElement !== tapsSlider) tapsSlider.value = String(taps);
+  if (tapsVal) tapsVal.textContent = String(taps);
+
+  const r = state.adsDofRadius ?? ADS_DOF_RADIUS;
+  const rSlider = el("adsDofRadiusSlider");
+  const rVal = el("adsDofRadiusVal");
+  if (rSlider && document.activeElement !== rSlider) rSlider.value = String(r);
+  if (rVal) rVal.textContent = Number(r).toFixed(4);
+}
+
+function setAdsDofTaps(v, { toast = false } = {}) {
+  const n = Math.round(clamp(parseFloat(v), ADS_DOF_TAPS_MIN, ADS_DOF_TAPS_MAX));
+  state.adsDofTaps = Number.isFinite(n) ? n : ADS_DOF_TAPS_DEFAULT;
+  syncAdsDofUI();
+  if (toast) showToast(`DOF taps ${state.adsDofTaps}`);
+}
+
+function setAdsDofRadius(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), ADS_DOF_RADIUS_MIN, ADS_DOF_RADIUS_MAX);
+  state.adsDofRadius = Number.isFinite(n) ? n : ADS_DOF_RADIUS;
+  syncAdsDofUI();
+  if (toast) showToast(`DOF blur ${state.adsDofRadius.toFixed(4)}`);
+}
+
 function syncBarrelHeatUI() {
   const n = state.barrelHeat ?? BARREL_HEAT_DEFAULT;
   const slider = el("barrelHeatSlider");
@@ -1920,6 +1958,7 @@ function syncSettingsUI() {
 
   syncGodRaysUI();
   syncBloomUI();
+  syncAdsDofUI();
   syncSunSizeUI();
   syncSunPunchUI();
   syncCloudsUI();
@@ -5787,6 +5826,7 @@ function initAdsDof() {
       tDiffuse: { value: rt.texture },
       radius: { value: 0 },
       aspect: { value: 1 },
+      taps: { value: ADS_DOF_TAPS_DEFAULT },
     },
     vertexShader: /* glsl */`
       varying vec2 vUv;
@@ -5799,6 +5839,7 @@ function initAdsDof() {
       uniform sampler2D tDiffuse;
       uniform float radius;
       uniform float aspect;
+      uniform float taps;
       varying vec2 vUv;
 
       vec4 fetchPremul(vec2 uv) {
@@ -5810,15 +5851,21 @@ function initAdsDof() {
         vec2 a = vec2(1.0, aspect);
         vec4 c = fetchPremul(vUv);
         if (radius > 1e-6) {
-          c += fetchPremul(vUv + vec2( 1.0,  0.0) * a * radius);
-          c += fetchPremul(vUv + vec2(-1.0,  0.0) * a * radius);
-          c += fetchPremul(vUv + vec2( 0.0,  1.0) * a * radius);
-          c += fetchPremul(vUv + vec2( 0.0, -1.0) * a * radius);
-          c += fetchPremul(vUv + vec2( 0.71,  0.71) * a * radius);
-          c += fetchPremul(vUv + vec2(-0.71,  0.71) * a * radius);
-          c += fetchPremul(vUv + vec2( 0.71, -0.71) * a * radius);
-          c += fetchPremul(vUv + vec2(-0.71, -0.71) * a * radius);
-          c *= 0.111111;
+          int ni = int(clamp(taps, 4.0, 24.0) + 0.5);
+          float nf = float(ni);
+          float twoPi = 6.283185307179586;
+          float count = 1.0;
+          for (int i = 0; i < 24; i++) {
+            if (i >= ni) break;
+            float ang = twoPi * float(i) / nf;
+            vec2 d = vec2(cos(ang), sin(ang));
+            c += fetchPremul(vUv + d * a * radius);
+            float ang2 = ang + twoPi / (nf * 2.0);
+            vec2 d2 = vec2(cos(ang2), sin(ang2));
+            c += fetchPremul(vUv + d2 * a * radius * 0.5);
+            count += 2.0;
+          }
+          c /= count;
         }
         vec3 rgb = c.a > 1e-4 ? c.rgb / c.a : vec3(0.0);
         gl_FragColor = vec4(rgb, c.a);
@@ -5897,7 +5944,8 @@ function renderScene() {
     renderer.shadowMap.autoUpdate = prevShadowAuto;
 
     adsDof.material.uniforms.tDiffuse.value = adsDof.rt.texture;
-    adsDof.material.uniforms.radius.value = ADS_DOF_RADIUS * amount;
+    adsDof.material.uniforms.radius.value = (state.adsDofRadius ?? ADS_DOF_RADIUS) * amount;
+    adsDof.material.uniforms.taps.value = state.adsDofTaps ?? ADS_DOF_TAPS_DEFAULT;
 
     renderer.autoClear = false;
     renderer.setRenderTarget(dest);
@@ -9445,6 +9493,17 @@ function bind() {
       if (adsVal) adsVal.textContent = `${player.adsLookMul.toFixed(2)}×`;
     };
   }
+  const adsDofTapsSlider = el("adsDofTapsSlider");
+  if (adsDofTapsSlider) {
+    adsDofTapsSlider.value = String(state.adsDofTaps);
+    adsDofTapsSlider.oninput = (e) => setAdsDofTaps(e.target.value);
+  }
+  const adsDofRadiusSlider = el("adsDofRadiusSlider");
+  if (adsDofRadiusSlider) {
+    adsDofRadiusSlider.value = String(state.adsDofRadius);
+    adsDofRadiusSlider.oninput = (e) => setAdsDofRadius(e.target.value);
+  }
+  syncAdsDofUI();
   const crouchSlider = el("crouchHeightSlider");
   if (crouchSlider) {
     crouchSlider.oninput = (e) => {

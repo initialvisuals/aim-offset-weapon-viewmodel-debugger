@@ -418,6 +418,15 @@
           <input type="range" id="adsLookMulSlider" min="50" max="150" step="5" value="100" />
           <code id="adsLookMulVal">1.00×</code>
         </label>
+        <label class="slider-row">DOF taps
+          <input type="range" id="adsDofTapsSlider" min="4" max="24" step="1" value="12" />
+          <code id="adsDofTapsVal">12</code>
+        </label>
+        <label class="slider-row">DOF blur
+          <input type="range" id="adsDofRadiusSlider" min="0" max="0.012" step="0.0001" value="0.0028" />
+          <code id="adsDofRadiusVal">0.0028</code>
+        </label>
+        <p class="note">ADS viewmodel only (half-res). Ring taps plus center, plus a half-radius inner ring. Range stays sharp.</p>
       </div>
 
       <div class="settings-section">
@@ -438,7 +447,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -446,6 +455,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v24"></script>
+    <script type="module" src="app.js?v=20260824v25"></script>
 </body>
 </html>

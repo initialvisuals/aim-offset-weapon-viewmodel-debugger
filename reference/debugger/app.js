@@ -127,6 +127,13 @@ const SMG_AUTO_SEC = 0.05;
 /** Recoil pattern index resets after this gap of not firing. */
 const RECOIL_RESET_MS = 200;
 
+/** Viewmodel isolation — ADS near-blur without smearing the range / HUD. */
+const VIEWMODEL_LAYER = 1;
+/** Disc radius (UV x) at ads=1 on the half-res viewmodel RT. Hint, not milk. */
+const ADS_DOF_RADIUS = 0.0028;
+/** Hold-breath multiplies near-blur (Space during ADS). */
+const ADS_DOF_BREATH_MUL = 1.6;
+
 const state = {
   mode: "weapon",
   weaponId: "example_smg",
@@ -212,6 +219,15 @@ const state = {
   showPluge: false,
   /** Hours 0–24. Default evening matches the dusk range look. */
   timeOfDay: 18.5,
+  /** Scene-light multipliers on the current ToD bases (1.00 = authored). */
+  lightAmbMul: 1,
+  lightFillMul: 1,
+  lightHemiMul: 1,
+  lightKeyMul: 1,
+  lightRimMul: 1,
+  lightMoonMul: 1,
+  /** Multiplier on ToD ACES exposure (1.00 = authored clock). */
+  exposureMul: 1,
 };
 
 const LOOK_SENS_BASE = 0.0022;
@@ -1164,21 +1180,21 @@ function applyDisplayLook() {
 
   if (renderer) {
     const exp = pal && pal.exp != null ? pal.exp : 1;
-    renderer.toneMappingExposure = exp;
+    renderer.toneMappingExposure = exp * (state.exposureMul ?? 1);
   }
 
   const lightMul = 0.88 + 0.12 * b;
-  const todI = (obj, fallback) => {
+  const todI = (obj, fallback, mul = 1) => {
     if (!obj) return;
     const base = (obj.userData && obj.userData.todBase != null) ? obj.userData.todBase : fallback;
-    obj.intensity = base * lightMul;
+    obj.intensity = base * lightMul * mul;
   };
-  todI(hemiLight, HEMI_INT_BASE);
-  todI(ambLight, AMB_INT_BASE);
-  todI(keyLight, KEY_INT_BASE);
-  todI(fillLight, FILL_INT_BASE);
-  todI(rimLight, RIM_INT_BASE);
-  todI(moonLight, 0);
+  todI(hemiLight, HEMI_INT_BASE, state.lightHemiMul);
+  todI(ambLight, AMB_INT_BASE, state.lightAmbMul);
+  todI(keyLight, KEY_INT_BASE, state.lightKeyMul);
+  todI(fillLight, FILL_INT_BASE, state.lightFillMul);
+  todI(rimLight, RIM_INT_BASE, state.lightRimMul);
+  todI(moonLight, 0, state.lightMoonMul);
   const fixtures = floodFixtures.length ? floodFixtures : floodLights.map((L) => ({ light: L, shotOut: !!(L.userData && L.userData.shotOut) }));
   for (const fx of fixtures) {
     const L = fx.light || fx;
@@ -1196,6 +1212,35 @@ function applyDisplayLook() {
     overlay.hidden = !state.showPluge;
     overlay.setAttribute("aria-hidden", state.showPluge ? "false" : "true");
   }
+}
+
+const LIGHT_MUL_UI = {
+  lightAmbMul: { slider: "lightAmbSlider", val: "lightAmbVal", label: "Ambient" },
+  lightFillMul: { slider: "lightFillSlider", val: "lightFillVal", label: "Fill" },
+  lightHemiMul: { slider: "lightHemiSlider", val: "lightHemiVal", label: "Hemisphere" },
+  lightKeyMul: { slider: "lightKeySlider", val: "lightKeyVal", label: "Sun / key" },
+  lightRimMul: { slider: "lightRimSlider", val: "lightRimVal", label: "Rim" },
+  lightMoonMul: { slider: "lightMoonSlider", val: "lightMoonVal", label: "Moon" },
+  exposureMul: { slider: "exposureSlider", val: "exposureVal", label: "ACES exposure" },
+};
+
+function syncLightMulUI(key) {
+  const meta = LIGHT_MUL_UI[key];
+  if (!meta) return;
+  const n = state[key] ?? 1;
+  const slider = el(meta.slider);
+  const val = el(meta.val);
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2) + "×";
+}
+
+function setLightMul(key, v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, 2.5);
+  state[key] = Number.isFinite(n) ? n : 1;
+  applyDisplayLook();
+  syncLightMulUI(key);
+  const meta = LIGHT_MUL_UI[key];
+  if (toast && meta) showToast(`${meta.label} ${state[key].toFixed(2)}×`);
 }
 
 function setBrightness(v, { toast = false } = {}) {
@@ -1296,6 +1341,8 @@ function syncSettingsUI() {
   const todVal = el("todVal");
   if (todSlider) todSlider.value = String(state.timeOfDay);
   if (todVal) todVal.textContent = formatClock(state.timeOfDay);
+
+  Object.keys(LIGHT_MUL_UI).forEach(syncLightMulUI);
 }
 
 function renderGunList() {
@@ -1547,6 +1594,8 @@ function nudgeSelected(sign) {
 
 /* ---- Three.js scene + player ---- */
 let renderer, camera, scene, holdRoot, gunRoot;
+/** Half-res viewmodel RT + fullscreen composite for ADS DOF. */
+let adsDof = null;
 /** Kept so Settings brightness/gamma can nudge intensities + fog. */
 let hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight;
 let sunDisc = null;
@@ -2835,6 +2884,7 @@ function buildBlockGun(style) {
   gunRoot.add(opticRoot);
   rebuildOpticMeshes();
   swayRig.add(gunRoot);
+  stampViewmodelLayer(holdRoot);
 }
 
 function rebuildOpticMeshes() {
@@ -2854,6 +2904,7 @@ function rebuildOpticMeshes() {
     m.visible = id === state.optic;
     opticRoot.add(m);
   });
+  stampViewmodelLayer(opticRoot);
 }
 
 function updateOpticVisibility() {
@@ -4276,6 +4327,174 @@ function clearInputFlags() {
   state.adsTarget = state.adsPreview ? 1 : 0;
 }
 
+
+/* ---- ADS viewmodel DOF (near gun softens; range stays sharp) ----
+ * EffectComposer/BokehPass fight logarithmicDepthBuffer (linear CoC vs log
+ * depth) and would smear distant targets / HUD-adjacent 3D. Isolate the
+ * viewmodel on VIEWMODEL_LAYER, render it to a half-res RT, cheap disc blur,
+ * composite over the world. Hip fire stays a single scene render. HTML HUD
+ * is untouched.
+ */
+function stampViewmodelLayer(root) {
+  if (!root) return;
+  root.traverse((o) => { o.layers.set(VIEWMODEL_LAYER); });
+}
+
+function enableViewmodelLighting() {
+  [hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight].forEach((L) => {
+    if (L) L.layers.enable(VIEWMODEL_LAYER);
+  });
+}
+
+function adsDofAmount() {
+  const ads = state.adsPreview ? 1 : state.adsFactor;
+  if (ads < 0.02) return 0;
+  let a = ads;
+  if (state.holdBreath && state.breathLeft > 0) a *= ADS_DOF_BREATH_MUL;
+  if (state.vaulting) {
+    const vaultB = 1 - Math.abs(state.vaultT / Math.max(0.12, state.vaultDur) - 0.5) * 2;
+    a *= 1 - clamp(vaultB, 0, 1);
+  }
+  if (state.reloading) {
+    const dur = Math.max(0.05, state.reloadDuration || 1.2);
+    const u = Math.min(1, state.reloadElapsed / dur);
+    a *= 1 - reloadDipEnvelope(u) * 0.85;
+  }
+  return a;
+}
+
+function initAdsDof() {
+  const rt = new THREE.WebGLRenderTarget(1, 1, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    type: THREE.HalfFloatType,
+    format: THREE.RGBAFormat,
+    depthBuffer: true,
+    stencilBuffer: false,
+  });
+  rt.texture.colorSpace = THREE.LinearSRGBColorSpace;
+
+  const material = new THREE.ShaderMaterial({
+    name: "AdsViewmodelDof",
+    uniforms: {
+      tDiffuse: { value: rt.texture },
+      radius: { value: 0 },
+      aspect: { value: 1 },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tDiffuse;
+      uniform float radius;
+      uniform float aspect;
+      varying vec2 vUv;
+
+      vec4 fetchPremul(vec2 uv) {
+        vec4 t = texture2D(tDiffuse, uv);
+        return vec4(t.rgb * t.a, t.a);
+      }
+
+      void main() {
+        vec2 a = vec2(1.0, aspect);
+        vec4 c = fetchPremul(vUv);
+        if (radius > 1e-6) {
+          c += fetchPremul(vUv + vec2( 1.0,  0.0) * a * radius);
+          c += fetchPremul(vUv + vec2(-1.0,  0.0) * a * radius);
+          c += fetchPremul(vUv + vec2( 0.0,  1.0) * a * radius);
+          c += fetchPremul(vUv + vec2( 0.0, -1.0) * a * radius);
+          c += fetchPremul(vUv + vec2( 0.71,  0.71) * a * radius);
+          c += fetchPremul(vUv + vec2(-0.71,  0.71) * a * radius);
+          c += fetchPremul(vUv + vec2( 0.71, -0.71) * a * radius);
+          c += fetchPremul(vUv + vec2(-0.71, -0.71) * a * radius);
+          c *= 0.111111;
+        }
+        vec3 rgb = c.a > 1e-4 ? c.rgb / c.a : vec3(0.0);
+        gl_FragColor = vec4(rgb, c.a);
+        #include <colorspace_fragment>
+      }
+    `,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+    fog: false,
+  });
+
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  quad.frustumCulled = false;
+  const fsScene = new THREE.Scene();
+  fsScene.add(quad);
+  const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  adsDof = { rt, material, quad, fsScene, fsCam, _clear: new THREE.Color() };
+  resizeAdsDof();
+}
+
+function resizeAdsDof() {
+  if (!adsDof || !renderer) return;
+  const canvas = el("view3d");
+  const wrap = canvas && canvas.parentElement;
+  const w = (wrap && wrap.clientWidth) || (canvas && canvas.clientWidth) || window.innerWidth;
+  const h = (wrap && wrap.clientHeight) || (canvas && canvas.clientHeight) || window.innerHeight;
+  const pr = renderer.getPixelRatio();
+  const dw = Math.max(1, Math.floor(w * pr * 0.5));
+  const dh = Math.max(1, Math.floor(h * pr * 0.5));
+  adsDof.rt.setSize(dw, dh);
+  adsDof.material.uniforms.aspect.value = dh > 0 ? dw / dh : 1;
+}
+
+function restoreCameraLayers() {
+  if (!camera) return;
+  camera.layers.enable(0);
+  camera.layers.enable(VIEWMODEL_LAYER);
+}
+
+function renderScene() {
+  const amount = adsDofAmount();
+  if (!adsDof || amount < 0.02) {
+    restoreCameraLayers();
+    renderer.render(scene, camera);
+    return;
+  }
+
+  const prevAutoClear = renderer.autoClear;
+  const prevShadowAuto = renderer.shadowMap.autoUpdate;
+  const prevBg = scene.background;
+  renderer.getClearColor(adsDof._clear);
+  const prevClearAlpha = renderer.getClearAlpha();
+
+  camera.layers.set(0);
+  renderer.autoClear = true;
+  renderer.setRenderTarget(null);
+  renderer.render(scene, camera);
+
+  camera.layers.set(VIEWMODEL_LAYER);
+  scene.background = null;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.setRenderTarget(adsDof.rt);
+  renderer.setClearColor(0x000000, 0);
+  renderer.clear();
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+
+  scene.background = prevBg;
+  renderer.setClearColor(adsDof._clear, prevClearAlpha);
+  renderer.shadowMap.autoUpdate = prevShadowAuto;
+
+  adsDof.material.uniforms.tDiffuse.value = adsDof.rt.texture;
+  adsDof.material.uniforms.radius.value = ADS_DOF_RADIUS * amount;
+
+  renderer.autoClear = false;
+  renderer.render(adsDof.fsScene, adsDof.fsCam);
+  renderer.autoClear = prevAutoClear;
+  restoreCameraLayers();
+}
+
 function initThree() {
   const canvas = el("view3d");
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
@@ -4294,6 +4513,7 @@ function initThree() {
   // near slightly above 0.01 improves distant depth precision; far clears ~410 m berm from spawn.
   // logarithmicDepthBuffer on the renderer further reduces distant z-fighting.
   camera = new THREE.PerspectiveCamera(player.fovHip, 1, state.camNear, state.camFar);
+  camera.layers.enable(VIEWMODEL_LAYER);
 
   playerRoot = new THREE.Group();
   leanPivot = new THREE.Group();
@@ -4331,6 +4551,7 @@ function initThree() {
   moonLight.position.set(-12, 20, -8);
   moonLight.castShadow = false;
   scene.add(moonLight);
+  enableViewmodelLighting();
 
   holdRoot = new THREE.Group();
   camera.add(holdRoot);
@@ -4338,6 +4559,7 @@ function initThree() {
 
   buildRoom();
   buildBlockGun(state.weaponId);
+  initAdsDof();
   resize();
   applyDisplayLook();
   const ro = new ResizeObserver(() => resize());
@@ -4354,6 +4576,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / Math.max(h, 1);
   camera.updateProjectionMatrix();
+  resizeAdsDof();
 }
 
 function applyAttachmentOffsets() {
@@ -6118,7 +6341,7 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   updatePlayer(dt);
   updateKeyLightShadow();
-  renderer.render(scene, camera);
+  renderScene();
 }
 
 function refresh(syncInputs = true) {
@@ -6593,6 +6816,15 @@ function bind() {
   }
   const todVal = el("todVal");
   if (todVal) todVal.textContent = formatClock(state.timeOfDay);
+
+  Object.keys(LIGHT_MUL_UI).forEach((key) => {
+    const meta = LIGHT_MUL_UI[key];
+    const slider = el(meta.slider);
+    if (!slider) return;
+    slider.value = String(state[key] ?? 1);
+    slider.oninput = (e) => setLightMul(key, e.target.value);
+    syncLightMulUI(key);
+  });
 
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);

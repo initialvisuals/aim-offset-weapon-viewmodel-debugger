@@ -270,12 +270,40 @@
       </div>
 
       <div class="settings-section">
-        <h3>Time of day</h3>
+        <h3>Lighting</h3>
         <label class="slider-row">Clock
           <input type="range" id="todSlider" min="0" max="24" step="0.05" value="18.5" />
           <code id="todVal">18:30</code>
         </label>
-        <p class="note">Scene sun, sky, and fog. Display brightness/gamma stay as grade. Default evening keeps the dusk range; night makes the floods matter.</p>
+        <p class="note">Scene sun, sky, and fog. Display brightness/gamma stay as grade. Default evening keeps the dusk range; night makes the floods matter. Intensity sliders multiply the current clock (1.00 = authored ToD).</p>
+        <label class="slider-row">Ambient intensity
+          <input type="range" id="lightAmbSlider" min="0" max="2.5" step="0.01" value="1.00" />
+          <code id="lightAmbVal">1.00×</code>
+        </label>
+        <label class="slider-row">Fill intensity
+          <input type="range" id="lightFillSlider" min="0" max="2.5" step="0.01" value="1.00" />
+          <code id="lightFillVal">1.00×</code>
+        </label>
+        <label class="slider-row">Hemisphere intensity
+          <input type="range" id="lightHemiSlider" min="0" max="2.5" step="0.01" value="1.00" />
+          <code id="lightHemiVal">1.00×</code>
+        </label>
+        <label class="slider-row">Sun / key intensity
+          <input type="range" id="lightKeySlider" min="0" max="2.5" step="0.01" value="1.00" />
+          <code id="lightKeyVal">1.00×</code>
+        </label>
+        <label class="slider-row">Rim intensity
+          <input type="range" id="lightRimSlider" min="0" max="2.5" step="0.01" value="1.00" />
+          <code id="lightRimVal">1.00×</code>
+        </label>
+        <label class="slider-row">Moon intensity
+          <input type="range" id="lightMoonSlider" min="0" max="2.5" step="0.01" value="1.00" />
+          <code id="lightMoonVal">1.00×</code>
+        </label>
+        <label class="slider-row">ACES exposure
+          <input type="range" id="exposureSlider" min="0" max="2.5" step="0.01" value="1.00" />
+          <code id="exposureVal">1.00×</code>
+        </label>
       </div>
 
       <div class="settings-section">
@@ -351,7 +379,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / reset-targets button (weapons + optics; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · Time of day · Fog near/far · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · Lighting (clock + intensities) · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -359,6 +387,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v11"></script>
+    <script type="module" src="app.js?v=20260824v13"></script>
 </body>
 </html>

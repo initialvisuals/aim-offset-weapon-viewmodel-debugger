@@ -115,7 +115,7 @@ const DEFAULT_OPTIC = {
 
 /** Mag capacity + reload duration by weapon (not by optic). Infinite reserve for range demo. */
 const MAG_SPEC = {
-  example_smg: { capacity: 30, reloadSec: 1.2 },
+  example_smg: { capacity: 20, reloadSec: 1.2 },
   example_rifle: { capacity: 20, reloadSec: 1.4 }, // heavier 7.62 20-rd
   example_sniper: { capacity: 5, reloadSec: 2.0 },
 };
@@ -207,7 +207,7 @@ const state = {
   /** 3px hip crosshair visibility (ADS optic HUD unaffected). */
   showHipReticle: true,
   /** Rounds currently in the magazine. */
-  ammoInMag: 30,
+  ammoInMag: 20,
   /** True while a timed reload is in progress (blocks fire). */
   reloading: false,
   /** Seconds elapsed in the current reload. */
@@ -6390,10 +6390,29 @@ function liveCasingFade() {
   return Number.isFinite(n) ? Math.max(0, n) : CASING_FADE_SEC;
 }
 
+/** Oldest third of live casings by spawn time — random pick, never spawn-order walk. */
+function oldestThirdCasingIndices() {
+  const n = casings.length;
+  if (!n) return [];
+  const k = Math.max(1, Math.ceil(n / 3));
+  const idxs = new Array(n);
+  for (let i = 0; i < n; i++) idxs[i] = i;
+  idxs.sort((a, b) => (casings[a].bornAt || 0) - (casings[b].bornAt || 0));
+  idxs.length = k;
+  return idxs;
+}
+
+function takeCasingFromOldestThird() {
+  const pool = oldestThirdCasingIndices();
+  if (!pool.length) return null;
+  const i = pool[(Math.random() * pool.length) | 0];
+  return casings.splice(i, 1)[0];
+}
+
 function trimCasings() {
   const cap = liveCasingCap();
   while (casings.length > cap) {
-    const rec = casings.shift();
+    const rec = takeCasingFromOldestThird();
     retireCasing(rec);
   }
 }
@@ -6403,13 +6422,27 @@ function expireCasings(nowMs) {
   if (fade <= 0) return;
   const now = nowMs != null ? nowMs : performance.now();
   const ttl = fade * 1000;
-  for (let i = casings.length - 1; i >= 0; i--) {
+  const pool = oldestThirdCasingIndices();
+  if (!pool.length) return;
+  const eligible = [];
+  for (let p = 0; p < pool.length; p++) {
+    const i = pool[p];
     const c = casings[i];
-    if (!c || !c.sleeping || !c.sleepAt) continue;
-    if (now - c.sleepAt >= ttl) {
-      retireCasing(c);
-      casings.splice(i, 1);
-    }
+    if (c && c.sleeping && c.sleepAt && now - c.sleepAt >= ttl) eligible.push(i);
+  }
+  if (!eligible.length) return;
+  const take = Math.max(1, Math.ceil(eligible.length / 6));
+  const doomed = [];
+  for (let t = 0; t < take && eligible.length; t++) {
+    const p = (Math.random() * eligible.length) | 0;
+    doomed.push(eligible[p]);
+    eligible[p] = eligible[eligible.length - 1];
+    eligible.pop();
+  }
+  doomed.sort((a, b) => b - a);
+  for (let d = 0; d < doomed.length; d++) {
+    const rec = casings.splice(doomed[d], 1)[0];
+    retireCasing(rec);
   }
 }
 
@@ -6425,7 +6458,7 @@ function spawnCasing() {
   const cap = liveCasingCap();
   let rec;
   if (casings.length >= cap) {
-    rec = casings.shift();
+    rec = takeCasingFromOldestThird();
     retireCasing(rec);
   } else {
     rec = {
@@ -6435,6 +6468,7 @@ function spawnCasing() {
       bounced: false,
       sleeping: false,
       sleepAt: 0,
+      bornAt: 0,
     };
     rec.mesh.castShadow = false;
     rec.mesh.receiveShadow = true;
@@ -6455,6 +6489,7 @@ function spawnCasing() {
   rec.bounced = false;
   rec.sleeping = false;
   rec.sleepAt = 0;
+  rec.bornAt = performance.now();
   if (rec.mesh) rec.mesh.visible = true;
   scene.add(rec.mesh);
   casings.push(rec);

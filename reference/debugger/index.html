@@ -63,7 +63,7 @@
     <div class="score-hud" id="scoreHud">Score 0</div>
     <div class="ammo-cluster" id="ammoCluster">
       <div class="fire-mode-hud" id="fireModeHud">AUTO</div>
-      <div class="ammo-hud" id="ammoHud" aria-live="polite">30/30 · ∞</div>
+      <div class="ammo-hud" id="ammoHud" aria-live="polite">20/20 · ∞</div>
     </div>
     <div class="game-style-badge" id="gameStyleBadge" aria-live="polite">SIM</div>
     <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · berm popups · table resets</div>
@@ -287,7 +287,7 @@
           <input type="range" id="casingFadeSlider" min="0" max="60" step="1" value="12" />
           <code id="casingFadeVal">12s</code>
         </label>
-        <p class="note">Env / silhouette holes FIFO-cap and optionally expire. Paper-target holes stay until table reset. Berm popups still clear on hide. Casings sleep, then expire (0 = until the cap recycles). Lowering a cap trims oldest immediately.</p>
+        <p class="note">Env / silhouette holes FIFO-cap and optionally expire. Paper-target holes stay until table reset. Berm popups still clear on hide. Casings sleep, then expire (0 = until the cap recycles). Cap and fade pick at random from the oldest third so brass does not vanish in firing order.</p>
       </div>
 
       <div class="settings-section">
@@ -431,6 +431,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v18"></script>
+    <script type="module" src="app.js?v=20260824v19"></script>
 </body>
 </html>

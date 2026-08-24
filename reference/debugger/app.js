@@ -81,8 +81,14 @@ const attachments = {
 };
 
 const WEAPON_META = {
-  example_smg: { label: "Example SMG", blurb: "Compact PDW — hip/ADS/holo/acog poses" },
-  example_rifle: { label: "Example Rifle", blurb: "Long rifle — hip/ADS/sniper poses" },
+  example_smg: { label: "Example SMG", blurb: "Compact PDW — hosts iron / holo / acog only" },
+  example_rifle: { label: "Example Rifle", blurb: "Long rifle — hosts iron / sniper_scope only" },
+};
+
+/** Which optic profiles each weapon may equip (iron = native default). */
+const WEAPON_OPTICS = {
+  example_smg: ["iron", "holo", "acog"],
+  example_rifle: ["iron", "sniper_scope"],
 };
 
 /** Mag capacity + reload duration. Sniper optic uses a short mag / slower swap. Infinite reserve for range demo. */
@@ -839,24 +845,48 @@ function renderGunList() {
   });
 }
 
+
+function allowedOpticsFor(weaponId = state.weaponId) {
+  return WEAPON_OPTICS[weaponId] || ["iron"];
+}
+
+function weaponAllowsOptic(optic, weaponId = state.weaponId) {
+  return allowedOpticsFor(weaponId).includes(optic);
+}
+
 function equipWeapon(id) {
   if (!db[id]) return;
   state.weaponId = id;
   const keys = Object.keys(attachments[id] || { holo_sight: 1 });
   if (!keys.includes(state.attachmentId)) state.attachmentId = keys[0];
+  let opticFellBack = false;
+  if (!weaponAllowsOptic(state.optic, id)) {
+    state.optic = "iron";
+    opticFellBack = true;
+  }
   buildWeaponSelect();
   buildPoseSelect();
   buildAttSelect();
+  buildOpticSelect();
   syncAxisInputsFromPose(true);
   syncAxisInputsFromPose(false);
   if (typeof buildBlockGun === "function" && holdRoot) buildBlockGun(id);
   syncAmmoForLoadout({ refill: true });
+  refreshOpticsTableAvailability();
   refresh();
   showToast("Equipped " + id);
+  if (opticFellBack) showToast("Optic reset to Iron (not supported on this weapon)");
 }
 
 function setOptic(profile) {
   if (!OPTIC_LABELS[profile]) return;
+  if (!weaponAllowsOptic(profile)) {
+    const w = (WEAPON_META[state.weaponId] && WEAPON_META[state.weaponId].label) || state.weaponId;
+    showToast((OPTIC_LABELS[profile] || profile) + " not available on " + w, true);
+    const sel = el("opticSelect");
+    if (sel) sel.value = state.optic;
+    return;
+  }
   state.optic = profile;
   const sel = el("opticSelect");
   if (sel) sel.value = profile;
@@ -865,6 +895,17 @@ function setOptic(profile) {
   refresh(false);
   showToast("Optic: " + OPTIC_LABELS[profile]);
   updateHudHint();
+}
+
+function buildOpticSelect() {
+  const s = el("opticSelect");
+  if (!s) return;
+  const allowed = allowedOpticsFor();
+  s.innerHTML = allowed
+    .map((k) => `<option value="${k}">${OPTIC_LABELS[k] || k}</option>`)
+    .join("");
+  if (!allowed.includes(state.optic)) state.optic = "iron";
+  s.value = state.optic;
 }
 
 function buildWeaponSelect() {
@@ -1689,17 +1730,25 @@ function makeOpticMesh(profile) {
   g.name = "optic_" + profile;
   const scopeMat = GUN_MAT.darkMetal;
   if (profile === "iron") {
-    // High-contrast front post + rear notch — readable silhouette
-    const rearBase = makeBox(0.052, 0.012, 0.024, 0x14181f, 0, 0.009, 0.055, scopeMat);
-    const notchL = makeBox(0.009, 0.032, 0.013, 0x0c0e12, -0.017, 0.03, 0.055, scopeMat);
-    const notchR = makeBox(0.009, 0.032, 0.013, 0x0c0e12, 0.017, 0.03, 0.055, scopeMat);
-    // Inner bevel lips so the notch reads as a U
-    const lipL = makeBox(0.004, 0.028, 0.01, 0x2a3140, -0.011, 0.028, 0.055, scopeMat);
-    const lipR = makeBox(0.004, 0.028, 0.01, 0x2a3140, 0.011, 0.028, 0.055, scopeMat);
-    const frontBase = makeBox(0.016, 0.009, 0.016, 0x14181f, 0, 0.009, -0.14, scopeMat);
-    const post = makeBox(0.006, 0.026, 0.006, 0xd4682e, 0, 0.028, -0.14, GUN_MAT.bronze);
-    const tip = makeBox(0.01, 0.005, 0.01, 0xffc078, 0, 0.042, -0.14, GUN_MAT.bronze);
-    g.add(rearBase, notchL, notchR, lipL, lipR, frontBase, post, tip);
+    // Believable block-gun irons: dark steel, thin front blade + rear U-notch / ghost-ring
+    const steel = 0x2a3038;
+    const steelDark = 0x1a1f28;
+    const tipEdge = 0x4a5560; // slight lighter tip edge for ADS readability (not candy)
+    // Rear — closer to eye (+Z), aperture / U-notch peep plate
+    const rearBase = makeBox(0.046, 0.009, 0.02, steelDark, 0, 0.007, 0.055, scopeMat);
+    const rearPlate = makeBox(0.04, 0.026, 0.009, steel, 0, 0.024, 0.055, scopeMat);
+    const notchL = makeBox(0.009, 0.02, 0.011, steelDark, -0.013, 0.033, 0.055, scopeMat);
+    const notchR = makeBox(0.009, 0.02, 0.011, steelDark, 0.013, 0.033, 0.055, scopeMat);
+    const lipL = makeBox(0.003, 0.016, 0.008, tipEdge, -0.0075, 0.034, 0.055, scopeMat);
+    const lipR = makeBox(0.003, 0.016, 0.008, tipEdge, 0.0075, 0.034, 0.055, scopeMat);
+    // Front — near muzzle end (−Z), thin tapered blade + tiny protective wings
+    const frontBase = makeBox(0.014, 0.007, 0.014, steelDark, 0, 0.007, -0.14, scopeMat);
+    const postLow = makeBox(0.0065, 0.01, 0.0065, steel, 0, 0.016, -0.14, scopeMat);
+    const postMid = makeBox(0.0045, 0.012, 0.0045, steel, 0, 0.026, -0.14, scopeMat);
+    const postTip = makeBox(0.0035, 0.007, 0.0035, tipEdge, 0, 0.035, -0.14, scopeMat); // square tip
+    const wingL = makeBox(0.007, 0.009, 0.0025, steelDark, -0.009, 0.02, -0.14, scopeMat);
+    const wingR = makeBox(0.007, 0.009, 0.0025, steelDark, 0.009, 0.02, -0.14, scopeMat);
+    g.add(rearBase, rearPlate, notchL, notchR, lipL, lipR, frontBase, postLow, postMid, postTip, wingL, wingR);
   } else if (profile === "holo") {
     // EOTech XPS3-ish: crisp black hood, open rear, clean edges
     const blk = 0x0e1014;
@@ -1911,6 +1960,29 @@ function updateOpticVisibility() {
   });
 }
 
+/** Dim table props the current weapon cannot host (still lookable; equip blocked). */
+function refreshOpticsTableAvailability() {
+  if (!pickups || !pickups.length) return;
+  pickups.forEach((p) => {
+    const ok = weaponAllowsOptic(p.userData.opticId);
+    p.userData.allowed = ok;
+    p.traverse((o) => {
+      if (!o.isMesh || o === p.userData.highlight || !o.material) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach((m) => {
+        if (m.userData._baseOp == null) m.userData._baseOp = m.opacity != null ? m.opacity : 1;
+        if (m.userData._baseColor == null && m.color) m.userData._baseColor = m.color.getHex();
+        m.transparent = true;
+        m.opacity = ok ? m.userData._baseOp : Math.max(0.12, m.userData._baseOp * 0.28);
+        if (m.color && m.userData._baseColor != null) {
+          m.color.setHex(ok ? m.userData._baseColor : 0x3a4048);
+        }
+        m.needsUpdate = true;
+      });
+    });
+  });
+}
+
 function buildRoom() {
   leanSolids = [];
   const floorTex = makeDirtConcreteTexture(6, 50);
@@ -2018,10 +2090,11 @@ function buildOpticsTable() {
     );
     highlight.position.y = 0.01;
     group.add(highlight);
-    group.userData = { opticId: d.id, label: d.label, highlight, baseY: tableY + 0.08 };
+    group.userData = { opticId: d.id, label: d.label, highlight, baseY: tableY + 0.08, allowed: true };
     scene.add(group);
     pickups.push(group);
   });
+  refreshOpticsTableAvailability();
 }
 
 function buildShootingRange() {
@@ -3772,10 +3845,16 @@ function updateEquipPrompt() {
     const id = state.lookPickup.userData.opticId;
     const label = state.lookPickup.userData.label;
     const equipped = state.optic === id;
+    const allowed = weaponAllowsOptic(id);
     prompt.hidden = false;
-    prompt.textContent = equipped
-      ? `Looking at ${label} (equipped)`
-      : `[E] Equip ${label}  ·  click to equip`;
+    if (!allowed) {
+      const w = (WEAPON_META[state.weaponId] && WEAPON_META[state.weaponId].label) || state.weaponId;
+      prompt.textContent = `${label} — not available on ${w}`;
+    } else if (equipped) {
+      prompt.textContent = `Looking at ${label} (equipped)`;
+    } else {
+      prompt.textContent = `[E] Equip ${label}  ·  click to equip`;
+    }
   } else {
     prompt.hidden = true;
   }
@@ -3836,7 +3915,13 @@ function updateHudHint() {
 
 function tryEquipLooked() {
   if (!state.lookPickup) return;
-  setOptic(state.lookPickup.userData.opticId);
+  const id = state.lookPickup.userData.opticId;
+  if (!weaponAllowsOptic(id)) {
+    const w = (WEAPON_META[state.weaponId] && WEAPON_META[state.weaponId].label) || state.weaponId;
+    showToast((OPTIC_LABELS[id] || id) + " not available on " + w, true);
+    return;
+  }
+  setOptic(id);
 }
 
 function fireFlash() {
@@ -4106,6 +4191,7 @@ function bind() {
   buildWeaponSelect();
   buildPoseSelect();
   buildAttSelect();
+  buildOpticSelect();
   buildAxesOnce("viewAxes", "view");
   buildAxesOnce("attAxes", "att");
 

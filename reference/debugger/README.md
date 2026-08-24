@@ -23,7 +23,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 5. **Sway / breath** — procedural `swayRig` after authored hold (header **Sway** toggle). Space hold-breath damps sway ~3s (HUD bar).
 6. **Shooting kit** — **long tracer streaks** + ballistic drop; mags SMG 30 / rifle 20 / sniper 5 (`mag/capacity · ∞`); empty = dry-click. **V** reload (~1.2s / ~2s sniper) with viewmodel dip. Live shots eject **shell casings** (FIFO ~28) and a short **muzzle flash**. Hits spawn **impact decals + sparks** (FIFO ~50). Screen-fixed +pts markers. Cheap Web Audio SFX.
 7. **Sim / Arcade + HoB** — **B** cycles **Sim** (default: height-over-bore + ballistic zero so the gravity arc meets the sight ray at **zero distance**) vs **Arcade** (reticle-faithful, vel = camera forward). **`-`/`=`** cycle zero (25/50/100/200/300 m, default 100). Live HoB cm readout; optional aim/bore rays.
-8. **Optics table** — iron / holo / acog / sniper_scope; look + click or E to equip.
+8. **Optics table** — iron / holo / acog / sniper_scope; look + click or E to equip. **Host limits:** SMG may use iron/holo/acog; rifle may use iron/sniper_scope. Illegal pickups dim and toast on equip; switching guns falls back to iron if needed.
 9. **Debugger (` / Backquote)** — view/attachment tabs, ads_factor, six-axis editors, Copy JSON. **G** = gun picker.
 10. **Settings (`O`)** — pauses gameplay: game style, **hip reticle** toggle, aim/bore rays, **brightness / gamma** (CSS filter + mild fog lift; defaults **1.30 / 1.18**), **fog** enable + near/far (linear `THREE.Fog`, defaults **ON / 90 / 430**), **PLUGE** grey strip, zero distance, look sens, ADS look mul, controls cheat.
 
@@ -38,7 +38,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 | C | Crouch toggle |
 | Z | Crouch hold |
 | WASD / Shift | Move / sprint (sprint blocked while crouched) |
-| Q / E | Lean (wall-clamped); E also equips looked-at optic |
+| Q / E | Lean (wall-clamped); E also equips looked-at optic (if weapon allows) |
 | RMB | Hold ADS |
 | Space | Hold breath (damp sway) |
 | `-` / `=` | Cycle zero distance (presets 25–300 m; clamp at ends; mainly Sim) |

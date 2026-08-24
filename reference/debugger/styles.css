@@ -189,3 +189,9 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
   filter: drop-shadow(0 0 1px rgba(255,255,255,0.25));
   opacity: 0.92;
 }
+
+.score-hud {
+  pointer-events: none; position: absolute; right: 1rem; top: 1rem;
+  color: #fff; font: 600 1rem/1.2 ui-sans-serif, system-ui, sans-serif;
+  text-shadow: 0 1px 4px #000; letter-spacing: 0.02em;
+}

@@ -95,6 +95,7 @@ const state = {
   lookPickup: null,
   swayEnabled: true,
   holdBreath: false,
+  score: 0,
   breathLeft: 3,
   breathMax: 3,
 };
@@ -405,6 +406,7 @@ let tracers = [];
 let playerRoot, leanPivot;
 let pickups = [];
 let rangeTargets = [];
+let scorePopups = [];
 let clock = new THREE.Clock();
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -718,65 +720,153 @@ function buildOpticsTable() {
 }
 
 function buildShootingRange() {
-  const laneZ = [-8, -14, -22, -32];
-  const labels = ["25m", "50m", "75m", "100m"];
+  const baseLanes = [
+    { z: -10, pts: 5, label: "≈30m" },
+    { z: -18, pts: 8, label: "≈55m" },
+    { z: -28, pts: 12, label: "≈85m" },
+    { z: -40, pts: 16, label: "≈120m" },
+    { z: -52, pts: 20, label: "≈155m" },
+  ];
   rangeTargets = [];
+  scorePopups = [];
 
   const strip = new THREE.Mesh(
-    new THREE.PlaneGeometry(4.5, 40),
+    new THREE.PlaneGeometry(14, 60),
     new THREE.MeshStandardMaterial({ color: 0x161a22, roughness: 0.95 })
   );
   strip.rotation.x = -Math.PI / 2;
-  strip.position.set(0, -1.385, -18);
+  strip.position.set(0, -1.385, -28);
   scene.add(strip);
 
-  for (const side of [-2.0, 2.0]) {
-    scene.add(makeBox(0.08, 0.12, 36, 0x2a3140, side, -1.3, -18));
+  for (const side of [-5.5, 5.5]) {
+    scene.add(makeBox(0.08, 0.12, 58, 0x2a3140, side, -1.3, -28));
   }
 
-  laneZ.forEach((z, i) => {
-    scene.add(makeBox(0.08, 0.9, 0.08, 0x445060, -2.3, -0.95, z));
-    scene.add(makeBox(0.08, 1.2, 0.08, 0x3a4558, 0, -0.8, z));
-    scene.add(makeBox(0.9, 0.06, 0.06, 0x3a4558, 0, -0.2, z));
+  baseLanes.forEach((lane, i) => {
+    const x = (Math.random() - 0.5) * 8.5;
+    const z = lane.z + (Math.random() - 0.5) * 3.5;
+    const y = 0.15 + (Math.random() - 0.5) * 0.2;
+    const scale = 0.85 + Math.random() * 0.35;
+
+    scene.add(makeBox(0.08, 0.9 * scale, 0.08, 0x445060, x - 0.55 * scale, -0.95, z));
+    scene.add(makeBox(0.08, 1.2 * scale, 0.08, 0x3a4558, x, -0.8, z));
+    scene.add(makeBox(0.9 * scale, 0.06, 0.06, 0x3a4558, x, -0.2, z));
 
     const board = new THREE.Mesh(
-      new THREE.CircleGeometry(0.45, 28),
+      new THREE.CircleGeometry(0.45 * scale, 28),
       new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.85 })
     );
-    board.position.set(0, 0.15, z);
+    board.position.set(x, y, z);
     const ring1 = new THREE.Mesh(
-      new THREE.RingGeometry(0.28, 0.32, 28),
+      new THREE.RingGeometry(0.28 * scale, 0.32 * scale, 28),
       new THREE.MeshBasicMaterial({ color: 0x222833, side: THREE.DoubleSide })
     );
-    ring1.position.set(0, 0.15, z + 0.01);
+    ring1.position.set(x, y, z + 0.01);
     const ring2 = new THREE.Mesh(
-      new THREE.RingGeometry(0.14, 0.18, 28),
+      new THREE.RingGeometry(0.14 * scale, 0.18 * scale, 28),
       new THREE.MeshBasicMaterial({ color: 0xc45c2a, side: THREE.DoubleSide })
     );
-    ring2.position.set(0, 0.15, z + 0.012);
+    ring2.position.set(x, y, z + 0.012);
     const bull = new THREE.Mesh(
-      new THREE.CircleGeometry(0.05, 16),
+      new THREE.CircleGeometry(0.05 * scale, 16),
       new THREE.MeshBasicMaterial({ color: 0xc45c2a })
     );
-    bull.position.set(0, 0.15, z + 0.014);
+    bull.position.set(x, y, z + 0.014);
     const flash = new THREE.Mesh(
-      new THREE.CircleGeometry(0.5, 28),
+      new THREE.CircleGeometry(0.5 * scale, 28),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
     );
-    flash.position.set(0, 0.15, z + 0.02);
-    scene.add(board, ring1, ring2, bull, flash);
+    flash.position.set(x, y, z + 0.02);
+
+    // Distance placard
+    const placard = makeScoreSprite(lane.label, "#9aa6bd", 128);
+    placard.position.set(x, y + 0.7 * scale, z);
+    placard.scale.set(0.9, 0.35, 1);
+
+    scene.add(board, ring1, ring2, bull, flash, placard);
     rangeTargets.push({
       mesh: board,
       flash,
-      center: new THREE.Vector3(0, 0.15, z),
-      radius: 0.48,
-      label: labels[i],
+      center: new THREE.Vector3(x, y, z),
+      radius: 0.48 * scale,
+      bullRadius: 0.06 * scale,
+      midRadius: 0.18 * scale,
+      outerRadius: 0.32 * scale,
+      basePts: lane.pts,
+      label: lane.label,
       hitUntil: 0,
     });
   });
 
-  scene.add(makeBox(6, 3.2, 0.4, 0x2a2030, 0, 0.1, -36));
+  scene.add(makeBox(16, 3.2, 0.4, 0x2a2030, 0, 0.1, -58));
 }
+
+function makeScoreSprite(text, color = "#ffffff", size = 160) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size * 2;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = `bold ${Math.floor(size * 0.55)}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = "rgba(0,0,0,0.75)";
+  ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+  ctx.fillStyle = color;
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  return new THREE.Sprite(mat);
+}
+
+function flashTarget(t, hitPos) {
+  t.hitUntil = performance.now() + 220;
+  if (t.flash) t.flash.material.opacity = 1;
+  const d = hitPos ? hitPos.distanceTo(t.center) : 0;
+  let pts = t.basePts;
+  let color = "#ffffff";
+  if (d <= t.bullRadius) {
+    pts = t.basePts * 2;
+    color = "#ffe66d";
+  } else if (d <= t.midRadius) {
+    pts = Math.round(t.basePts * 1.4);
+    color = "#ffffff";
+  } else if (d <= t.outerRadius) {
+    pts = t.basePts;
+    color = "#d0d6e0";
+  } else {
+    pts = Math.max(1, Math.round(t.basePts * 0.5));
+    color = "#9aa6bd";
+  }
+  const spr = makeScoreSprite("+" + pts, color, 180);
+  const origin = (hitPos || t.center).clone();
+  origin.y += 0.35;
+  spr.position.copy(origin);
+  spr.scale.set(1.1, 0.45, 1);
+  scene.add(spr);
+  scorePopups.push({ sprite: spr, life: 1.1, vy: 1.1 });
+  state.score = (state.score || 0) + pts;
+  const hud = el("scoreHud");
+  if (hud) hud.textContent = "Score " + state.score;
+}
+
+function updateScorePopups(dt) {
+  for (let i = scorePopups.length - 1; i >= 0; i--) {
+    const p = scorePopups[i];
+    p.life -= dt;
+    p.sprite.position.y += p.vy * dt;
+    p.sprite.material.opacity = Math.max(0, p.life / 1.1);
+    if (p.life <= 0) {
+      scene.remove(p.sprite);
+      if (p.sprite.material.map) p.sprite.material.map.dispose();
+      p.sprite.material.dispose();
+      scorePopups.splice(i, 1);
+    }
+  }
+}
+
 
 function clearInputFlags() {
   input.forward = input.back = input.left = input.right = false;
@@ -995,11 +1085,6 @@ function fireWeapon() {
   tracers.push({ mesh, vel, gravity: bal.gravity, life: bal.life, hit: false });
 }
 
-function flashTarget(t) {
-  t.hitUntil = performance.now() + 220;
-  if (t.flash) t.flash.material.opacity = 1;
-}
-
 function updateTracers(dt) {
   const now = performance.now();
   rangeTargets.forEach((t) => {
@@ -1030,7 +1115,7 @@ function updateTracers(dt) {
         if (d < t.radius) {
           tr.hit = true;
           tr.life = Math.min(tr.life, 0.02);
-          flashTarget(t);
+          flashTarget(t, tr.mesh.position.clone());
           break;
         }
       }
@@ -1079,8 +1164,8 @@ function updatePlayer(dt) {
     // yaw 0 looks down -Z
     player.pos.x += (mx * cy + mz * sy) * speed * dt;
     player.pos.z += (-mx * sy + mz * cy) * speed * dt;
-    player.pos.x = clamp(player.pos.x, -6, 6);
-    player.pos.z = clamp(player.pos.z, -34, 4);
+    player.pos.x = clamp(player.pos.x, -10, 10);
+    player.pos.z = clamp(player.pos.z, -55, 4);
   }
 
   // View bob

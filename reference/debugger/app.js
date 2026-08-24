@@ -3180,23 +3180,24 @@ function fireWeapon() {
   // Visual streak: unit-length cylinder with tip at local y=0 (body in -Y).
   // Each frame scale.y stretches to visualLength; mesh.position stays the tip for hits.
   const TRACER_BASE_LEN = 1;
-  const tracerR = 0.042;
+  const tracerR = 0.015;
   const geo = new THREE.CylinderGeometry(tracerR * 0.85, tracerR, TRACER_BASE_LEN, 8);
   geo.translate(0, -TRACER_BASE_LEN * 0.5, 0);
   const mat = new THREE.MeshBasicMaterial({
-    color: 0xffe090,
+    color: 0xe8c878,
     transparent: true,
-    opacity: 1,
+    opacity: 0.78,
     blending: THREE.NormalBlending,
-    depthTest: false,
+    depthTest: true,
     depthWrite: false,
     toneMapped: false,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-  mesh.position.copy(origin);
+  // Start past the barrel so the streak does not draw inside the receiver.
+  mesh.position.copy(origin).addScaledVector(dir, 0.7);
   const speed0 = vel.length();
-  const visualLength0 = Math.min(45, Math.max(3, speed0 * 0.06));
+  const visualLength0 = Math.min(18, Math.max(1.5, speed0 * 0.035));
   mesh.scale.set(1, visualLength0 / TRACER_BASE_LEN, 1);
   mesh.renderOrder = 8;
   scene.add(mesh);
@@ -3437,7 +3438,7 @@ function updateTracers(dt) {
     }
     // Stretch cylinder along velocity so it reads as a long streak (tip = mesh.position).
     const baseLen = tr.baseLen || 1;
-    const visualLength = Math.min(45, Math.max(3, speed * 0.06));
+    const visualLength = Math.min(18, Math.max(1.5, speed * 0.035));
     tr.mesh.scale.set(1, visualLength / baseLen, 1);
 
     // First hit along segment: circular bullseyes + silhouettes + env (floor/berm/walls)
@@ -3482,7 +3483,7 @@ function updateTracers(dt) {
     else tr.prev = tr.mesh.position.clone();
 
     const maxLife = tr.maxLife || 1;
-    tr.mesh.material.opacity = Math.max(0, tr.life / maxLife);
+    tr.mesh.material.opacity = Math.max(0, (tr.life / maxLife) * 0.78);
 
     if (tr.life <= 0 || tr.mesh.position.y < -2.5) {
       if (!tr.hit) {

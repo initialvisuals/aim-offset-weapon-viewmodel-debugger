@@ -17,7 +17,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 ## What you get
 
 1. **3D viewport** — walkable room, optics table, procedural shooting range (circular bullseye lanes + side knockdown silhouette lane), first-person block guns, cyan aim ray (camera −Z), crosshair.
-2. **Player controls** (panel closed) — WASD, Shift sprint, C crouch toggle / Z crouch hold (slower move, no sprint, ducked eye height), mouse look, Q/E lean (full roll + lateral offset), tiny A/D strafe tilt only (~2.5% of lean max), RMB ADS, Space hold-breath, LMB fire.
+2. **Player controls** (panel closed) — WASD, Shift sprint, C crouch toggle / Z crouch hold (slower move, no sprint, ducked eye height), mouse look, Q/E lean (full roll + lateral offset; **collision-clamped** so the camera cannot lean through walls / bay walls / berm / crates — common FPS lean-through-walls anti-cheese), tiny A/D strafe tilt only (~2.5% of lean max), RMB ADS, Space hold-breath, LMB fire.
 3. **ADS presentation** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), screen-space HUD reticle (holo dot / ACOG chevron / sniper mil-cross), peripheral tube frame + vignette for magnified optics. Iron uses 3D front-post / rear-notch geometry. Attachment offsets still move the optic mesh on the gun for hip/inspection. **Look sens scales with optic FOV** (and `adsFactor`) so sniper ~10° is ~9× slower angular than hip; optional `ADS_LOOK_MUL` / `player.adsLookMul` fine-tune on top.
 4. **Sway + recoil** — procedural on a `swayRig` *after* the authored hold pose (never baked into hip/ADS JSON). Header **Sway** toggle (default ON); turn OFF for clean aim-offset tuning.
 5. **Hold breath (Space)** — damps sway for up to ~3s (HUD stamina bar); release/exhaust recovers with a brief overshoot.
@@ -37,7 +37,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 | C | Crouch toggle |
 | Z | Crouch hold |
 | WASD / Shift | Move / sprint (sprint blocked while crouched) |
-| Q / E | Lean; E also equips looked-at optic |
+| Q / E | Lean (wall-clamped); E also equips looked-at optic |
 | RMB | Hold ADS |
 | Space | Hold breath (damp sway) |
 | `-` / `=` | Cycle zero distance (presets 25–300 m; clamp at ends; mainly Sim) |

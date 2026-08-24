@@ -661,6 +661,10 @@ let renderer, camera, scene, holdRoot, gunRoot;
 let opticRoot, gripMesh, muzzleFlash, muzzleSocket, swayRig;
 let tracers = [];
 let playerRoot, leanPivot;
+/** Meshes lean probes may hit (walls, berm, crates, solid props) — never player/viewmodel. */
+let leanSolids = [];
+const _leanOrigin = new THREE.Vector3();
+const _leanDir = new THREE.Vector3();
 let pickups = [];
 let rangeTargets = [];
 let silhouetteTargets = [];
@@ -699,6 +703,8 @@ const player = {
   leanSpring: 8,
   leanLerp: 0.1,
   leanOffset: 0.5,
+  /** Skin gap (m) so leaned camera stops just short of the surface. */
+  leanSkin: 0.08,
   fovHip: FOV_BY_OPTIC.hip,
   fovAds: FOV_BY_OPTIC.iron,
   fov: FOV_BY_OPTIC.hip,
@@ -892,6 +898,65 @@ function makeBermTexture() {
       ctx.fill();
     }
   }, 256, { repeat: [4, 1] });
+}
+
+/** Register world solids for lean anti-clip probes (excludes player / gun / targets). */
+function registerLeanSolid(obj) {
+  if (!obj) return obj;
+  obj.traverse((c) => {
+    if (c.isMesh && !c.userData.leanSolid) {
+      c.userData.leanSolid = true;
+      leanSolids.push(c);
+    }
+  });
+  return obj;
+}
+
+function addLeanSolid(obj) {
+  scene.add(obj);
+  return registerLeanSolid(obj);
+}
+
+/**
+ * Sideways clearance from unleaned head toward lean direction.
+ * sign > 0 = lean left (camera local −X), sign < 0 = lean right.
+ * Returns meters of free lateral travel before skin gap (0..leanOffset+).
+ */
+function probeLeanClearance(sign) {
+  if (!sign || !leanSolids.length) return player.leanOffset;
+  const rightX = Math.cos(player.yaw);
+  const rightZ = -Math.sin(player.yaw);
+  // Positive leanAngle moves leanPivot −local X (world left = −flatRight).
+  _leanDir.set(-sign * rightX, 0, -sign * rightZ);
+  if (_leanDir.lengthSq() < 1e-8) return player.leanOffset;
+  _leanDir.normalize();
+  _leanOrigin.set(player.pos.x, player.eyeCurrent, player.pos.z);
+  const skin = player.leanSkin;
+  const maxDist = player.leanOffset + skin;
+  _raycaster.near = 0;
+  _raycaster.far = maxDist;
+  _raycaster.set(_leanOrigin, _leanDir);
+  const hits = _raycaster.intersectObjects(leanSolids, false);
+  if (!hits.length) return player.leanOffset;
+  // Ignore grazing / embedded hits (self-overlap style zero-distance cheese)
+  let dist = hits[0].distance;
+  for (const h of hits) {
+    if (h.distance > 1e-4) {
+      dist = h.distance;
+      break;
+    }
+  }
+  if (dist <= 1e-4) return player.leanOffset;
+  return Math.max(0, dist - skin);
+}
+
+/** Clamp desired lean target (±leanMax) by wall/prop clearance. */
+function clampLeanTarget(desired) {
+  if (!desired) return 0;
+  const sign = Math.sign(desired);
+  const clear = probeLeanClearance(sign);
+  const allowedRatio = Math.min(1, clear / player.leanOffset);
+  return sign * player.leanMax * allowedRatio;
 }
 
 function makeCrate(w, h, d, x, y, z, rotY = 0) {
@@ -1148,6 +1213,7 @@ function updateOpticVisibility() {
 }
 
 function buildRoom() {
+  leanSolids = [];
   const floorTex = makeDirtConcreteTexture(6, 50);
   const floorMat = new THREE.MeshStandardMaterial({
     map: floorTex,
@@ -1182,7 +1248,7 @@ function buildRoom() {
     wall.position.set(side, -0.2, -200);
     wall.castShadow = true;
     wall.receiveShadow = true;
-    scene.add(wall);
+    addLeanSolid(wall);
   }
 
   buildOpticsTable();
@@ -1215,6 +1281,14 @@ function buildOpticsTable() {
   // Small shelf under top for depth
   const shelf = makeBox(1.4, 0.03, 0.4, 0x4a3a2c, 0, tableY - 0.28, tableZ);
   scene.add(top, apron, apronB, legL, legR, legL2, legR2, shelf);
+  registerLeanSolid(top);
+  registerLeanSolid(apron);
+  registerLeanSolid(apronB);
+  registerLeanSolid(legL);
+  registerLeanSolid(legR);
+  registerLeanSolid(legL2);
+  registerLeanSolid(legR2);
+  registerLeanSolid(shelf);
 
   const defs = [
     { id: "iron", label: "Iron", x: -0.55 },
@@ -1375,14 +1449,14 @@ function buildBackBerm() {
   main.position.set(0, 0.7, -410);
   main.castShadow = true;
   main.receiveShadow = true;
-  scene.add(main);
+  addLeanSolid(main);
   // Front slope / face toward shooter
   const face = new THREE.Mesh(new THREE.BoxGeometry(26, 3.6, 2.4), dirtMat.clone());
   face.position.set(0, -0.15, -407.2);
   face.rotation.x = -0.35;
   face.castShadow = true;
   face.receiveShadow = true;
-  scene.add(face);
+  addLeanSolid(face);
   // Crest / uneven top chunks
   for (const [x, y, z, w, h, d] of [
     [-8, 3.2, -410.5, 6, 1.4, 2.2],
@@ -1395,7 +1469,7 @@ function buildBackBerm() {
     chunk.rotation.y = (x % 3) * 0.05;
     chunk.castShadow = true;
     chunk.receiveShadow = true;
-    scene.add(chunk);
+    addLeanSolid(chunk);
   }
   // Flanking dirt piles
   for (const side of [-14, 14]) {
@@ -1403,7 +1477,7 @@ function buildBackBerm() {
     pile.position.set(side, 0.1, -408);
     pile.castShadow = true;
     pile.receiveShadow = true;
-    scene.add(pile);
+    addLeanSolid(pile);
   }
 }
 
@@ -1411,22 +1485,22 @@ function buildBackBerm() {
 function buildRangeProps() {
   const placements = [
     // near bay / optics area
-    () => scene.add(makeCrate(0.55, 0.45, 0.5, -7.2, -1.15, -4.5, 0.2)),
-    () => scene.add(makeCrate(0.4, 0.35, 0.4, -7.5, -1.2, -3.8, -0.4)),
-    () => scene.add(makeBarrel(0.22, 0.7, -6.6, -1.05, -5.8, 0x3a4a3c)),
-    () => scene.add(makeCrate(0.5, 0.4, 0.48, 7.4, -1.18, -3.5, -0.25)),
-    () => scene.add(makeBarrel(0.2, 0.65, 6.8, -1.07, -4.8, 0x4a3a2e)),
-    () => scene.add(makeBarrel(0.22, 0.72, 7.6, -1.04, -5.2, 0x3d4550)),
+    () => addLeanSolid(makeCrate(0.55, 0.45, 0.5, -7.2, -1.15, -4.5, 0.2)),
+    () => addLeanSolid(makeCrate(0.4, 0.35, 0.4, -7.5, -1.2, -3.8, -0.4)),
+    () => addLeanSolid(makeBarrel(0.22, 0.7, -6.6, -1.05, -5.8, 0x3a4a3c)),
+    () => addLeanSolid(makeCrate(0.5, 0.4, 0.48, 7.4, -1.18, -3.5, -0.25)),
+    () => addLeanSolid(makeBarrel(0.2, 0.65, 6.8, -1.07, -4.8, 0x4a3a2e)),
+    () => addLeanSolid(makeBarrel(0.22, 0.72, 7.6, -1.04, -5.2, 0x3d4550)),
     // mid-range side silhouettes
-    () => scene.add(makeCrate(0.6, 0.5, 0.55, -7.8, -1.12, -48, 0.15)),
-    () => scene.add(makeBarrel(0.24, 0.8, -7.1, -1.0, -52, 0x454e3a)),
-    () => scene.add(makeCrate(0.45, 0.38, 0.42, 7.5, -1.18, -70, -0.3)),
-    () => scene.add(makeBarrel(0.22, 0.7, 8.0, -1.05, -95, 0x3a4048)),
-    () => scene.add(makeCrate(0.7, 0.55, 0.6, -8.0, -1.1, -140, 0.4)),
-    () => scene.add(makeBarrel(0.25, 0.85, 7.8, -0.98, -180, 0x4a4034)),
-    () => scene.add(makeCrate(0.5, 0.42, 0.48, 7.2, -1.16, -220, -0.2)),
-    () => scene.add(makeCrate(0.55, 0.48, 0.5, -7.6, -1.14, -280, 0.1)),
-    () => scene.add(makeBarrel(0.23, 0.75, 7.4, -1.02, -320, 0x384438)),
+    () => addLeanSolid(makeCrate(0.6, 0.5, 0.55, -7.8, -1.12, -48, 0.15)),
+    () => addLeanSolid(makeBarrel(0.24, 0.8, -7.1, -1.0, -52, 0x454e3a)),
+    () => addLeanSolid(makeCrate(0.45, 0.38, 0.42, 7.5, -1.18, -70, -0.3)),
+    () => addLeanSolid(makeBarrel(0.22, 0.7, 8.0, -1.05, -95, 0x3a4048)),
+    () => addLeanSolid(makeCrate(0.7, 0.55, 0.6, -8.0, -1.1, -140, 0.4)),
+    () => addLeanSolid(makeBarrel(0.25, 0.85, 7.8, -0.98, -180, 0x4a4034)),
+    () => addLeanSolid(makeCrate(0.5, 0.42, 0.48, 7.2, -1.16, -220, -0.2)),
+    () => addLeanSolid(makeCrate(0.55, 0.48, 0.5, -7.6, -1.14, -280, 0.1)),
+    () => addLeanSolid(makeBarrel(0.23, 0.75, 7.4, -1.02, -320, 0x384438)),
   ];
   for (const place of placements) place();
 }
@@ -2262,12 +2336,6 @@ function updatePlayer(dt) {
     state.adsFactor = 1;
   }
 
-  // Lean spring toward ±leanMax while Q/E held
-  if (input.leanLeft && !input.leanRight) player.leanTarget = player.leanMax;
-  else if (input.leanRight && !input.leanLeft) player.leanTarget = -player.leanMax;
-  else player.leanTarget = 0;
-  player.leanAngle = lerp(player.leanAngle, player.leanTarget, 1 - Math.exp(-player.leanSpring * dt));
-
   // Crouch (Z hold or C toggle) — sticky toggle survives unlock; no Ctrl (browser steals it)
   const crouching = input.crouchHold || state.crouchToggled;
   const eyeTarget = player.eyeHeight * (crouching ? player.crouchEyeMul : 1);
@@ -2275,6 +2343,21 @@ function updatePlayer(dt) {
   if (Math.abs(player.eyeCurrent - eyeTarget) < 0.0005) player.eyeCurrent = eyeTarget;
   // Keep pos.y as standing reference; root uses lerped eye before bob
   player.pos.y = player.eyeHeight;
+
+  // Lean spring toward ±leanMax while Q/E held — clamped so camera cannot clip solids
+  // (probe uses eyeCurrent so crouch lean height stays honest)
+  let leanDesired = 0;
+  if (input.leanLeft && !input.leanRight) leanDesired = player.leanMax;
+  else if (input.leanRight && !input.leanLeft) leanDesired = -player.leanMax;
+  player.leanTarget = clampLeanTarget(leanDesired);
+  player.leanAngle = lerp(player.leanAngle, player.leanTarget, 1 - Math.exp(-player.leanSpring * dt));
+  // Hard clamp current angle too (walk into cover while already leaned)
+  if (Math.abs(player.leanAngle) > 1e-4) {
+    const maxAbs = Math.abs(clampLeanTarget(Math.sign(player.leanAngle) * player.leanMax));
+    if (Math.abs(player.leanAngle) > maxAbs) {
+      player.leanAngle = Math.sign(player.leanAngle) * maxAbs;
+    }
+  }
 
   // Movement on XZ
   let mx = 0, mz = 0;

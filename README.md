@@ -4,7 +4,30 @@ Live-tune first-person **weapon hold poses** (hip, ADS, optics, attachments) so 
 
 **Knowledge share for any FPS stack** — Unity, Unreal, Source-likes, custom engines. Not a plugin. Docs + math + schemas + a small reference tuner UI you can rebuild in your own tools.
 
-The browser scene in [`reference/debugger/`](reference/debugger/) is a **tech FPS demo that supports the weapon tuner** — a live range for proving viewmodel hold, ballistics, and feel. It is **not** a shipped multiplayer game. The contracts (schemas, math, tuner UX) stay engine-agnostic so they can later sit on a dedicated host + web client.
+### Browser tech demo
+
+This repo is a knowledge-share plus a live Three.js shooting-range demo for proving viewmodel poses, ballistics (height-over-bore / zero), and common FPS feel — lean vs walls, reload, crouch, vault, lights. It is **not** a shipped multiplayer game.
+
+Static HTML/JS, Three.js from CDN, no bundler. From [`reference/debugger/`](reference/debugger/):
+
+    python3 -m http.server 8765
+
+Open http://127.0.0.1:8765/ and click the canvas for mouse look (pointer lock).
+
+![Hip fire on the dusk range — bay, gun, default evening](docs/screenshots/range-hip.png)
+
+![ADS down the lane](docs/screenshots/range-ads.png)
+
+![Far targets and berm](docs/screenshots/range-far.png)
+
+What the range is exercising:
+
+- Two-tab **tuner** (`` ` ``) — live hip/ADS holds, attachments, Copy JSON
+- ~400 m lane with fog, time of day (Settings `O`), and shootable flood bulbs
+- Berm-peak popup figures; **F** bench pickups (guns / optics / table reset)
+- **R** reload; crouch / slide; wall-clamped lean; vault; Sim vs Arcade ballistics (HoB / zero)
+
+Contracts here can travel to a real engine later. This demo is the feel lab.
 
 ### Start here
 

@@ -381,16 +381,16 @@
 
       <div class="settings-section">
         <h3>Camera clip</h3>
-        <p class="note">Near/far planes for depth teaching. Defaults clear the ~410&nbsp;m berm; logarithmic depth is on.</p>
+        <p class="note">Near/far planes for depth teaching. Default far <strong>2000</strong> so looking up does not clip at 520&nbsp;m; fog 375/520 still hides long tracers. Logarithmic depth is on.</p>
         <label class="slider-row">Near
           <input type="range" id="camNearSlider" min="0.01" max="0.5" step="0.01" value="0.05" />
           <input type="number" id="camNearInput" min="0.001" max="2" step="0.01" value="0.05" style="width:4.5rem" />
           <code id="camNearVal">0.050</code>
         </label>
         <label class="slider-row">Far
-          <input type="range" id="camFarSlider" min="100" max="2000" step="10" value="520" />
-          <input type="number" id="camFarInput" min="50" max="5000" step="10" value="520" style="width:4.5rem" />
-          <code id="camFarVal">520</code>
+          <input type="range" id="camFarSlider" min="100" max="5000" step="10" value="2000" />
+          <input type="number" id="camFarInput" min="50" max="5000" step="10" value="2000" style="width:4.5rem" />
+          <code id="camFarVal">2000</code>
         </label>
       </div>
 
@@ -438,7 +438,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + barrel heat) · Materials (concrete wear) · Fog near/far · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -446,6 +446,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v23"></script>
+    <script type="module" src="app.js?v=20260824v24"></script>
 </body>
 </html>

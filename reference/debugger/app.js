@@ -40,13 +40,19 @@ const ADS_LOOK_MUL = {
 };
 
 const BALLISTICS = {
-  // Demo units ≈ meters.
-  example_smg: { speed: 300, gravity: 14, life: 3.2, tracerLen: 0.55 }, // .45 ACP-ish PDW
+  // Demo units ≈ meters. Tracers fly until impact (see TRACER_SANITY_LIFE), not these old 3–4s lives.
+  example_smg: { speed: 300, gravity: 14, tracerLen: 0.55 }, // .45 ACP-ish PDW
   // 7.62×51 from a 20" DMR. 785 m/s ≈ 2571 fps.
-  example_rifle: { speed: 785, gravity: 9.8, life: 3.5, tracerLen: 0.75 },
+  example_rifle: { speed: 785, gravity: 9.8, tracerLen: 0.75 },
   // 7.62×51 24"-class bolt (M24-ish). ~810 m/s.
-  example_sniper: { speed: 810, gravity: 9.8, life: 4.0, tracerLen: 0.85 },
+  example_sniper: { speed: 810, gravity: 9.8, tracerLen: 0.85 },
 };
+
+/** Tracers are not timed cartridges — live until impact. 180s covers an 810 m/s vertical return (~165s). */
+const TRACER_SANITY_LIFE = 180;
+/** After a hit, sit as a tiny spent slug before despawn. Rare grazing skip is a separate mesh. */
+const TRACER_LINGER = 2;
+const TRACER_SLUG_LEN = 0.07;
 
 
 function emptyPose() {
@@ -242,7 +248,7 @@ const state = {
   zeroDist: 100,
   /** PerspectiveCamera near/far — tunable in Settings (O) for depth teaching. */
   camNear: 0.05,
-  camFar: 520,
+  camFar: 2000,
   /** Draw sight vs bore/launch debug rays. */
   showAimRays: false,
   /** 3px hip crosshair visibility (ADS optic HUD unaffected). */
@@ -970,7 +976,7 @@ function effectiveZeroDist() {
 function applyCameraClip() {
   if (!camera) return;
   const near = Math.max(0.001, Math.min(2, Number(state.camNear) || 0.05));
-  const far = Math.max(near + 10, Math.min(5000, Number(state.camFar) || 520));
+  const far = Math.max(near + 10, Math.min(5000, Number(state.camFar) || 2000));
   state.camNear = near;
   state.camFar = far;
   camera.near = near;
@@ -1114,6 +1120,7 @@ function setCasingCap(v, { toast = false } = {}) {
   state.casingCap = Math.round(clamp(parseFloat(v), CASING_CAP_MIN, CASING_CAP_MAX));
   if (!Number.isFinite(state.casingCap)) state.casingCap = CASING_MAX;
   trimCasings();
+  trimSpentSlugs();
   syncFxSettingsUI();
   if (toast) showToast(`Casing cap ${state.casingCap}`);
 }
@@ -1476,7 +1483,7 @@ function syncSkyUniforms(pal, path) {
 }
 
 function skyFollowRadius() {
-  const far = (camera && camera.far) || 520;
+  const far = (camera && camera.far) || 2000;
   return Math.max(28, Math.min(220, far * 0.42));
 }
 
@@ -2248,6 +2255,30 @@ let _shardGeo = null;
 const MUZZLE_FLASH_MS = 80;
 let _casingGeo = null;
 let _casingMat = null;
+/** Rare unflattened spent slugs — graze skip, then settle like brass. */
+let spentSlugs = [];
+let _slugBodyGeo = null;
+let _slugTailGeo = null;
+let _slugNoseGeo = null;
+let _slugMat = null;
+let _plugWideGeo = null;
+let _plugMidGeo = null;
+let _plugNubGeo = null;
+let _plugBrassMat = null;
+let _plugSteelMat = null;
+const _slugN = new THREE.Vector3();
+const _slugVel = new THREE.Vector3();
+const _slugTmp = new THREE.Vector3();
+const _slugT1 = new THREE.Vector3();
+const _slugT2 = new THREE.Vector3();
+const SLUG_CHANCE = 1 / 16;
+const SLUG_PAPER_CHANCE = 1 / 48;
+/** |n·vhat| above this is dead-on — no skip. Cheap graze gate, not an angle table. */
+const SLUG_GRAZE_MAX = 0.52;
+const SLUG_KEEP_MIN = 0.08;
+const SLUG_KEEP_MAX = 0.18;
+const SLUG_SPEED_MIN = 2.2;
+const SLUG_SPEED_MAX = 16;
 let _holePunchMaps = [];
 let _holeScuffMaps = [];
 const IMPACT_HOLE_VARIANTS = 10;
@@ -5550,6 +5581,7 @@ function resetSilhouettes() {
 
 function clearPaperDecals() {
   for (const mesh of paperDecals) {
+    disposeDecalPlug(mesh);
     if (mesh.parent) mesh.parent.remove(mesh);
     if (mesh.material) mesh.material.dispose();
   }
@@ -7293,6 +7325,226 @@ function updateCasings(dt) {
   expireCasings(now);
 }
 
+
+const SLUG_FLOOR_Y = FLOOR_Y + 0.012;
+
+function spentSlugChance(kind) {
+  if (kind === "flood" || kind === "bottle") return 0;
+  if (kind === "circle") return SLUG_PAPER_CHANCE;
+  return SLUG_CHANCE;
+}
+
+function getSlugBodyGeo() {
+  if (!_slugBodyGeo) _slugBodyGeo = new THREE.CylinderGeometry(0.0064, 0.0064, 0.015, 10);
+  return _slugBodyGeo;
+}
+function getSlugTailGeo() {
+  // Narrower at the rear (−Y). Same stacked-cylinder language as the beer bottles.
+  if (!_slugTailGeo) _slugTailGeo = new THREE.CylinderGeometry(0.0064, 0.0040, 0.007, 10);
+  return _slugTailGeo;
+}
+function getSlugNoseGeo() {
+  if (!_slugNoseGeo) _slugNoseGeo = new THREE.CylinderGeometry(0.0014, 0.0064, 0.010, 10);
+  return _slugNoseGeo;
+}
+function getSlugMat() {
+  if (!_slugMat) {
+    _slugMat = new THREE.MeshStandardMaterial({
+      color: 0xc48a3a,
+      roughness: 0.34,
+      metalness: 0.82,
+      emissive: 0x3a220c,
+      emissiveIntensity: 0.22,
+    });
+  }
+  return _slugMat;
+}
+
+function makeSpentSlugMesh() {
+  const g = new THREE.Group();
+  const mat = getSlugMat();
+  const body = new THREE.Mesh(getSlugBodyGeo(), mat);
+  const tail = new THREE.Mesh(getSlugTailGeo(), mat);
+  const nose = new THREE.Mesh(getSlugNoseGeo(), mat);
+  tail.position.y = -0.011;
+  nose.position.y = 0.0125;
+  g.add(body, tail, nose);
+  g.traverse((c) => {
+    if (c.isMesh) {
+      c.castShadow = false;
+      c.receiveShadow = true;
+    }
+  });
+  return g;
+}
+
+function retireSpentSlug(s) {
+  if (s && s.mesh && s.mesh.parent) s.mesh.parent.remove(s.mesh);
+}
+
+function oldestThirdSlugIndices() {
+  const n = spentSlugs.length;
+  if (!n) return [];
+  const k = Math.max(1, Math.ceil(n / 3));
+  const idxs = new Array(n);
+  for (let i = 0; i < n; i++) idxs[i] = i;
+  idxs.sort((a, b) => (spentSlugs[a].bornAt || 0) - (spentSlugs[b].bornAt || 0));
+  idxs.length = k;
+  return idxs;
+}
+
+function takeSlugFromOldestThird() {
+  const pool = oldestThirdSlugIndices();
+  if (!pool.length) return null;
+  const i = pool[(Math.random() * pool.length) | 0];
+  return spentSlugs.splice(i, 1)[0];
+}
+
+function trimSpentSlugs() {
+  const cap = liveCasingCap();
+  while (spentSlugs.length > cap) {
+    retireSpentSlug(takeSlugFromOldestThird());
+  }
+}
+
+function expireSpentSlugs(nowMs) {
+  const fade = liveCasingFade();
+  if (fade <= 0) return;
+  const now = nowMs != null ? nowMs : performance.now();
+  const ttl = fade * 1000;
+  const pool = oldestThirdSlugIndices();
+  if (!pool.length) return;
+  const eligible = [];
+  for (let p = 0; p < pool.length; p++) {
+    const i = pool[p];
+    const s = spentSlugs[i];
+    if (s && s.sleeping && s.sleepAt && now - s.sleepAt >= ttl) eligible.push(i);
+  }
+  if (!eligible.length) return;
+  const take = Math.max(1, Math.ceil(eligible.length / 6));
+  const doomed = [];
+  for (let t = 0; t < take && eligible.length; t++) {
+    const p = (Math.random() * eligible.length) | 0;
+    doomed.push(eligible[p]);
+    eligible[p] = eligible[eligible.length - 1];
+    eligible.pop();
+  }
+  doomed.sort((a, b) => b - a);
+  for (let d = 0; d < doomed.length; d++) {
+    retireSpentSlug(spentSlugs.splice(doomed[d], 1)[0]);
+  }
+}
+
+/**
+ * Cheap graze skip: 1-in-16 on wall/floor/berm (paper rarer).
+ * Reflect incoming vel about the surface normal, keep ~8–18% speed, add tangent scatter.
+ * Dead-on impacts do not skip. Not a real ricochet table.
+ */
+function trySpawnSpentSlugBounce(pos, normal, incomingVel, kind) {
+  if (!scene || !pos || !normal || !incomingVel) return false;
+  const chance = spentSlugChance(kind);
+  if (chance <= 0) return false;
+  const speed = incomingVel.length();
+  if (speed < 1e-3) return false;
+  _slugN.copy(normal);
+  if (_slugN.lengthSq() < 1e-10) return false;
+  _slugN.normalize();
+  const vDotN = incomingVel.dot(_slugN) / speed;
+  // Require a graze; dead-on does not skip. Cheap gate, not an angle table.
+  if (vDotN >= -0.02) return false;
+  if (-vDotN > SLUG_GRAZE_MAX) return false;
+  if (Math.random() >= chance) return false;
+  spawnSpentSlug(pos, incomingVel, speed);
+  return true;
+}
+
+function spawnSpentSlug(pos, incomingVel, speed) {
+  // r = v - 2 n (v·n) — reflect about normal, not invert.
+  const vn = incomingVel.dot(_slugN);
+  _slugVel.copy(incomingVel).addScaledVector(_slugN, -2 * vn);
+  const keep = SLUG_KEEP_MIN + Math.random() * (SLUG_KEEP_MAX - SLUG_KEEP_MIN);
+  let outSpeed = speed * keep;
+  if (outSpeed < SLUG_SPEED_MIN) outSpeed = SLUG_SPEED_MIN;
+  if (outSpeed > SLUG_SPEED_MAX) outSpeed = SLUG_SPEED_MAX;
+  if (_slugVel.lengthSq() < 1e-10) _slugVel.copy(_slugN);
+  _slugVel.setLength(outSpeed);
+  // Tangent-plane scatter so it is not a perfect mirror.
+  _slugTmp.set(0, 1, 0);
+  if (Math.abs(_slugN.y) > 0.92) _slugTmp.set(1, 0, 0);
+  _slugT1.copy(_slugN).cross(_slugTmp);
+  if (_slugT1.lengthSq() < 1e-10) _slugT1.set(0, 0, 1);
+  _slugT1.normalize();
+  _slugT2.copy(_slugN).cross(_slugT1).normalize();
+  const scatter = outSpeed * (0.12 + Math.random() * 0.18);
+  _slugVel.addScaledVector(_slugT1, (Math.random() - 0.5) * scatter);
+  _slugVel.addScaledVector(_slugT2, (Math.random() - 0.5) * scatter);
+  // Keep a little outgoing so a graze skips along the wall instead of digging in.
+  const out = _slugVel.dot(_slugN);
+  if (out < 0.35) _slugVel.addScaledVector(_slugN, 0.4 - out);
+
+  const cap = liveCasingCap();
+  let rec;
+  if (spentSlugs.length >= cap) {
+    rec = takeSlugFromOldestThird();
+    retireSpentSlug(rec);
+  } else {
+    rec = {
+      mesh: makeSpentSlugMesh(),
+      vel: new THREE.Vector3(),
+      angVel: new THREE.Vector3(),
+      bounced: false,
+      sleeping: false,
+      sleepAt: 0,
+      bornAt: 0,
+    };
+  }
+  rec.mesh.position.copy(pos).addScaledVector(_slugN, 0.02);
+  rec.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _slugVel.clone().normalize());
+  rec.vel.copy(_slugVel);
+  rec.angVel.set(
+    (Math.random() - 0.5) * 22,
+    (Math.random() - 0.5) * 16,
+    (Math.random() - 0.5) * 22
+  );
+  rec.bounced = false;
+  rec.sleeping = false;
+  rec.sleepAt = 0;
+  rec.bornAt = performance.now();
+  rec.mesh.visible = true;
+  scene.add(rec.mesh);
+  spentSlugs.push(rec);
+}
+
+function updateSpentSlugs(dt) {
+  const now = performance.now();
+  for (let i = 0; i < spentSlugs.length; i++) {
+    const s = spentSlugs[i];
+    if (s.sleeping) continue;
+    s.vel.y -= CASING_GRAVITY * dt;
+    s.mesh.position.addScaledVector(s.vel, dt);
+    s.mesh.rotation.x += s.angVel.x * dt;
+    s.mesh.rotation.y += s.angVel.y * dt;
+    s.mesh.rotation.z += s.angVel.z * dt;
+    if (s.mesh.position.y <= SLUG_FLOOR_Y) {
+      s.mesh.position.y = SLUG_FLOOR_Y;
+      if (!s.bounced) {
+        s.bounced = true;
+        s.vel.y = Math.abs(s.vel.y) * 0.32;
+        s.vel.x *= 0.48;
+        s.vel.z *= 0.48;
+        s.angVel.multiplyScalar(0.42);
+        if (s.vel.y < 0.55) s.vel.y = 0.55;
+      } else if (s.vel.y <= 0) {
+        s.vel.set(0, 0, 0);
+        s.angVel.set(0, 0, 0);
+        s.sleeping = true;
+        s.sleepAt = now;
+      }
+    }
+  }
+  expireSpentSlugs(now);
+}
+
 /** Mild horizontal walk (SMG AUTO). Pattern index resets after RECOIL_RESET_MS idle. */
 const SMG_YAW_WALK = [
   0.18, 0.42, -0.16, 0.58, -0.38, 0.72, -0.22, 0.48,
@@ -7400,8 +7652,8 @@ function fireWeapon({ fromHold = false } = {}) {
     mesh,
     vel,
     gravity: bal.gravity,
-    life: bal.life,
-    maxLife: bal.life,
+    life: TRACER_SANITY_LIFE,
+    maxLife: TRACER_SANITY_LIFE,
     hit: false,
     prev: mesh.position.clone(),
     baseLen: TRACER_BASE_LEN,
@@ -7422,29 +7674,29 @@ function drawImpactHole(ctx, size, punch, variant) {
   ctx.clearRect(0, 0, size, size);
   const s = variant * 1.847 + (punch ? 0.31 : 2.17);
   const verts = 22;
-  const baseR = size * (punch ? 0.22 : 0.26);
+  const baseR = size * (punch ? 0.19 : 0.26);
   ctx.beginPath();
   for (let i = 0; i < verts; i++) {
     const a = (i / verts) * Math.PI * 2;
     const wobble =
-      0.11 * Math.sin(a * 2 + s) +
-      0.07 * Math.sin(a * 5 + s * 1.73) +
-      0.045 * Math.sin(a * 9 + s * 0.61);
-    const jag = (_holeHash(variant * 13.3 + i * 7.1) - 0.5) * 0.16;
-    const r = Math.max(size * 0.12, baseR * (1 + wobble + jag));
+      0.13 * Math.sin(a * 2 + s) +
+      0.09 * Math.sin(a * 5 + s * 1.73) +
+      0.055 * Math.sin(a * 9 + s * 0.61);
+    const jag = (_holeHash(variant * 13.3 + i * 7.1) - 0.5) * (punch ? 0.22 : 0.16);
+    const r = Math.max(size * (punch ? 0.10 : 0.12), baseR * (1 + wobble + jag));
     const x = cx + Math.cos(a) * r;
     const y = cy + Math.sin(a) * r;
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   }
   ctx.closePath();
-  ctx.fillStyle = punch ? "rgba(6,5,4,0.96)" : "rgba(14,11,9,0.84)";
+  ctx.fillStyle = punch ? "rgba(4,3,2,0.98)" : "rgba(14,11,9,0.84)";
   ctx.fill();
   ctx.lineJoin = "round";
   ctx.lineWidth = 1.15;
   ctx.strokeStyle = punch ? "rgba(0,0,0,1)" : "rgba(5,4,3,0.95)";
   ctx.stroke();
-  const chips = punch ? 3 : 5;
+  const chips = punch ? 5 : 5;
   for (let k = 0; k < chips; k++) {
     const a = (k / chips) * Math.PI * 2 + s * 0.4;
     const rr = baseR * (0.88 + _holeHash(s + k) * 0.12);
@@ -7715,8 +7967,75 @@ function liveHoleFade() {
   return Number.isFinite(n) ? Math.max(0, n) : HOLE_FADE_SEC;
 }
 
+function getPlugWideGeo() {
+  if (!_plugWideGeo) _plugWideGeo = new THREE.CylinderGeometry(0.0072, 0.0078, 0.0023, 10);
+  return _plugWideGeo;
+}
+function getPlugMidGeo() {
+  if (!_plugMidGeo) _plugMidGeo = new THREE.CylinderGeometry(0.0054, 0.0072, 0.0020, 10);
+  return _plugMidGeo;
+}
+function getPlugNubGeo() {
+  if (!_plugNubGeo) _plugNubGeo = new THREE.CylinderGeometry(0.0028, 0.0054, 0.0017, 8);
+  return _plugNubGeo;
+}
+function getPlugMat(steel) {
+  if (steel) {
+    if (!_plugSteelMat) {
+      _plugSteelMat = new THREE.MeshStandardMaterial({
+        color: 0x8a9098,
+        roughness: 0.42,
+        metalness: 0.9,
+        emissive: 0x111214,
+        emissiveIntensity: 0.08,
+      });
+    }
+    return _plugSteelMat;
+  }
+  if (!_plugBrassMat) {
+    _plugBrassMat = new THREE.MeshStandardMaterial({
+      color: 0xd4a24a,
+      roughness: 0.38,
+      metalness: 0.85,
+      emissive: 0x3a2208,
+      emissiveIntensity: 0.12,
+    });
+  }
+  return _plugBrassMat;
+}
+
+/** Flattened stuck slug — stacked squat cylinders, beer-bottle geo, flush in the crater. */
+function makeImpactPlugMesh() {
+  const g = new THREE.Group();
+  const steel = state.weaponId !== "example_smg";
+  const mat = getPlugMat(steel);
+  const wide = new THREE.Mesh(getPlugWideGeo(), mat);
+  const mid = new THREE.Mesh(getPlugMidGeo(), mat);
+  const nub = new THREE.Mesh(getPlugNubGeo(), mat);
+  mid.position.y = 0.00215;
+  nub.position.y = 0.0040;
+  g.add(wide, mid, nub);
+  const s = 0.88 + Math.random() * 0.28;
+  g.scale.setScalar(s);
+  g.traverse((c) => {
+    if (c.isMesh) {
+      c.castShadow = false;
+      c.receiveShadow = true;
+    }
+  });
+  return g;
+}
+
+function disposeDecalPlug(mesh) {
+  const plug = mesh && mesh.userData && mesh.userData.plug;
+  if (!plug) return;
+  if (plug.parent) plug.parent.remove(plug);
+  mesh.userData.plug = null;
+}
+
 function disposeImpactDecal(mesh) {
   if (!mesh) return;
+  disposeDecalPlug(mesh);
   if (mesh.parent) mesh.parent.remove(mesh);
   if (mesh.material) mesh.material.dispose();
   if (mesh.userData) mesh.userData.bermPopup = null;
@@ -7748,6 +8067,7 @@ function expireImpactDecals(nowMs) {
 
 function recycleDecalFrom(list, isPunch) {
   const mesh = list.shift();
+  disposeDecalPlug(mesh);
   if (mesh.parent) mesh.parent.remove(mesh);
   mesh.visible = true;
   mesh.userData.bermPopup = null;
@@ -7800,6 +8120,25 @@ function spawnImpactDecal(pos, normal, kind, opts) {
   }
   mesh.visible = true;
   mesh.userData.born = performance.now();
+  mesh.userData.plug = null;
+  if (opts && opts.plug) {
+    const plug = makeImpactPlugMesh();
+    plug.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _impactN);
+    if (parent) {
+      parent.updateWorldMatrix(true, false);
+      _decalLocal.copy(pos).addScaledVector(_impactN, paper ? 0.004 : 0.007);
+      parent.worldToLocal(_decalLocal);
+      plug.position.copy(_decalLocal);
+      parent.getWorldQuaternion(_decalParentQ);
+      _decalWorldQ.copy(plug.quaternion);
+      plug.quaternion.copy(_decalParentQ).invert().multiply(_decalWorldQ);
+      parent.add(plug);
+    } else {
+      plug.position.copy(pos).addScaledVector(_impactN, 0.007);
+      scene.add(plug);
+    }
+    mesh.userData.plug = plug;
+  }
   if (paper) paperDecals.push(mesh);
   else impactDecals.push(mesh);
 }
@@ -7892,6 +8231,22 @@ function updateTracers(dt) {
   syncBeerBottleZones();
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i];
+    const baseLen = tr.baseLen || 1;
+
+    if (tr.hit) {
+      // Linger as a spent slug at the impact. No fake miss on this despawn.
+      tr.life -= dt;
+      const lingerMax = tr.maxLife || TRACER_LINGER;
+      tr.mesh.material.opacity = Math.max(0, (tr.life / lingerMax) * 0.55);
+      if (tr.life <= 0) {
+        scene.remove(tr.mesh);
+        tr.mesh.geometry.dispose();
+        tr.mesh.material.dispose();
+        tracers.splice(i, 1);
+      }
+      continue;
+    }
+
     tr.life -= dt;
     // Save position before integrate, then move, then disk-plane hit test
     const prev = tr.mesh.position.clone();
@@ -7906,105 +8261,113 @@ function updateTracers(dt) {
       );
     }
     // Stretch cylinder along velocity so it reads as a long streak (tip = mesh.position).
-    const baseLen = tr.baseLen || 1;
     const visualLength = Math.min(18, Math.max(1.5, speed * 0.035));
     tr.mesh.scale.set(1, visualLength / baseLen, 1);
 
     // First hit along segment: circular bullseyes + silhouettes + env (floor/berm/walls)
-    if (!tr.hit) {
-      let best = null;
-      for (const t of rangeTargets) {
-        const info = hitTargetDiskInfo(prev, tr.mesh.position, t);
+    let best = null;
+    for (const t of rangeTargets) {
+      const info = hitTargetDiskInfo(prev, tr.mesh.position, t);
+      if (info && (!best || info.u < best.u)) {
+        best = { kind: "circle", target: t, hit: info.hit, normal: t.normal, u: info.u };
+      }
+    }
+    for (const sil of silhouetteTargets) {
+      for (const zone of sil.zones) {
+        if (!zoneActive(sil, zone.id)) continue;
+        const info = hitTargetDiskInfo(prev, tr.mesh.position, zone);
         if (info && (!best || info.u < best.u)) {
-          best = { kind: "circle", target: t, hit: info.hit, normal: t.normal, u: info.u };
+          best = { kind: "sil", sil, zone, hit: info.hit, normal: zone.normal, u: info.u };
         }
       }
-      for (const sil of silhouetteTargets) {
-        for (const zone of sil.zones) {
-          if (!zoneActive(sil, zone.id)) continue;
-          const info = hitTargetDiskInfo(prev, tr.mesh.position, zone);
-          if (info && (!best || info.u < best.u)) {
-            best = { kind: "sil", sil, zone, hit: info.hit, normal: zone.normal, u: info.u };
-          }
-        }
-      }
-      for (const fig of bermPopupTargets) {
-        for (const zone of fig.zones) {
-          if (!bermPopupZoneActive(fig, zone.id)) continue;
-          const info = hitTargetDiskInfo(prev, tr.mesh.position, zone);
-          if (info && (!best || info.u < best.u)) {
-            best = { kind: "berm", fig, zone, hit: info.hit, normal: zone.normal, u: info.u };
-          }
-        }
-      }
-      for (const fx of floodFixtures) {
-        if (fx.shotOut || !fx.zone) continue;
-        const info = hitTargetDiskInfo(prev, tr.mesh.position, fx.zone);
+    }
+    for (const fig of bermPopupTargets) {
+      for (const zone of fig.zones) {
+        if (!bermPopupZoneActive(fig, zone.id)) continue;
+        const info = hitTargetDiskInfo(prev, tr.mesh.position, zone);
         if (info && (!best || info.u < best.u)) {
-          best = { kind: "flood", fixture: fx, hit: info.hit, normal: fx.zone.normal, u: info.u };
+          best = { kind: "berm", fig, zone, hit: info.hit, normal: zone.normal, u: info.u };
         }
       }
-      for (const bot of beerBottles) {
-        if (bot.broken || !bot.zone) continue;
-        const info = hitSphereSegment(prev, tr.mesh.position, bot.zone.center, bot.zone.radius);
-        if (info && (!best || info.u < best.u)) {
-          best = { kind: "bottle", bottle: bot, hit: info.hit, normal: info.normal, u: info.u };
-        }
+    }
+    for (const fx of floodFixtures) {
+      if (fx.shotOut || !fx.zone) continue;
+      const info = hitTargetDiskInfo(prev, tr.mesh.position, fx.zone);
+      if (info && (!best || info.u < best.u)) {
+        best = { kind: "flood", fixture: fx, hit: info.hit, normal: fx.zone.normal, u: info.u };
       }
-      const env = hitEnvironmentSegment(prev, tr.mesh.position);
-      if (env && (!best || env.u < best.u)) {
-        const fx = env.object && env.object.userData && env.object.userData.floodFixture;
-        if (fx && !fx.shotOut) {
-          best = { kind: "flood", fixture: fx, hit: env.hit, normal: env.normal, u: env.u };
-        } else {
-          best = { kind: "env", hit: env.hit, normal: env.normal, u: env.u, surface: env.surface };
-        }
+    }
+    for (const bot of beerBottles) {
+      if (bot.broken || !bot.zone) continue;
+      const info = hitSphereSegment(prev, tr.mesh.position, bot.zone.center, bot.zone.radius);
+      if (info && (!best || info.u < best.u)) {
+        best = { kind: "bottle", bottle: bot, hit: info.hit, normal: info.normal, u: info.u };
       }
-      if (best) {
-        tr.hit = true;
-        tr.life = Math.min(tr.life, 0.02);
-        tr.mesh.position.copy(best.hit);
-        if (best.kind === "circle") {
-          flashTarget(best.target, best.hit);
-          spawnImpactFX(best.hit, best.normal, "punch", {
-            paperTarget: true,
-            parent: best.target.mesh,
-          });
-        } else if (best.kind === "sil") {
-          flashSilhouetteZone(best.sil, best.zone, best.hit);
-          spawnImpactFX(best.hit, best.normal, "punch", {
-            parent: (best.sil.plates && best.sil.plates[best.zone.id]) || best.sil.group,
-          });
-        } else if (best.kind === "berm") {
-          flashBermPopupZone(best.fig, best.zone, best.hit);
-          spawnImpactFX(best.hit, best.normal, "punch", {
-            parent: best.fig.group,
-            bermPopup: best.fig,
-          });
-        } else if (best.kind === "flood") {
-          shootOutFlood(best.fixture, best.hit, best.normal);
-        } else if (best.kind === "bottle") {
-          breakBeerBottle(best.bottle, best.hit);
-        } else {
-          sfx.play("miss");
-          spawnImpactFX(best.hit, best.normal, "scuff");
-        }
+    }
+    const env = hitEnvironmentSegment(prev, tr.mesh.position);
+    if (env && (!best || env.u < best.u)) {
+      const fx = env.object && env.object.userData && env.object.userData.floodFixture;
+      if (fx && !fx.shotOut) {
+        best = { kind: "flood", fixture: fx, hit: env.hit, normal: env.normal, u: env.u };
+      } else {
+        best = { kind: "env", hit: env.hit, normal: env.normal, u: env.u, surface: env.surface };
       }
+    }
+    if (best) {
+      tr.hit = true;
+      tr.life = TRACER_LINGER;
+      tr.maxLife = TRACER_LINGER;
+      tr.mesh.position.copy(best.hit);
+      tr.mesh.scale.set(1.35, TRACER_SLUG_LEN / baseLen, 1.35);
+      tr.mesh.material.opacity = 0.55;
+      const bounced = trySpawnSpentSlugBounce(best.hit, best.normal, tr.vel, best.kind);
+      const mark = bounced ? "scuff" : "punch";
+      const plug = !bounced;
+      if (best.kind === "circle") {
+        flashTarget(best.target, best.hit);
+        spawnImpactFX(best.hit, best.normal, mark, {
+          paperTarget: true,
+          parent: best.target.mesh,
+          plug,
+        });
+      } else if (best.kind === "sil") {
+        flashSilhouetteZone(best.sil, best.zone, best.hit);
+        spawnImpactFX(best.hit, best.normal, mark, {
+          parent: (best.sil.plates && best.sil.plates[best.zone.id]) || best.sil.group,
+          plug,
+        });
+      } else if (best.kind === "berm") {
+        flashBermPopupZone(best.fig, best.zone, best.hit);
+        spawnImpactFX(best.hit, best.normal, mark, {
+          parent: best.fig.group,
+          bermPopup: best.fig,
+          plug,
+        });
+      } else if (best.kind === "flood") {
+        shootOutFlood(best.fixture, best.hit, best.normal);
+      } else if (best.kind === "bottle") {
+        breakBeerBottle(best.bottle, best.hit);
+      } else {
+        sfx.play("miss");
+        spawnImpactFX(best.hit, best.normal, mark, { plug });
+      }
+    } else {
+      // Speed/streak age, not the 180s countdown — stay readable; faint at long/slow.
+      tr.mesh.material.opacity = Math.max(0.22, Math.min(0.82, 0.22 + speed * 0.0007));
     }
     if (tr.prev) tr.prev.copy(tr.mesh.position);
     else tr.prev = tr.mesh.position.clone();
 
-    const maxLife = tr.maxLife || 1;
-    tr.mesh.material.opacity = Math.max(0, (tr.life / maxLife) * 0.78);
-
-    if (tr.life <= 0 || tr.mesh.position.y < -2.5) {
-      if (!tr.hit) {
+    if (!tr.hit && (tr.life <= 0 || tr.mesh.position.y < -2.5)) {
+      // Floor punch-through still scuffs + miss. Sky sanity timeout is silent (no fake impact).
+      if (tr.mesh.position.y < FLOOR_Y) {
         sfx.play("miss");
-        // y-floor kill / expired arc: spark + scuff on ground when below floor
-        if (tr.mesh.position.y < FLOOR_Y) {
-          const ground = tr.mesh.position.clone();
-          ground.y = FLOOR_Y;
-          spawnImpactFX(ground, new THREE.Vector3(0, 1, 0), "scuff");
+        const ground = tr.mesh.position.clone();
+        ground.y = FLOOR_Y;
+        {
+          const up = new THREE.Vector3(0, 1, 0);
+          const bounced = trySpawnSpentSlugBounce(ground, up, tr.vel, "env");
+          spawnImpactFX(ground, up, bounced ? "scuff" : "punch", { plug: !bounced });
         }
       }
       scene.remove(tr.mesh);
@@ -8014,7 +8377,6 @@ function updateTracers(dt) {
     }
   }
 }
-
 
 function vaultRootFor(obj) {
   let o = obj;
@@ -8460,6 +8822,7 @@ function updatePlayer(dt) {
   updateHobReadout();
   updateTracers(dt);
   updateCasings(dt);
+  updateSpentSlugs(dt);
   updateGlassShards(dt);
   updateImpactFX(dt);
   updateBulbSparks(dt);

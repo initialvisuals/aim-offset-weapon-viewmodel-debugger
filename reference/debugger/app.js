@@ -143,7 +143,7 @@ const state = {
   spaceHoldT: 0,
   /** Sim (true) = HoB + ballistic zero. Arcade (false) = reticle-faithful / idealized bore=aim. */
   hobZero: true,
-  /** Zero distance in demo meters. */
+  /** Stored optic zero (m). Irons ignore this and always ballistic-zero at 100 via effectiveZeroDist(). */
   zeroDist: 100,
   /** PerspectiveCamera near/far — tunable in Settings (O) for depth teaching. */
   camNear: 0.05,
@@ -642,6 +642,11 @@ function setZeroDist(m, { toast = false } = {}) {
   updateHobReadout();
   updateAimBoreRays();
   if (toast) showToast(`Zero ${state.zeroDist} m`);
+}
+
+/** Ballistic zero in meters. Irons are locked at 100; holo / acog / sniper use stored zeroDist. */
+function effectiveZeroDist() {
+  return state.optic === "iron" ? 100 : (state.zeroDist || 100);
 }
 
 function applyCameraClip() {
@@ -1293,12 +1298,18 @@ function cycleStep(which, dir) {
     el("attStepSelect").value = next;
   }
 }
+let _ironsZeroLockToasted = false;
 function cycleZeroDist(dir) {
   let i = ZERO_DIST_PRESETS.indexOf(state.zeroDist);
   if (i < 0) i = ZERO_DIST_PRESETS.indexOf(100);
   if (i < 0) i = 2;
   const next = clamp(i + dir, 0, ZERO_DIST_PRESETS.length - 1);
-  setZeroDist(ZERO_DIST_PRESETS[next], { toast: true });
+  const onIrons = state.optic === "iron";
+  setZeroDist(ZERO_DIST_PRESETS[next], { toast: !onIrons });
+  if (onIrons && !_ironsZeroLockToasted) {
+    _ironsZeroLockToasted = true;
+    showToast("Irons locked at 100 m");
+  }
 }
 
 
@@ -3878,7 +3889,7 @@ function ballisticForWeapon() {
 /* ---- Height-over-bore + zeroing (teaching model) ----
  * Sight ray = camera / optic aim.
  * Natural bore = muzzleSocket local −Z (barrel extends toward −Z on these block guns).
- * Zero: choose launch dir so the constant-g arc meets the sight point at zeroDist.
+ * Zero: choose launch dir so the constant-g arc meets the sight point at effectiveZeroDist().
  * Arcade toggle: velocity = camera forward (reticle-faithful / hides HoB).
  */
 const _sightO = new THREE.Vector3();
@@ -4011,7 +4022,7 @@ function updateAimBoreRays() {
   getSightRay(_sightO, _sightD);
   getBoreForward(_boreD);
 
-  const Z = Math.max(5, state.zeroDist || 100);
+  const Z = Math.max(5, effectiveZeroDist());
   // Sight: camera → zero point
   _zeroPt.copy(_sightO).addScaledVector(_sightD, Z);
   setRayEndpoints(aimRayLine, _sightO, _zeroPt);
@@ -4035,7 +4046,9 @@ function updateHobReadout() {
   const hobM = computeHobMeters();
   const cm = hobM * 100;
   const mode = state.hobZero ? "Sim" : "Arcade";
-  node.textContent = `HoB ${cm >= 0 ? "+" : ""}${cm.toFixed(1)} cm · ${mode} · Z=${state.zeroDist} m`;
+  const z = effectiveZeroDist();
+  const zLabel = state.optic === "iron" ? `Z=${z} m (irons)` : `Z=${z} m`;
+  node.textContent = `HoB ${cm >= 0 ? "+" : ""}${cm.toFixed(1)} cm · ${mode} · ${zLabel}`;
 }
 
 /** Apply Arcade vs Sim theme + hobZero. Sim = true, Arcade = false. */
@@ -4086,7 +4099,7 @@ function fireLaunchDirection(muzzlePos, outDir) {
     return;
   }
   getSightRay(_sightO, _sightD);
-  _zeroPt.copy(_sightO).addScaledVector(_sightD, Math.max(1, state.zeroDist || 100));
+  _zeroPt.copy(_sightO).addScaledVector(_sightD, Math.max(1, effectiveZeroDist()));
   const bal = ballisticForWeapon();
   solveBallisticLaunchDir(muzzlePos, _zeroPt, bal.speed, bal.gravity, outDir);
 }

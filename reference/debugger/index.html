@@ -142,7 +142,7 @@
               <button type="button" id="btnAimRays" class="toggle" aria-pressed="false" title="Draw sight ray vs bore/launch ray">Show aim/bore rays</button>
               <code id="hobReadout">HoB — cm</code>
             </div>
-            <p class="note" id="ballisticsNote">Sight ray = camera/optic aim. <strong>Sim</strong> launches along a ballistic zero so the gravity arc meets the sight ray at the zero distance (default 100&nbsp;m). <strong>Arcade</strong> is reticle-faithful: spawn at muzzle, velocity = camera forward (idealized bore=aim).</p>
+            <p class="note" id="ballisticsNote">Sight ray = camera/optic aim. <strong>Sim</strong> launches along a ballistic zero so the gravity arc meets the sight ray at the zero distance (optics use the preset; <strong>irons are locked at 100&nbsp;m</strong>). <strong>Arcade</strong> is reticle-faithful: spawn at muzzle, velocity = camera forward (idealized bore=aim).</p>
             <p class="note arcade-zero-hint" id="arcadeZeroHint" hidden>Zero distance mainly applies in Sim.</p>
           </div>
 
@@ -161,7 +161,7 @@
                 <li>Hold <kbd>Space</kbd> vault (when prompted) · ADS + Space = hold breath · tap Space reserved</li>
                 <li><kbd>O</kbd> Settings (options)</li>
                 <li><kbd>B</kbd> cycle Arcade / Sim (game style)</li>
-                <li><kbd>-</kbd>/<kbd>=</kbd> cycle zero distance (Sim)</li>
+                <li><kbd>-</kbd>/<kbd>=</kbd> cycle optic zero (Sim) · irons locked 100 m</li>
                 <li>LMB fire (tracers from muzzle; Sim = HoB+zero by default)</li>
                 <li><kbd>R</kbd> reload mag · <kbd>F</kbd> bench pickup / table reset button</li>
                 <li>Click canvas = mouse look</li>
@@ -356,6 +356,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v5"></script>
+    <script type="module" src="app.js?v=20260824v6"></script>
 </body>
 </html>

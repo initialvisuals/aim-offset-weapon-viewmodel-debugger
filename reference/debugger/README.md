@@ -17,7 +17,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 ## What you get
 
 1. **3D viewport** — walkable room, optics table, first-person block guns, cyan aim ray (camera −Z), hip crosshair.
-2. **Range** — circular bullseyes + knockdown silhouette lane; **firing-line sandbags** + stall benches at spawn; side-bay **floodlights with visible floor pools** (~25/80/160/280 m); **floor chalk lines** + **wall stencil distances** at circular-target ranges (~50/100/150/200/300/400 m). No floating text on targets.
+2. **Range** — circular bullseyes + knockdown silhouette lane; **firing-line sandbags** + stall benches at spawn; side-bay **floodlights with visible floor pools** (~25/80/160/280 m from spawn); **floor chalk lines** + **wall stencil distances** at circular-target ranges (50/100/150/200/300/400 m from the spawn firing line). Wall numbers are meters from spawn, not raw world `|z|`. No floating text on targets.
 3. **Player** (panel closed) — WASD, Shift sprint, **C** crouch toggle / **Z** crouch hold (slower, no sprint, ducked eye), mouse look, **Q/E lean (wall-clamped)**, tiny A/D strafe tilt, RMB ADS, Space hold-breath, LMB fire, **V reload**.
 4. **ADS** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), HUD reticles + mag-optic tube/vignette, 3D iron sights. Look sens scales with optic FOV.
 5. **Sway / breath** — procedural `swayRig` after authored hold (header **Sway** toggle). Space hold-breath damps sway ~3s (HUD bar).

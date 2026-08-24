@@ -1068,8 +1068,17 @@ const input = {
   crouchHold: false,
 };
 
+/** Spawn / firing-line world Z. Range art distances are meters downrange (−Z) from here. */
+const SPAWN_Z = 2.5;
+/** World Z for `meters` downrange of the spawn firing line. */
+function rangeZ(meters) {
+  return SPAWN_Z - meters;
+}
+/** Wall chalk + stencil distances (meters from spawn firing line). */
+const RANGE_MARK_DISTANCES = [50, 100, 150, 200, 300, 400];
+
 const player = {
-  pos: new THREE.Vector3(0, 0.2, 2.5),
+  pos: new THREE.Vector3(0, 0.2, SPAWN_Z),
   yaw: 0,
   pitch: 0,
   leanAngle: 0,
@@ -1911,10 +1920,12 @@ function buildRoom() {
     roughness: 0.92,
     metalness: 0.04,
   });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 450), floorMat);
+  // Bay geometry centered on the 200 m mark so spawn→berm (~410 m) stays covered.
+  const rangeCenterZ = rangeZ(200);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 460), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = FLOOR_Y;
-  floor.position.z = -200;
+  floor.position.z = rangeCenterZ;
   floor.receiveShadow = true;
   floor.userData.impactSurface = "floor";
   scene.add(floor);
@@ -1922,7 +1933,7 @@ function buildRoom() {
   // Soft reference grid — quieter than before so texture can read
   const grid = new THREE.GridHelper(40, 80, 0x2e3848, 0x1c222c);
   grid.position.y = -1.39;
-  grid.position.z = -200;
+  grid.position.z = rangeCenterZ;
   grid.material.transparent = true;
   grid.material.opacity = 0.35;
   scene.add(grid);
@@ -1935,8 +1946,8 @@ function buildRoom() {
     metalness: 0.05,
   });
   for (const side of [-12, 12]) {
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 420), wallMat.clone());
-    wall.position.set(side, -0.2, -200);
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 430), wallMat.clone());
+    wall.position.set(side, -0.2, rangeCenterZ);
     wall.castShadow = true;
     wall.receiveShadow = true;
     addLeanSolid(wall);
@@ -2014,14 +2025,12 @@ function buildOpticsTable() {
 }
 
 function buildShootingRange() {
-  const baseLanes = [
-    { z: -50, m: 50, pts: 5 },
-    { z: -100, m: 100, pts: 8 },
-    { z: -150, m: 150, pts: 12 },
-    { z: -200, m: 200, pts: 16 },
-    { z: -300, m: 300, pts: 22 },
-    { z: -400, m: 400, pts: 30 },
-  ];
+  const ptsByM = { 50: 5, 100: 8, 150: 12, 200: 16, 300: 22, 400: 30 };
+  const baseLanes = RANGE_MARK_DISTANCES.map((m) => ({
+    z: rangeZ(m),
+    m,
+    pts: ptsByM[m],
+  }));
   clearGroundRangeLines();
   rangeTargets = [];
   silhouetteTargets = [];
@@ -2031,8 +2040,9 @@ function buildShootingRange() {
   if (fl) fl.innerHTML = "";
 
   const stripTex = makeLaneStripTexture();
+  const rangeCenterZ = rangeZ(200);
   const strip = new THREE.Mesh(
-    new THREE.PlaneGeometry(18, 420),
+    new THREE.PlaneGeometry(18, 430),
     new THREE.MeshStandardMaterial({
       map: stripTex,
       color: 0xa8b0bc,
@@ -2041,12 +2051,12 @@ function buildShootingRange() {
     })
   );
   strip.rotation.x = -Math.PI / 2;
-  strip.position.set(0, -1.385, -200);
+  strip.position.set(0, -1.385, rangeCenterZ);
   strip.receiveShadow = true;
   scene.add(strip);
 
   for (const side of [-5.5, 5.5]) {
-    const rail = makeBox(0.1, 0.14, 400, 0x343c4c, side, -1.3, -200);
+    const rail = makeBox(0.1, 0.14, 410, 0x343c4c, side, -1.3, rangeCenterZ);
     rail.material.roughness = 0.8;
     rail.material.metalness = 0.2;
     scene.add(rail);
@@ -2128,7 +2138,7 @@ function buildShootingRange() {
   buildBackBerm();
 }
 
-/** Earthen backstop berm ~400m — layered dirt/rock silhouette for distance read. */
+/** Earthen backstop berm ~410 m from spawn — layered dirt/rock silhouette for distance read. */
 function buildBackBerm() {
   const bermTex = makeBermTexture();
   const dirtMat = new THREE.MeshStandardMaterial({
@@ -2142,28 +2152,30 @@ function buildBackBerm() {
     roughness: 0.96,
     metalness: 0.02,
   });
+  // Just past the 400 m mark so the end-wall reads as the range backstop.
+  const bermZ = rangeZ(410);
   // Main mound
   const main = new THREE.Mesh(new THREE.BoxGeometry(28, 5.2, 3.2), dirtMat);
-  main.position.set(0, 0.7, -410);
+  main.position.set(0, 0.7, bermZ);
   main.castShadow = true;
   main.receiveShadow = true;
   addLeanSolid(main);
   // Front slope / face toward shooter
   const face = new THREE.Mesh(new THREE.BoxGeometry(26, 3.6, 2.4), dirtMat.clone());
-  face.position.set(0, -0.15, -407.2);
+  face.position.set(0, -0.15, bermZ + 2.8);
   face.rotation.x = -0.35;
   face.castShadow = true;
   face.receiveShadow = true;
   addLeanSolid(face);
   // Crest / uneven top chunks
-  for (const [x, y, z, w, h, d] of [
-    [-8, 3.2, -410.5, 6, 1.4, 2.2],
-    [-2, 3.5, -409.8, 5, 1.8, 2.5],
-    [5, 3.1, -410.2, 7, 1.3, 2.0],
-    [10, 2.9, -411, 5, 1.1, 1.8],
+  for (const [x, y, zOff, w, h, d] of [
+    [-8, 3.2, -0.5, 6, 1.4, 2.2],
+    [-2, 3.5, 0.2, 5, 1.8, 2.5],
+    [5, 3.1, -0.2, 7, 1.3, 2.0],
+    [10, 2.9, -1.0, 5, 1.1, 1.8],
   ]) {
     const chunk = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), darkMat.clone());
-    chunk.position.set(x, y, z);
+    chunk.position.set(x, y, bermZ + zOff);
     chunk.rotation.y = (x % 3) * 0.05;
     chunk.castShadow = true;
     chunk.receiveShadow = true;
@@ -2172,7 +2184,7 @@ function buildBackBerm() {
   // Flanking dirt piles
   for (const side of [-14, 14]) {
     const pile = new THREE.Mesh(new THREE.BoxGeometry(6, 3.2, 4), dirtMat.clone());
-    pile.position.set(side, 0.1, -408);
+    pile.position.set(side, 0.1, bermZ + 2);
     pile.castShadow = true;
     pile.receiveShadow = true;
     addLeanSolid(pile);
@@ -2189,16 +2201,16 @@ function buildRangeProps() {
     () => addLeanSolid(makeCrate(0.5, 0.4, 0.48, 7.4, -1.18, -3.5, -0.25)),
     () => addLeanSolid(makeBarrel(0.2, 0.65, 6.8, -1.07, -4.8, 0x4a3a2e)),
     () => addLeanSolid(makeBarrel(0.22, 0.72, 7.6, -1.04, -5.2, 0x3d4550)),
-    // mid-range side silhouettes
-    () => addLeanSolid(makeCrate(0.6, 0.5, 0.55, -7.8, -1.12, -48, 0.15)),
-    () => addLeanSolid(makeBarrel(0.24, 0.8, -7.1, -1.0, -52, 0x454e3a)),
-    () => addLeanSolid(makeCrate(0.45, 0.38, 0.42, 7.5, -1.18, -70, -0.3)),
-    () => addLeanSolid(makeBarrel(0.22, 0.7, 8.0, -1.05, -95, 0x3a4048)),
-    () => addLeanSolid(makeCrate(0.7, 0.55, 0.6, -8.0, -1.1, -140, 0.4)),
-    () => addLeanSolid(makeBarrel(0.25, 0.85, 7.8, -0.98, -180, 0x4a4034)),
-    () => addLeanSolid(makeCrate(0.5, 0.42, 0.48, 7.2, -1.16, -220, -0.2)),
-    () => addLeanSolid(makeCrate(0.55, 0.48, 0.5, -7.6, -1.14, -280, 0.1)),
-    () => addLeanSolid(makeBarrel(0.23, 0.75, 7.4, -1.02, -320, 0x384438)),
+    // mid-range side props at spawn-relative distances
+    () => addLeanSolid(makeCrate(0.6, 0.5, 0.55, -7.8, -1.12, rangeZ(48), 0.15)),
+    () => addLeanSolid(makeBarrel(0.24, 0.8, -7.1, -1.0, rangeZ(52), 0x454e3a)),
+    () => addLeanSolid(makeCrate(0.45, 0.38, 0.42, 7.5, -1.18, rangeZ(70), -0.3)),
+    () => addLeanSolid(makeBarrel(0.22, 0.7, 8.0, -1.05, rangeZ(95), 0x3a4048)),
+    () => addLeanSolid(makeCrate(0.7, 0.55, 0.6, -8.0, -1.1, rangeZ(140), 0.4)),
+    () => addLeanSolid(makeBarrel(0.25, 0.85, 7.8, -0.98, rangeZ(180), 0x4a4034)),
+    () => addLeanSolid(makeCrate(0.5, 0.42, 0.48, 7.2, -1.16, rangeZ(220), -0.2)),
+    () => addLeanSolid(makeCrate(0.55, 0.48, 0.5, -7.6, -1.14, rangeZ(280), 0.1)),
+    () => addLeanSolid(makeBarrel(0.23, 0.75, 7.4, -1.02, rangeZ(320), 0x384438)),
   ];
   for (const place of placements) place();
 }
@@ -2370,19 +2382,19 @@ function makeFloodlight(x, z, opts = {}) {
   return { group, light };
 }
 
-/** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m — PointLights + fake pools. */
+/** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m from spawn — PointLights + fake pools. */
 function buildRangeFloodlights() {
   floodLights = [];
   // PointLight intensity/distance sized to read on MeshStandard; soft peach discs sell the spill.
   // Pool radii ~10–14 m under fixture; depthTest:false NormalBlending so they stay visible.
   const posts = [
-    { x: -9.2, z: -25, intensity: 48, distance: 45, poolRadius: 14, poolCoreRadius: 4.5, poolInward: 5.5 },
-    { x: 9.4, z: -80, intensity: 58, distance: 52, poolRadius: 13, poolCoreRadius: 4.2, poolInward: 5.2 },
-    { x: -9.2, z: -160, intensity: 68, distance: 56, poolRadius: 12, poolCoreRadius: 4, poolInward: 5 },
-    { x: 9.4, z: -280, intensity: 78, distance: 60, poolRadius: 11, poolCoreRadius: 3.5, poolInward: 5 },
+    { x: -9.2, meters: 25, intensity: 48, distance: 45, poolRadius: 14, poolCoreRadius: 4.5, poolInward: 5.5 },
+    { x: 9.4, meters: 80, intensity: 58, distance: 52, poolRadius: 13, poolCoreRadius: 4.2, poolInward: 5.2 },
+    { x: -9.2, meters: 160, intensity: 68, distance: 56, poolRadius: 12, poolCoreRadius: 4, poolInward: 5 },
+    { x: 9.4, meters: 280, intensity: 78, distance: 60, poolRadius: 11, poolCoreRadius: 3.5, poolInward: 5 },
   ];
   for (const p of posts) {
-    const { group, light } = makeFloodlight(p.x, p.z, p);
+    const { group, light } = makeFloodlight(p.x, rangeZ(p.meters), p);
     addLeanSolid(group);
     floodLights.push(light);
   }
@@ -2496,13 +2508,8 @@ function createKnockdownSilhouette(x, z, scale) {
 
 function buildSilhouetteLane() {
   silhouetteTargets = [];
-  const lanes = [
-    { z: -42 },
-    { z: -88 },
-    { z: -145 },
-    { z: -230 },
-    { z: -340 },
-  ];
+  // Off the circular-target marks so both lanes read distinctly.
+  const lanes = [80, 140, 190, 280, 370].map((m) => ({ z: rangeZ(m), m }));
   const laneX = 7.4;
   lanes.forEach((lane) => {
     const x = laneX + (Math.random() - 0.5) * 1.6;
@@ -2711,9 +2718,9 @@ function initThree() {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(SCENE_BG_BASE);
-  // Subtle distance fog so ~400m berm reads as far without crushing mid-lane contrast
+  // Subtle distance fog so ~410 m berm (from spawn) reads as far without crushing mid-lane contrast
   applyFog();
-  // near slightly above 0.01 improves distant depth precision; far clears ~410m berm.
+  // near slightly above 0.01 improves distant depth precision; far clears ~410 m berm from spawn.
   // logarithmicDepthBuffer on the renderer further reduces distant z-fighting.
   camera = new THREE.PerspectiveCamera(player.fovHip, 1, state.camNear, state.camFar);
 
@@ -3634,7 +3641,7 @@ function updatePlayer(dt) {
     player.pos.x += (mx * cy + mz * sy) * speed * dt;
     player.pos.z += (-mx * sy + mz * cy) * speed * dt;
     player.pos.x = clamp(player.pos.x, -10, 10);
-    player.pos.z = clamp(player.pos.z, -410, 4);
+    player.pos.z = clamp(player.pos.z, rangeZ(412), SPAWN_Z + 1.5);
   }
 
   // View bob

@@ -25,7 +25,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 7. **Sim / Arcade + HoB** — **B** cycles **Sim** (default: height-over-bore + ballistic zero so the gravity arc meets the sight ray at **zero distance**) vs **Arcade** (reticle-faithful, vel = camera forward). **`-`/`=`** cycle zero (25/50/100/200/300 m, default 100). Live HoB cm readout; optional aim/bore rays.
 8. **Optics table** — iron / holo / acog / sniper_scope; look + click or E to equip.
 9. **Debugger (` / Backquote)** — view/attachment tabs, ads_factor, six-axis editors, Copy JSON. **G** = gun picker.
-10. **Settings (`O`)** — pauses gameplay: game style, **hip reticle** toggle, aim/bore rays, **brightness / gamma** (CSS filter + mild fog lift; defaults **1.30 / 1.18**), **PLUGE** grey strip, zero distance, look sens, ADS look mul, controls cheat.
+10. **Settings (`O`)** — pauses gameplay: game style, **hip reticle** toggle, aim/bore rays, **brightness / gamma** (CSS filter + mild fog lift; defaults **1.30 / 1.18**), **fog** enable + near/far (linear `THREE.Fog`, defaults **ON / 90 / 430**), **PLUGE** grey strip, zero distance, look sens, ADS look mul, controls cheat.
 
 ## Hotkeys
 
@@ -79,6 +79,7 @@ Real guns put the barrel below the optic, so the bore line and the sight line ar
 | Show aim/bore rays | Ballistics / Settings | **OFF** — cyan sight, amber launch |
 | Show hip reticle | Settings | **ON** — 3px hip crosshair (ADS HUD unchanged) |
 | Brightness / Gamma | Settings | **1.30 / 1.18** — CSS `brightness()`/`contrast()` on `#view3d` + mild fog/bg lift |
+| Fog | Settings | **ON** — linear `THREE.Fog` near **90** / far **430**; color tracks bg/clear |
 | Show PLUGE strip | Settings | **OFF** — Black/Low/Mid/High/White overlay (unfiltered) |
 | HoB readout | Live cm | Signed: + = muzzle below sight ray |
 

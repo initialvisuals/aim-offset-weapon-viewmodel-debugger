@@ -266,6 +266,20 @@
       </div>
 
       <div class="settings-section">
+        <h3>Fog</h3>
+        <label class="check-row"><input type="checkbox" id="chkFog" checked /> Fog enabled</label>
+        <label class="slider-row">Near
+          <input type="range" id="fogNearSlider" min="20" max="200" step="1" value="90" />
+          <code id="fogNearVal">90</code>
+        </label>
+        <label class="slider-row">Far
+          <input type="range" id="fogFarSlider" min="150" max="500" step="1" value="430" />
+          <code id="fogFarVal">430</code>
+        </label>
+        <p class="note">Linear distance fog (<code>THREE.Fog</code>). Color tracks clear/background. Density (<code>FogExp2</code>) not exposed yet.</p>
+      </div>
+
+      <div class="settings-section">
         <h3>Camera clip</h3>
         <p class="note">Near/far planes for depth teaching. Defaults clear the ~410&nbsp;m berm; logarithmic depth is on.</p>
         <label class="slider-row">Near
@@ -315,7 +329,7 @@
           <li><kbd>V</kbd> reload · <kbd>Space</kbd> hold breath · <kbd>B</kbd> Arcade/Sim</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>R</kbd> reset silhouettes · <kbd>F</kbd>/<kbd>E</kbd> equip looked-at optic</li>
-          <li>Settings: hip reticle · Brightness/Gamma · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -323,6 +337,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824t5"></script>
+    <script type="module" src="app.js?v=20260824t6"></script>
 </body>
 </html>

@@ -139,6 +139,10 @@ const state = {
   brightness: 1.30,
   /** Viewport CSS contrast / “gamma” feel (0.8–1.6). */
   gamma: 1.18,
+  /** Linear distance fog (THREE.Fog) — tunable in Settings (O). */
+  fogEnabled: true,
+  fogNear: 90,
+  fogFar: 430,
   /** Overlay Black/Low/Mid/High/White strip on viewport corner. */
   showPluge: false,
 };
@@ -614,7 +618,68 @@ function setCamFar(v, { toast = false } = {}) {
   if (toast) showToast(`Camera far ${Math.round(state.camFar)}`);
 }
 
+/** Apply linear scene fog from Settings; null when disabled. Color tracks bg/clear. */
+function applyFog() {
+  if (!scene) return;
+  const near = clamp(Number(state.fogNear) || 90, 20, 200);
+  let far = clamp(Number(state.fogFar) || 430, 150, 500);
+  if (far <= near) far = Math.min(500, near + 10);
+  state.fogNear = near;
+  state.fogFar = far;
 
+  if (!state.fogEnabled) {
+    scene.fog = null;
+    return;
+  }
+
+  let hex = SCENE_BG_BASE;
+  if (scene.background && scene.background.isColor) {
+    hex = scene.background.getHex();
+  }
+  if (scene.fog && scene.fog.isFog) {
+    scene.fog.near = near;
+    scene.fog.far = far;
+    scene.fog.color.setHex(hex);
+  } else {
+    scene.fog = new THREE.Fog(hex, near, far);
+  }
+}
+
+function setFogEnabled(on, { toast = false } = {}) {
+  state.fogEnabled = !!on;
+  applyFog();
+  const chk = el("chkFog");
+  if (chk) chk.checked = state.fogEnabled;
+  if (toast) showToast(state.fogEnabled ? "Fog ON" : "Fog OFF");
+}
+
+function setFogNear(v, { toast = false } = {}) {
+  state.fogNear = parseFloat(v);
+  applyFog();
+  const slider = el("fogNearSlider");
+  const val = el("fogNearVal");
+  if (slider) slider.value = String(state.fogNear);
+  if (val) val.textContent = String(Math.round(state.fogNear));
+  const farSlider = el("fogFarSlider");
+  const farVal = el("fogFarVal");
+  if (farSlider) farSlider.value = String(state.fogFar);
+  if (farVal) farVal.textContent = String(Math.round(state.fogFar));
+  if (toast) showToast(`Fog near ${Math.round(state.fogNear)}`);
+}
+
+function setFogFar(v, { toast = false } = {}) {
+  state.fogFar = parseFloat(v);
+  applyFog();
+  const slider = el("fogFarSlider");
+  const val = el("fogFarVal");
+  if (slider) slider.value = String(state.fogFar);
+  if (val) val.textContent = String(Math.round(state.fogFar));
+  const nearSlider = el("fogNearSlider");
+  const nearVal = el("fogNearVal");
+  if (nearSlider) nearSlider.value = String(state.fogNear);
+  if (nearVal) nearVal.textContent = String(Math.round(state.fogNear));
+  if (toast) showToast(`Fog far ${Math.round(state.fogFar)}`);
+}
 
 /** Map Settings brightness/gamma → CSS filter on #view3d + mild fog/bg/light lift. */
 function applyDisplayLook() {
@@ -638,9 +703,9 @@ function applyDisplayLook() {
   if (renderer) renderer.setClearColor(new THREE.Color(r, gv, bv), 1);
   if (scene) {
     if (scene.background && scene.background.isColor) scene.background.setRGB(r, gv, bv);
-    else if (scene) scene.background = new THREE.Color(r, gv, bv);
-    if (scene.fog) scene.fog.color.setRGB(r, gv, bv);
+    else scene.background = new THREE.Color(r, gv, bv);
   }
+  applyFog();
 
   const lightMul = 0.88 + 0.12 * b;
   if (hemiLight) hemiLight.intensity = HEMI_INT_BASE * lightMul;
@@ -739,6 +804,17 @@ function syncSettingsUI() {
   const gammaVal = el("gammaVal");
   if (gammaSlider) gammaSlider.value = String(state.gamma);
   if (gammaVal) gammaVal.textContent = Number(state.gamma).toFixed(2);
+
+  const chkFog = el("chkFog");
+  if (chkFog) chkFog.checked = !!state.fogEnabled;
+  const fogNearSlider = el("fogNearSlider");
+  const fogNearVal = el("fogNearVal");
+  if (fogNearSlider) fogNearSlider.value = String(state.fogNear);
+  if (fogNearVal) fogNearVal.textContent = String(Math.round(state.fogNear));
+  const fogFarSlider = el("fogFarSlider");
+  const fogFarVal = el("fogFarVal");
+  if (fogFarSlider) fogFarSlider.value = String(state.fogFar);
+  if (fogFarVal) fogFarVal.textContent = String(Math.round(state.fogFar));
 
   const chkPluge = el("chkPluge");
   if (chkPluge) chkPluge.checked = !!state.showPluge;
@@ -2636,7 +2712,7 @@ function initThree() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(SCENE_BG_BASE);
   // Subtle distance fog so ~400m berm reads as far without crushing mid-lane contrast
-  scene.fog = new THREE.Fog(SCENE_BG_BASE, 90, 430);
+  applyFog();
   // near slightly above 0.01 improves distant depth precision; far clears ~410m berm.
   // logarithmicDepthBuffer on the renderer further reduces distant z-fighting.
   camera = new THREE.PerspectiveCamera(player.fovHip, 1, state.camNear, state.camFar);
@@ -4155,6 +4231,20 @@ function bind() {
   }
   if (camFarInput) {
     camFarInput.onchange = (e) => setCamFar(e.target.value, { toast: true });
+  }
+
+  const chkFog = el("chkFog");
+  if (chkFog) {
+    chkFog.checked = state.fogEnabled;
+    chkFog.onchange = (e) => setFogEnabled(e.target.checked, { toast: true });
+  }
+  const fogNearSlider = el("fogNearSlider");
+  if (fogNearSlider) {
+    fogNearSlider.oninput = (e) => setFogNear(e.target.value);
+  }
+  const fogFarSlider = el("fogFarSlider");
+  if (fogFarSlider) {
+    fogFarSlider.oninput = (e) => setFogFar(e.target.value);
   }
 
   const brightnessSlider = el("brightnessSlider");

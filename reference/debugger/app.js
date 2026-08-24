@@ -2053,12 +2053,12 @@ function getFloodPoolTexture(kind = "outer") {
 
 function makeFloodPoolMaterial(map) {
   // depthTest:false so pools stay visible with renderer logarithmicDepthBuffer + transparent floor;
-  // prefer this over disabling log depth globally. NormalBlending + high opacity for reliability.
+  // prefer this over disabling log depth globally. NormalBlending + peach discs under floods.
   const mat = new THREE.MeshBasicMaterial({
     map,
-    color: 0xffc878,
+    color: 0xffd0a0,
     transparent: true,
-    opacity: 0.75,
+    opacity: 0.62,
     depthTest: false,
     depthWrite: false,
     blending: THREE.NormalBlending,
@@ -2136,8 +2136,8 @@ function makeFloodlight(x, z, opts = {}) {
   group.add(light);
   light.userData.floodIntBase = intensity;
 
-  // Unmissable floor pool under the fixture (visual only — no raycast / lean).
-  // radius 10–16, y=0.04, inward 4–6; depthTest:false + renderOrder 1000 vs log-depth/transparent fights.
+  // Floor pool under the fixture (visual only — no raycast / lean).
+  // radius ~10–14, y=0.04, inward 4–6; depthTest:false + renderOrder 1000 vs log-depth/transparent fights.
   const poolR = opts.poolRadius != null ? opts.poolRadius : 14;
   const poolInward = opts.poolInward != null ? opts.poolInward : 5;
   const poolX = inward * poolInward;
@@ -2174,44 +2174,19 @@ function makeFloodlight(x, z, opts = {}) {
 /** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m — PointLights + fake pools. */
 function buildRangeFloodlights() {
   floodLights = [];
-  // PointLight intensity/distance sized to read on MeshStandard; soft radial discs sell the spill.
-  // Pool radii 10–16 m under fixture; nearest post gets an unmissable warm disc from spawn.
+  // PointLight intensity/distance sized to read on MeshStandard; soft peach discs sell the spill.
+  // Pool radii ~10–14 m under fixture; depthTest:false NormalBlending so they stay visible.
   const posts = [
-    { x: -9.2, z: -25, intensity: 48, distance: 45, poolRadius: 16, poolCoreRadius: 5.5, poolInward: 5.5 },
-    { x: 9.4, z: -80, intensity: 58, distance: 52, poolRadius: 15, poolCoreRadius: 5, poolInward: 5.2 },
-    { x: -9.2, z: -160, intensity: 68, distance: 56, poolRadius: 14, poolCoreRadius: 4.5, poolInward: 5 },
-    { x: 9.4, z: -280, intensity: 78, distance: 60, poolRadius: 12, poolCoreRadius: 4, poolInward: 5 },
+    { x: -9.2, z: -25, intensity: 48, distance: 45, poolRadius: 14, poolCoreRadius: 4.5, poolInward: 5.5 },
+    { x: 9.4, z: -80, intensity: 58, distance: 52, poolRadius: 13, poolCoreRadius: 4.2, poolInward: 5.2 },
+    { x: -9.2, z: -160, intensity: 68, distance: 56, poolRadius: 12, poolCoreRadius: 4, poolInward: 5 },
+    { x: 9.4, z: -280, intensity: 78, distance: 60, poolRadius: 11, poolCoreRadius: 3.5, poolInward: 5 },
   ];
-  let first = true;
   for (const p of posts) {
     const { group, light } = makeFloodlight(p.x, p.z, p);
-    if (first) {
-      // TODO removable — temporary 3 m bright marker so playtest can confirm flood group is in the scene.
-      const marker = new THREE.Mesh(
-        new THREE.BoxGeometry(0.8, 3, 0.8),
-        new THREE.MeshBasicMaterial({ color: 0xff6600, toneMapped: false })
-      );
-      marker.position.set(0, 1.5, 0); // first flood base world x=-9.2,z=-25
-      marker.userData.debugFloodMarker = true;
-      marker.raycast = () => {};
-      group.add(marker);
-      first = false;
-    }
     addLeanSolid(group);
     floodLights.push(light);
   }
-
-  // TODO removable — huge magenta box directly ahead of default spawn (looking -Z from z≈2.5).
-  const spawnMarker = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 4, 1),
-    new THREE.MeshBasicMaterial({ color: 0xff00ff, toneMapped: false })
-  );
-  spawnMarker.position.set(0, 1, -3);
-  spawnMarker.userData.debugFloodMarker = true;
-  spawnMarker.raycast = () => {};
-  scene.add(spawnMarker);
-
-  console.log('[flood] built', floodLights.length);
 }
 
 

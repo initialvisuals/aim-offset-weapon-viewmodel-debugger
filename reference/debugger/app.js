@@ -85,6 +85,13 @@ const WEAPON_META = {
   example_rifle: { label: "Example Rifle", blurb: "Long rifle — hip/ADS/sniper poses" },
 };
 
+/** Mag capacity + reload duration. Sniper optic uses a short mag / slower swap. Infinite reserve for range demo. */
+const MAG_SPEC = {
+  example_smg: { capacity: 30, reloadSec: 1.2 },
+  example_rifle: { capacity: 20, reloadSec: 1.2 },
+  sniper: { capacity: 5, reloadSec: 2.0 },
+};
+
 const state = {
   mode: "weapon",
   weaponId: "example_smg",
@@ -117,6 +124,14 @@ const state = {
   showAimRays: false,
   /** 3px hip crosshair visibility (ADS optic HUD unaffected). */
   showHipReticle: true,
+  /** Rounds currently in the magazine. */
+  ammoInMag: 30,
+  /** True while a timed reload is in progress (blocks fire). */
+  reloading: false,
+  /** Seconds elapsed in the current reload. */
+  reloadElapsed: 0,
+  /** Active reload duration (sec). */
+  reloadDuration: 1.2,
 };
 
 const LOOK_SENS_BASE = 0.0022;
@@ -166,6 +181,75 @@ function gameplayActive() {
 function typingFocus() {
   const t = document.activeElement;
   return t && (t.matches("input, select, textarea") || t.isContentEditable);
+}
+
+function magSpecForLoadout() {
+  if (state.optic === "sniper_scope") return MAG_SPEC.sniper;
+  return MAG_SPEC[state.weaponId] || MAG_SPEC.example_smg;
+}
+
+function syncAmmoForLoadout({ refill = false } = {}) {
+  const spec = magSpecForLoadout();
+  state.reloadDuration = spec.reloadSec;
+  if (refill || state.ammoInMag > spec.capacity) {
+    state.ammoInMag = spec.capacity;
+  }
+  if (state.reloading) {
+    // Cancel in-progress reload on weapon/optic swap; keep remaining rounds.
+    state.reloading = false;
+    state.reloadElapsed = 0;
+  }
+  updateAmmoHud();
+}
+
+function updateAmmoHud() {
+  const node = el("ammoHud");
+  if (!node) return;
+  const cap = magSpecForLoadout().capacity;
+  if (state.reloading) {
+    node.textContent = `RELOADING… ${state.ammoInMag}/${cap}`;
+    node.classList.add("reloading");
+  } else {
+    node.textContent = `${state.ammoInMag}/${cap} · ∞`;
+    node.classList.toggle("empty", state.ammoInMag <= 0);
+    node.classList.remove("reloading");
+  }
+}
+
+function beginReload() {
+  if (!gameplayActive()) return;
+  if (state.reloading) return;
+  const spec = magSpecForLoadout();
+  if (state.ammoInMag >= spec.capacity) return;
+  state.reloading = true;
+  state.reloadElapsed = 0;
+  state.reloadDuration = spec.reloadSec;
+  updateAmmoHud();
+}
+
+function finishReload() {
+  const spec = magSpecForLoadout();
+  state.ammoInMag = spec.capacity; // infinite reserve
+  state.reloading = false;
+  state.reloadElapsed = 0;
+  if (magMesh) magMesh.visible = true;
+  updateAmmoHud();
+}
+
+function updateReload(dt) {
+  if (!state.reloading) {
+    if (magMesh && !magMesh.visible) magMesh.visible = true;
+    return;
+  }
+  state.reloadElapsed += dt;
+  const dur = Math.max(0.05, state.reloadDuration || 1.2);
+  const t = Math.min(1, state.reloadElapsed / dur);
+  // Mag visibility flash mid-swap
+  if (magMesh) {
+    magMesh.visible = !(t > 0.18 && t < 0.72);
+  }
+  if (t >= 1) finishReload();
+  else updateAmmoHud();
 }
 
 
@@ -308,6 +392,32 @@ const sfx = {
       og.connect(c.destination);
       osc.start(now);
       osc.stop(now + 0.18);
+      return;
+    }
+
+    if (kind === "dry") {
+      // Short metallic click — empty mag, no tracer
+      out.gain.setValueAtTime(0.0001, now);
+      out.gain.exponentialRampToValueAtTime(0.18, now + 0.002);
+      out.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
+      const osc = c.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(420, now);
+      osc.frequency.exponentialRampToValueAtTime(180, now + 0.05);
+      osc.connect(out);
+      osc.start(now);
+      osc.stop(now + 0.06);
+      const click = c.createOscillator();
+      click.type = "square";
+      click.frequency.value = 1100;
+      const cg = c.createGain();
+      cg.gain.setValueAtTime(0.0001, now);
+      cg.gain.exponentialRampToValueAtTime(0.08, now + 0.001);
+      cg.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
+      click.connect(cg);
+      cg.connect(c.destination);
+      click.start(now);
+      click.stop(now + 0.03);
     }
   },
 };
@@ -497,6 +607,7 @@ function equipWeapon(id) {
   syncAxisInputsFromPose(true);
   syncAxisInputsFromPose(false);
   if (typeof buildBlockGun === "function" && holdRoot) buildBlockGun(id);
+  syncAmmoForLoadout({ refill: true });
   refresh();
   showToast("Equipped " + id);
 }
@@ -507,6 +618,7 @@ function setOptic(profile) {
   const sel = el("opticSelect");
   if (sel) sel.value = profile;
   updateOpticVisibility();
+  syncAmmoForLoadout({ refill: true });
   refresh(false);
   showToast("Optic: " + OPTIC_LABELS[profile]);
   updateHudHint();
@@ -658,7 +770,7 @@ function nudgeSelected(sign) {
 
 /* ---- Three.js scene + player ---- */
 let renderer, camera, scene, holdRoot, gunRoot;
-let opticRoot, gripMesh, muzzleFlash, muzzleSocket, swayRig;
+let opticRoot, gripMesh, muzzleFlash, muzzleSocket, swayRig, magMesh;
 let tracers = [];
 /** Short-lived bullet spark bursts (MeshBasic quads). */
 let impactSparks = [];
@@ -1160,6 +1272,8 @@ function buildBlockGun(style) {
     const barrel = makeCyl(0.012, 0.012, 0.38, 0x2c3340, 0, 0.022, -0.52, Math.PI / 2, 0, 0, 12);
     const muzzleBrake = makeCyl(0.016, 0.014, 0.04, 0x1a1f28, 0, 0.022, -0.72, Math.PI / 2, 0, 0, 10);
     const mag = makeBox(0.036, 0.15, 0.05, 0x444b58, 0, -0.115, 0.0);
+    mag.name = "mag";
+    magMesh = mag;
     const pistol = makeBox(0.036, 0.1, 0.048, 0x2a3140, 0, -0.085, 0.1);
     pistol.rotation.x = 0.22;
     gripMesh = makeBox(0.038, 0.055, 0.07, 0x6b5344, 0, -0.048, -0.2);
@@ -1177,6 +1291,8 @@ function buildBlockGun(style) {
     const barrel = makeCyl(0.011, 0.011, 0.2, 0x2c3340, 0, 0.016, -0.28, Math.PI / 2, 0, 0, 12);
     const muzzleDevice = makeCyl(0.014, 0.013, 0.028, 0x1a1f28, 0, 0.016, -0.4, Math.PI / 2, 0, 0, 10);
     const mag = makeBox(0.038, 0.12, 0.05, 0x444b58, 0, -0.1, 0.01);
+    mag.name = "mag";
+    magMesh = mag;
     const pistol = makeBox(0.034, 0.088, 0.042, 0x2a3140, 0, -0.078, 0.07);
     pistol.rotation.x = 0.28;
     gripMesh = makeBox(0.034, 0.048, 0.048, 0x6b5344, 0, -0.052, -0.1);
@@ -1966,13 +2082,23 @@ function applySwayAndRecoil(dt, moving) {
   player.recoilPunch.multiplyScalar(Math.exp(-10 * dt));
   player.recoilRot.multiplyScalar(Math.exp(-9 * dt));
 
+  // Simple reload dip (lower + pitch) while mag swap runs
+  let reloadDipY = 0, reloadDipRx = 0;
+  if (state.reloading) {
+    const dur = Math.max(0.05, state.reloadDuration || 1.2);
+    const u = Math.min(1, state.reloadElapsed / dur);
+    const envelope = Math.sin(Math.PI * u); // 0→1→0
+    reloadDipY = -0.055 * envelope;
+    reloadDipRx = 0.22 * envelope;
+  }
+
   swayRig.position.set(
     sx + player.recoilPunch.x,
-    sy + player.recoilPunch.y,
+    sy + player.recoilPunch.y + reloadDipY,
     sz + player.recoilPunch.z
   );
   swayRig.rotation.set(
-    rx + player.recoilRot.x,
+    rx + player.recoilRot.x + reloadDipRx,
     ry + player.recoilRot.y,
     rz + player.recoilRot.z,
     "XYZ"
@@ -2245,7 +2371,16 @@ function fireWeapon() {
     tryEquipLooked();
     return;
   }
+  if (state.reloading) return;
   sfx.resume();
+  if (state.ammoInMag <= 0) {
+    sfx.play("dry");
+    player.fireCooldown = 0.18;
+    updateAmmoHud();
+    return;
+  }
+  state.ammoInMag -= 1;
+  updateAmmoHud();
   sfx.play("fire");
   player.fireCooldown = state.optic === "sniper_scope" ? 0.35 : 0.12;
   fireFlash();
@@ -2672,6 +2807,7 @@ function updatePlayer(dt) {
 
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
 
+  updateReload(dt);
   updateHoldBreath(dt);
   updatePickupHover();
   syncAdsSlider();
@@ -2791,7 +2927,7 @@ function updateHudHint() {
   } else if (state.panelOpen) {
     hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
   } else {
-    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd> crouch · <kbd>Z</kbd> hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd> crouch · <kbd>Z</kbd> hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire · <kbd>V</kbd> reload`;
   }
 }
 
@@ -2912,6 +3048,11 @@ function onKeyDown(e) {
     }
     if ((k === "r" || k === "R") && !e.repeat) {
       resetSilhouettes();
+      e.preventDefault();
+    }
+    // V = reVload (R is silhouette reset; F is optic equip)
+    if ((code === "KeyV" || k === "v" || k === "V") && !e.repeat) {
+      beginReload();
       e.preventDefault();
     }
     if ((k === "-" || code === "Minus") && !e.repeat) {
@@ -3195,6 +3336,7 @@ function bind() {
   bindPointerLock();
   setTab("weapon");
   setPanelOpen(false);
+  syncAmmoForLoadout({ refill: true });
   updateHudHint();
   initThree();
   refresh();

@@ -195,6 +195,19 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
   color: #fff; font: 600 1rem/1.2 ui-sans-serif, system-ui, sans-serif;
   text-shadow: 0 1px 4px #000; letter-spacing: 0.02em;
 }
+.ammo-hud {
+  pointer-events: none; position: absolute; left: 50%; bottom: 12%;
+  transform: translateX(-50%);
+  color: #e8eef8; font: 700 1.05rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-shadow: 0 1px 4px #000; letter-spacing: 0.04em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  background: rgba(12, 16, 24, 0.55);
+  border: 1px solid rgba(120, 140, 170, 0.35);
+  z-index: 3;
+}
+.ammo-hud.empty { color: #ff8a8a; border-color: rgba(255, 100, 100, 0.45); }
+.ammo-hud.reloading { color: #ffe08a; border-color: rgba(255, 200, 80, 0.5); }
 
 .float-labels {
   pointer-events: none;
@@ -359,6 +372,14 @@ body[data-game-style="arcade"] .score-hud {
   color: #ffd6f5;
   text-shadow: 0 1px 4px #000, 0 0 10px rgba(255, 79, 216, 0.55);
 }
+body[data-game-style="arcade"] .ammo-hud {
+  color: #ffd6f5;
+  background: rgba(40, 16, 28, 0.7);
+  border-color: rgba(255, 79, 216, 0.45);
+  text-shadow: 0 1px 4px #000, 0 0 10px rgba(255, 79, 216, 0.45);
+}
+body[data-game-style="arcade"] .ammo-hud.empty { color: #ff8aad; }
+body[data-game-style="arcade"] .ammo-hud.reloading { color: #ffb347; }
 body[data-game-style="arcade"] .breath-fill {
   background: linear-gradient(90deg, #ff8a3d, #ff4fd8);
 }

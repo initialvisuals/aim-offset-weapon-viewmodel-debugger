@@ -355,8 +355,8 @@ function smooth01(t) {
   t = clamp(t, 0, 1);
   return t * t * (3 - 2 * t);
 }
-/** Ease in, hold dipped, ease out over a 0–1 reload clock. */
-function reloadDipEnvelope(u) {
+/** Ease in, hold the lifted pose, ease out over a 0–1 reload clock. */
+function reloadLiftEnvelope(u) {
   const enter = smooth01(u / 0.2);
   const leave = 1 - smooth01((u - 0.8) / 0.2);
   return enter * leave;
@@ -578,7 +578,7 @@ function updateReload(dt) {
   state.reloadElapsed += dt;
   const dur = Math.max(0.05, state.reloadDuration || 1.2);
   const t = Math.min(1, state.reloadElapsed / dur);
-  // Mag unseats, drops, then the seated size/shape slams in — inside the existing dip window.
+  // Mag unseats down the well, drops, then the seated size/shape slams in from below.
   if (magMesh) {
     applyReloadMagMotion(t);
   }
@@ -590,32 +590,39 @@ function applyReloadMagMotion(u) {
   const m = magMesh;
   if (!m) return;
   m.scale.set(1, 1, 1);
+  // Bottom-feed along the well. Sniper clip also kicks a bit forward-down (muzzle is -Z).
+  const sniper = state.weaponId === "example_sniper";
+  const kickX = sniper ? 0.03 : 0.012;
+  const kickZ = sniper ? -0.22 : 0.03;
   if (u < 0.16) {
+    // Unseat downward along the well — readable slide, not a centimetre nudge.
     const k = smooth01(u / 0.16);
     m.visible = true;
-    m.position.set(0.004 * k, -0.028 * k, 0.006 * k);
-    m.rotation.set(0.22 * k, 0, 0.08 * k);
-  } else if (u < 0.42) {
-    const k = (u - 0.16) / 0.26;
+    m.position.set(0.006 * k, -0.10 * k, (sniper ? -0.02 : 0.006) * k);
+    m.rotation.set(0.10 * k, 0, 0.05 * k);
+  } else if (u < 0.44) {
+    // Clear the lips and fall with a tumble — tens of cm in viewmodel space.
+    const k = (u - 0.16) / 0.28;
     const fall = k * k;
-    m.visible = k < 0.92;
-    m.position.set(0.01 + 0.10 * fall, -0.028 - 0.42 * fall, 0.01 + 0.04 * fall);
-    m.rotation.set(0.22 + 0.55 * k, 0.15 * k, 0.08 + 0.7 * k);
-  } else if (u < 0.58) {
+    m.visible = k < 0.9;
+    m.position.set(kickX * fall, -0.10 - 0.38 * fall, kickZ * fall);
+    m.rotation.set(0.10 + 1.15 * k, 0.45 * k, 0.05 + 1.05 * k);
+  } else if (u < 0.56) {
     m.visible = false;
-    m.position.set(0.02, -0.28, 0.02);
-    m.rotation.set(0.35, 0, 0.2);
-  } else if (u < 0.88) {
-    const k = smooth01((u - 0.58) / 0.30);
+    m.position.set(kickX, -0.48, kickZ);
+    m.rotation.set(0.7, 0.3, 0.55);
+  } else if (u < 0.86) {
+    const t = (u - 0.56) / 0.30;
+    const k = t * t; // ease-in: travel is visible, last beat slams the well
     m.visible = true;
-    // Overshoot the well then we'll settle — slam.
-    const y = lerp(-0.26, 0.014, k);
-    m.position.set(lerp(0.03, 0, k), y, lerp(-0.02, 0, k));
-    m.rotation.set(lerp(0.42, 0, k), 0, lerp(-0.12, 0, k));
+    // Same seated shape rises from below and slams into the well.
+    const y = lerp(-0.38, 0.018, k);
+    m.position.set(lerp(0.02, 0, k), y, lerp(-0.04, 0, k));
+    m.rotation.set(lerp(0.38, 0, k), 0, lerp(-0.14, 0, k));
   } else {
-    const k = smooth01((u - 0.88) / 0.12);
+    const k = smooth01((u - 0.86) / 0.14);
     m.visible = true;
-    m.position.set(0, lerp(0.014, 0, k), 0);
+    m.position.set(0, lerp(0.018, 0, k), 0);
     m.rotation.set(0, 0, 0);
   }
 }
@@ -6020,7 +6027,7 @@ function adsDofAmount() {
   if (state.reloading) {
     const dur = Math.max(0.05, state.reloadDuration || 1.2);
     const u = Math.min(1, state.reloadElapsed / dur);
-    a *= 1 - reloadDipEnvelope(u) * 0.85;
+    a *= 1 - reloadLiftEnvelope(u) * 0.85;
   }
   return a;
 }
@@ -7254,14 +7261,18 @@ function applySwayAndRecoil(dt, moving) {
   player.camRecoilP *= Math.exp(-camLambda * dt);
   player.camRecoilY *= Math.exp(-camLambda * dt);
 
-  // Reload dip: lower + pitch on swayRig, eased in/out over reload duration
-  let reloadDipY = 0, reloadDipRx = 0;
+  // Reload lift: raise + cant on swayRig so the mag well is in first-person view.
+  // Hold while the mag is out, then settle. Viewmodel only — camera stays put.
+  let reloadLiftY = 0, reloadLiftZ = 0, reloadLiftRx = 0, reloadLiftRy = 0, reloadLiftRz = 0;
   if (state.reloading) {
     const dur = Math.max(0.05, state.reloadDuration || 1.2);
     const u = Math.min(1, state.reloadElapsed / dur);
-    const envelope = reloadDipEnvelope(u);
-    reloadDipY = -0.07 * envelope;   // Y drop
-    reloadDipRx = 0.28 * envelope;   // slight +rotX tilt
+    const envelope = reloadLiftEnvelope(u);
+    reloadLiftY = 0.16 * envelope;    // 16 cm up — bigger than the old 7 cm dip
+    reloadLiftZ = 0.035 * envelope;   // slightly closer
+    reloadLiftRx = -0.24 * envelope;  // muzzle a bit down so the well faces the lens
+    reloadLiftRy = 0.10 * envelope;   // yaw the receiver inward
+    reloadLiftRz = -0.46 * envelope;  // roll the well toward camera (~26 deg)
   }
 
   const crouchB = clamp(state.crouchGrad, 0, 1);
@@ -7272,8 +7283,8 @@ function applySwayAndRecoil(dt, moving) {
 
   swayRig.position.set(
     sx + player.recoilPunch.x,
-    sy + player.recoilPunch.y + reloadDipY + crouchDipY,
-    sz + player.recoilPunch.z + crouchDipZ
+    sy + player.recoilPunch.y + reloadLiftY + crouchDipY,
+    sz + player.recoilPunch.z + crouchDipZ + reloadLiftZ
   );
   let boltYaw = 0;
   if (state.boltCycling) {
@@ -7282,9 +7293,9 @@ function applySwayAndRecoil(dt, moving) {
     boltYaw = 0.05 * Math.sin(u * Math.PI); // tiny viewmodel yaw through the cycle
   }
   swayRig.rotation.set(
-    rx + player.recoilRot.x + reloadDipRx + 0.04 * tuck,
-    ry + player.recoilRot.y + boltYaw,
-    rz + player.recoilRot.z,
+    rx + player.recoilRot.x + reloadLiftRx + 0.04 * tuck,
+    ry + player.recoilRot.y + boltYaw + reloadLiftRy,
+    rz + player.recoilRot.z + reloadLiftRz,
     "XYZ"
   );
 }

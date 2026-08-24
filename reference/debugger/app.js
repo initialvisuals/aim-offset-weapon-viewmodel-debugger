@@ -100,6 +100,7 @@ const state = {
   attachmentId: "holo_sight",
   panelOpen: false,
   gunModalOpen: false,
+  settingsOpen: false,
   gunPickId: "example_smg",
   lookPickup: null,
   swayEnabled: true,
@@ -108,13 +109,18 @@ const state = {
   breathLeft: 3,
   breathMax: 3,
   crouchToggled: false,
-  /** HoB + ballistic zero (default). false = Policy A idealized bore=aim. */
+  /** Sim (true) = HoB + ballistic zero. Arcade (false) = reticle-faithful / idealized bore=aim. */
   hobZero: true,
   /** Zero distance in demo meters. */
   zeroDist: 100,
   /** Draw sight vs bore/launch debug rays. */
   showAimRays: false,
+  /** 3px hip crosshair visibility (ADS optic HUD unaffected). */
+  showHipReticle: true,
 };
+
+const LOOK_SENS_BASE = 0.0022;
+const ADS_LOOK_MUL_BASE = 1;
 
 function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
@@ -155,7 +161,7 @@ function el(id) { return document.getElementById(id); }
 function fmt(n) { return (Math.round(n * 1e6) / 1e6).toString(); }
 
 function gameplayActive() {
-  return !state.panelOpen && !state.gunModalOpen;
+  return !state.panelOpen && !state.gunModalOpen && !state.settingsOpen;
 }
 function typingFocus() {
   const t = document.activeElement;
@@ -362,7 +368,10 @@ function setPanelOpen(open) {
   const panel = el("debuggerPanel");
   panel.classList.toggle("closed", !open);
   panel.setAttribute("aria-hidden", open ? "false" : "true");
-  if (open && document.pointerLockElement) document.exitPointerLock();
+  if (open) {
+    if (state.settingsOpen) setSettingsOpen(false, { nested: true });
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
   updateHudHint();
 }
 function togglePanel() { setPanelOpen(!state.panelOpen); }
@@ -372,11 +381,90 @@ function setGunModal(open) {
   const modal = el("gunModal");
   modal.hidden = !open;
   if (open) {
+    if (state.settingsOpen) setSettingsOpen(false, { nested: true });
     state.gunPickId = state.weaponId;
     renderGunList();
     if (document.pointerLockElement) document.exitPointerLock();
   }
   updateHudHint();
+}
+
+function setSettingsOpen(open, { nested = false } = {}) {
+  state.settingsOpen = !!open;
+  const modal = el("settingsModal");
+  if (modal) modal.hidden = !open;
+  if (open) {
+    if (!nested && state.panelOpen) setPanelOpen(false);
+    if (state.gunModalOpen) setGunModal(false);
+    if (document.pointerLockElement) document.exitPointerLock();
+    syncSettingsUI();
+  }
+  updateHudHint();
+}
+function toggleSettings() { setSettingsOpen(!state.settingsOpen); }
+
+function setHipReticle(on, { toast = false } = {}) {
+  state.showHipReticle = !!on;
+  syncHipReticle();
+  const chk = el("chkHipReticle");
+  if (chk) chk.checked = state.showHipReticle;
+  if (toast) showToast(state.showHipReticle ? "Hip reticle ON" : "Hip reticle OFF");
+}
+
+function syncHipReticle() {
+  const hipXh = el("hipCrosshair");
+  if (!hipXh) return;
+  hipXh.classList.toggle("hip-hide", !state.showHipReticle);
+}
+
+function setAimRays(on, { toast = true } = {}) {
+  state.showAimRays = !!on;
+  const raysBtn = el("btnAimRays");
+  if (raysBtn) raysBtn.setAttribute("aria-pressed", state.showAimRays ? "true" : "false");
+  const chk = el("chkAimRays");
+  if (chk) chk.checked = state.showAimRays;
+  if (toast) showToast(state.showAimRays ? "Aim/bore rays ON" : "Aim/bore rays OFF");
+  updateAimBoreRays();
+}
+
+function setZeroDist(m, { toast = false } = {}) {
+  state.zeroDist = parseFloat(m) || 100;
+  const sel = el("zeroDistSelect");
+  if (sel) sel.value = String(state.zeroDist);
+  const ssel = el("settingsZeroDist");
+  if (ssel) ssel.value = String(state.zeroDist);
+  updateHobReadout();
+  updateAimBoreRays();
+  if (toast) showToast(`Zero ${state.zeroDist} m`);
+}
+
+function syncSettingsUI() {
+  const btnSim = el("btnSettingsSim");
+  const btnArcade = el("btnSettingsArcade");
+  if (btnSim) btnSim.setAttribute("aria-pressed", state.hobZero ? "true" : "false");
+  if (btnArcade) btnArcade.setAttribute("aria-pressed", state.hobZero ? "false" : "true");
+  const hint = el("settingsArcadeZeroHint");
+  if (hint) hint.hidden = !!state.hobZero;
+
+  const chkHip = el("chkHipReticle");
+  if (chkHip) chkHip.checked = state.showHipReticle;
+  const chkRays = el("chkAimRays");
+  if (chkRays) chkRays.checked = state.showAimRays;
+
+  const zsel = el("settingsZeroDist");
+  if (zsel) zsel.value = String(state.zeroDist);
+
+  const lookPct = Math.round((player.lookSens / LOOK_SENS_BASE) * 100);
+  const lookSlider = el("lookSensSlider");
+  const lookVal = el("lookSensVal");
+  if (lookSlider) lookSlider.value = String(clamp(lookPct, 50, 200));
+  if (lookVal) lookVal.textContent = `${clamp(lookPct, 50, 200)}%`;
+
+  const adsPct = Math.round((player.adsLookMul / ADS_LOOK_MUL_BASE) * 100);
+  const adsSlider = el("adsLookMulSlider");
+  const adsVal = el("adsLookMulVal");
+  if (adsSlider) adsSlider.value = String(clamp(adsPct, 50, 150));
+  if (adsVal) adsVal.textContent = `${(player.adsLookMul).toFixed(2)}×`;
 }
 
 function renderGunList() {
@@ -552,12 +640,7 @@ function cycleZeroDist(dir) {
   if (i < 0) i = ZERO_DIST_PRESETS.indexOf(100);
   if (i < 0) i = 2;
   const next = clamp(i + dir, 0, ZERO_DIST_PRESETS.length - 1);
-  state.zeroDist = ZERO_DIST_PRESETS[next];
-  const sel = el("zeroDistSelect");
-  if (sel) sel.value = String(state.zeroDist);
-  showToast(`Zero ${state.zeroDist} m`);
-  updateHobReadout();
-  updateAimBoreRays();
+  setZeroDist(ZERO_DIST_PRESETS[next], { toast: true });
 }
 
 
@@ -609,7 +692,7 @@ const player = {
   crouchSpeedMul: 0.6,
   moveSpeed: 3.2,
   sprintMul: 1.65,
-  lookSens: 0.0022,
+  lookSens: LOOK_SENS_BASE,
   // Global ADS coefficient on top of FOV scale (1 = hip feel × FOV ratio only).
   adsLookMul: 1,
   leanMax: 0.5,
@@ -1534,7 +1617,7 @@ function ballisticForWeapon() {
  * Sight ray = camera / optic aim.
  * Natural bore = muzzleSocket local −Z (barrel extends toward −Z on these block guns).
  * Zero: choose launch dir so the constant-g arc meets the sight point at zeroDist.
- * Policy A toggle: velocity = camera forward (hides HoB).
+ * Arcade toggle: velocity = camera forward (reticle-faithful / hides HoB).
  */
 const _sightO = new THREE.Vector3();
 const _sightD = new THREE.Vector3();
@@ -1672,7 +1755,7 @@ function updateAimBoreRays() {
   setRayEndpoints(aimRayLine, _sightO, _zeroPt);
   aimRayLine.visible = true;
 
-  // Bore/launch: muzzle → along fire dir for length Z (or natural bore if Policy A)
+  // Bore/launch: muzzle → along fire dir for length Z (or camera dir in Arcade)
   if (state.hobZero) {
     const bal = ballisticForWeapon();
     solveBallisticLaunchDir(_muzzleO, _zeroPt, bal.speed, bal.gravity, _launchD);
@@ -1689,8 +1772,49 @@ function updateHobReadout() {
   if (!node) return;
   const hobM = computeHobMeters();
   const cm = hobM * 100;
-  const mode = state.hobZero ? "HoB+zero" : "Policy A";
+  const mode = state.hobZero ? "Sim" : "Arcade";
   node.textContent = `HoB ${cm >= 0 ? "+" : ""}${cm.toFixed(1)} cm · ${mode} · Z=${state.zeroDist} m`;
+}
+
+/** Apply Arcade vs Sim theme + hobZero. Sim = true, Arcade = false. */
+function setGameStyle(sim, { toast = true } = {}) {
+  state.hobZero = !!sim;
+  const style = state.hobZero ? "sim" : "arcade";
+  document.body.setAttribute("data-game-style", style);
+
+  const badge = el("gameStyleBadge");
+  if (badge) badge.textContent = state.hobZero ? "SIM" : "ARCADE";
+
+  const btnSim = el("btnGameSim");
+  const btnArcade = el("btnGameArcade");
+  if (btnSim) btnSim.setAttribute("aria-pressed", state.hobZero ? "true" : "false");
+  if (btnArcade) btnArcade.setAttribute("aria-pressed", state.hobZero ? "false" : "true");
+
+  const sSim = el("btnSettingsSim");
+  const sArcade = el("btnSettingsArcade");
+  if (sSim) sSim.setAttribute("aria-pressed", state.hobZero ? "true" : "false");
+  if (sArcade) sArcade.setAttribute("aria-pressed", state.hobZero ? "false" : "true");
+
+  const bar = el("ballisticsBar");
+  if (bar) bar.classList.toggle("arcade-dim", !state.hobZero);
+  const hint = el("arcadeZeroHint");
+  if (hint) hint.hidden = !!state.hobZero;
+  const sHint = el("settingsArcadeZeroHint");
+  if (sHint) sHint.hidden = !!state.hobZero;
+
+  updateHobReadout();
+  updateAimBoreRays();
+  if (toast) {
+    showToast(
+      state.hobZero
+        ? "Sim: HoB + ballistic zero"
+        : "Arcade: reticle-faithful aim"
+    );
+  }
+}
+
+function toggleGameStyle() {
+  setGameStyle(!state.hobZero);
 }
 
 function fireLaunchDirection(muzzlePos, outDir) {
@@ -1723,8 +1847,8 @@ function fireWeapon() {
   player.recoilRot.x -= 0.035 * kick;
   player.recoilRot.y += (Math.random() - 0.5) * 0.02 * kick;
 
-  // HoB + ballistic zero (default): spawn at muzzle, launch so arc meets sight at Z.
-  // Policy A toggle: spawn at muzzle, initial dir = camera aim (hides HoB).
+  // Sim (hobZero): spawn at muzzle, launch so arc meets sight at Z.
+  // Arcade: spawn at muzzle, initial dir = camera aim (reticle-faithful).
   if (!muzzleSocket || !camera) return;
   muzzleSocket.updateWorldMatrix(true, false);
   const origin = new THREE.Vector3();
@@ -1998,7 +2122,10 @@ function syncOpticHud() {
   hud.classList.toggle("active", showOverlay);
   const fade = showOverlay ? clamp((t - 0.12) / 0.55, 0, 1) : 0;
   hud.style.opacity = String(fade);
-  if (hipXh) hipXh.classList.toggle("ads-hide", adsOn);
+  if (hipXh) {
+    hipXh.classList.toggle("ads-hide", adsOn);
+    hipXh.classList.toggle("hip-hide", !state.showHipReticle);
+  }
   if (holo) holo.hidden = !(showOverlay && optic === "holo");
   if (acog) acog.hidden = !(showOverlay && optic === "acog");
   if (sniper) sniper.hidden = !(showOverlay && optic === "sniper_scope");
@@ -2020,11 +2147,12 @@ function syncOpticHud() {
 function updateHudHint() {
   const hint = el("hudHint");
   if (!hint) return;
-  if (state.panelOpen) {
-    hint.textContent = "";
-    hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns`;
+  if (state.settingsOpen) {
+    hint.innerHTML = `Settings open — <kbd>O</kbd> / Esc close · <kbd>B</kbd> Arcade/Sim`;
+  } else if (state.panelOpen) {
+    hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
   } else {
-    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>C</kbd> crouch · <kbd>Z</kbd> hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd> crouch · <kbd>Z</kbd> hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire`;
   }
 }
 
@@ -2072,13 +2200,31 @@ function refresh(syncInputs = true) {
 function onKeyDown(e) {
   if (typingFocus()) return;
 
-  if (state.gunModalOpen) {
-    if (e.key === "Escape") { setGunModal(false); e.preventDefault(); }
+  const k = e.key;
+  const code = e.code;
+
+  // Settings: O toggles globally; Esc closes (before other UI)
+  if ((k === "o" || k === "O") && !e.repeat) {
+    toggleSettings();
+    e.preventDefault();
+    return;
+  }
+  if (state.settingsOpen) {
+    if (k === "Escape") {
+      setSettingsOpen(false);
+      e.preventDefault();
+    }
+    if ((k === "b" || k === "B") && !e.repeat) {
+      toggleGameStyle();
+      e.preventDefault();
+    }
     return;
   }
 
-  const k = e.key;
-  const code = e.code;
+  if (state.gunModalOpen) {
+    if (k === "Escape") { setGunModal(false); e.preventDefault(); }
+    return;
+  }
 
   // Always allow Backquote / G / Esc
   if (code === "Backquote" || k === "`") {
@@ -2135,6 +2281,10 @@ function onKeyDown(e) {
     }
     if ((k === "=" || code === "Equal") && !e.repeat) {
       cycleZeroDist(1);
+      e.preventDefault();
+    }
+    if ((k === "b" || k === "B") && !e.repeat) {
+      toggleGameStyle();
       e.preventDefault();
     }
   }
@@ -2314,38 +2464,25 @@ function bind() {
   const zeroSel = el("zeroDistSelect");
   if (zeroSel) {
     zeroSel.value = String(state.zeroDist);
-    zeroSel.onchange = (e) => {
-      state.zeroDist = parseFloat(e.target.value) || 100;
-      updateHobReadout();
-      updateAimBoreRays();
-    };
+    zeroSel.onchange = (e) => setZeroDist(e.target.value);
   }
-  const hobBtn = el("btnHobZero");
-  if (hobBtn) {
-    hobBtn.setAttribute("aria-pressed", state.hobZero ? "true" : "false");
-    hobBtn.onclick = () => {
-      state.hobZero = !state.hobZero;
-      hobBtn.setAttribute("aria-pressed", state.hobZero ? "true" : "false");
-      hobBtn.textContent = state.hobZero ? "HoB + zero" : "Idealized bore=aim";
-      showToast(state.hobZero ? "HoB + ballistic zero ON" : "Policy A: bore = camera aim");
-      updateHobReadout();
-      updateAimBoreRays();
-    };
-  }
+  const btnSim = el("btnGameSim");
+  const btnArcade = el("btnGameArcade");
+  if (btnSim) btnSim.onclick = () => setGameStyle(true);
+  if (btnArcade) btnArcade.onclick = () => setGameStyle(false);
+  setGameStyle(state.hobZero, { toast: false });
+  syncHipReticle();
   const raysBtn = el("btnAimRays");
   if (raysBtn) {
     raysBtn.setAttribute("aria-pressed", state.showAimRays ? "true" : "false");
-    raysBtn.onclick = () => {
-      state.showAimRays = !state.showAimRays;
-      raysBtn.setAttribute("aria-pressed", state.showAimRays ? "true" : "false");
-      showToast(state.showAimRays ? "Aim/bore rays ON" : "Aim/bore rays OFF");
-      updateAimBoreRays();
-    };
+    raysBtn.onclick = () => setAimRays(!state.showAimRays);
   }
   el("btnCopy").onclick = () => copyWeaponJson();
   el("btnCopyAtt").onclick = () => copyAttJson();
   el("btnCloseDbg").onclick = () => setPanelOpen(false);
   el("btnGuns").onclick = () => setGunModal(true);
+  const btnSettings = el("btnSettings");
+  if (btnSettings) btnSettings.onclick = () => setSettingsOpen(true);
   el("btnGunCancel").onclick = () => setGunModal(false);
   el("btnGunEquip").onclick = () => {
     const id = state.gunPickId;
@@ -2355,6 +2492,53 @@ function bind() {
   el("gunModal").addEventListener("click", (e) => {
     if (e.target === el("gunModal")) setGunModal(false);
   });
+
+  // Settings overlay controls
+  const btnSettingsClose = el("btnSettingsClose");
+  if (btnSettingsClose) btnSettingsClose.onclick = () => setSettingsOpen(false);
+  const settingsModal = el("settingsModal");
+  if (settingsModal) {
+    settingsModal.addEventListener("click", (e) => {
+      if (e.target === settingsModal) setSettingsOpen(false);
+    });
+  }
+  const btnSettingsSim = el("btnSettingsSim");
+  const btnSettingsArcade = el("btnSettingsArcade");
+  if (btnSettingsSim) btnSettingsSim.onclick = () => setGameStyle(true);
+  if (btnSettingsArcade) btnSettingsArcade.onclick = () => setGameStyle(false);
+  const chkHip = el("chkHipReticle");
+  if (chkHip) {
+    chkHip.checked = state.showHipReticle;
+    chkHip.onchange = (e) => setHipReticle(e.target.checked, { toast: true });
+  }
+  const chkRays = el("chkAimRays");
+  if (chkRays) {
+    chkRays.checked = state.showAimRays;
+    chkRays.onchange = (e) => setAimRays(e.target.checked);
+  }
+  const settingsZero = el("settingsZeroDist");
+  if (settingsZero) {
+    settingsZero.value = String(state.zeroDist);
+    settingsZero.onchange = (e) => setZeroDist(e.target.value, { toast: true });
+  }
+  const lookSlider = el("lookSensSlider");
+  if (lookSlider) {
+    lookSlider.oninput = (e) => {
+      const pct = parseFloat(e.target.value) || 100;
+      player.lookSens = LOOK_SENS_BASE * (pct / 100);
+      const lookVal = el("lookSensVal");
+      if (lookVal) lookVal.textContent = `${Math.round(pct)}%`;
+    };
+  }
+  const adsMulSlider = el("adsLookMulSlider");
+  if (adsMulSlider) {
+    adsMulSlider.oninput = (e) => {
+      const pct = parseFloat(e.target.value) || 100;
+      player.adsLookMul = ADS_LOOK_MUL_BASE * (pct / 100);
+      const adsVal = el("adsLookMulVal");
+      if (adsVal) adsVal.textContent = `${player.adsLookMul.toFixed(2)}×`;
+    };
+  }
 
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);

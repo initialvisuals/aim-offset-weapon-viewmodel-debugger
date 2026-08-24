@@ -252,3 +252,243 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
   padding: 0.35rem 0.45rem; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
 }
 .ballistics-bar .note { margin: 0.15rem 0 0; }
+
+/* ---- Game style: Sim (default) vs Arcade ---- */
+.game-style-badge {
+  pointer-events: none;
+  position: absolute;
+  right: 1rem;
+  top: 3.55rem;
+  z-index: 4;
+  font: 700 0.72rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.12em;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: rgba(15, 22, 36, 0.88);
+  color: var(--accent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.sil-legend { top: 5.15rem; }
+
+.game-style-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.game-style-control .gs-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.segmented .seg {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.4rem 0.85rem;
+  min-width: 4.5rem;
+}
+.segmented .seg + .seg {
+  border-left: 1px solid var(--line);
+}
+.segmented .seg:hover {
+  color: var(--text);
+  border-color: transparent;
+}
+.segmented .seg[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 28%, var(--panel));
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.arcade-zero-hint {
+  color: var(--focus);
+  margin: 0.25rem 0 0;
+}
+.ballistics-bar.arcade-dim #zeroDistLabel {
+  opacity: 0.45;
+}
+.ballistics-bar.arcade-dim #zeroDistSelect {
+  opacity: 0.7;
+}
+
+/* Arcade: warmer neon / cabinet vibe (Sim keeps cool blue/teal defaults) */
+body[data-game-style="arcade"] {
+  --bg: #160e16;
+  --panel: #221428;
+  --line: #4a2a48;
+  --text: #ffeef8;
+  --muted: #c9a0b8;
+  --accent: #ff4fd8;
+  --accent-dim: #8a2a6e;
+  --ok: #ffb347;
+  --focus: #ff8a3d;
+  --danger: #ff5e7a;
+}
+body[data-game-style="arcade"] .viewport-wrap {
+  background: #120810;
+}
+body[data-game-style="arcade"] .debugger-panel {
+  background: rgba(22, 10, 20, 0.94);
+  border-left-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  box-shadow: -8px 0 28px rgba(255, 79, 216, 0.12);
+}
+body[data-game-style="arcade"] .panel,
+body[data-game-style="arcade"] .ballistics-bar,
+body[data-game-style="arcade"] .preview {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
+              0 0 18px rgba(255, 79, 216, 0.08);
+}
+body[data-game-style="arcade"] .hud-hint {
+  color: rgba(255, 180, 230, 0.82);
+}
+body[data-game-style="arcade"] .hud-hint kbd {
+  background: rgba(60, 20, 48, 0.9);
+  border-color: var(--line);
+}
+body[data-game-style="arcade"] .score-hud {
+  color: #ffd6f5;
+  text-shadow: 0 1px 4px #000, 0 0 10px rgba(255, 79, 216, 0.55);
+}
+body[data-game-style="arcade"] .breath-fill {
+  background: linear-gradient(90deg, #ff8a3d, #ff4fd8);
+}
+body[data-game-style="arcade"] .crosshair {
+  background: #ff9ae8;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.55), 0 0 8px rgba(255, 79, 216, 0.85);
+}
+body[data-game-style="arcade"] .float-popup {
+  color: #fff0fb;
+  text-shadow: 0 2px 4px #000, 0 0 14px rgba(255, 79, 216, 0.75);
+}
+body[data-game-style="arcade"] .float-popup.bull { color: #ffe066; }
+body[data-game-style="arcade"] .float-popup.mid { color: #ff9ae8; }
+body[data-game-style="arcade"] .float-popup.outer { color: #ffb347; }
+body[data-game-style="arcade"] .float-popup.edge { color: #c9a0b8; }
+body[data-game-style="arcade"] .toast {
+  background: #2a1428;
+  border-color: var(--accent);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.45), 0 0 16px rgba(255, 79, 216, 0.25);
+}
+body[data-game-style="arcade"] .game-style-badge {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: rgba(40, 16, 28, 0.9);
+  text-shadow: 0 0 8px rgba(255, 179, 71, 0.65);
+  box-shadow: 0 0 14px rgba(255, 79, 216, 0.35);
+}
+body[data-game-style="arcade"] .segmented .seg[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 32%, var(--panel));
+}
+body[data-game-style="arcade"] button.toggle[aria-pressed="true"] {
+  background: #6b3a28;
+  border-color: var(--ok);
+}
+
+/* ---- Hip reticle toggle ---- */
+.crosshair.hip-hide { opacity: 0 !important; visibility: hidden; }
+
+/* ---- Settings overlay ---- */
+.settings-dialog {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  width: min(420px, 100%);
+  max-height: min(88vh, 720px);
+  overflow: auto;
+  padding: 1rem 1.1rem 1.15rem;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+.settings-head h2 { margin: 0; font-size: 1.05rem; }
+.settings-dialog .hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0 0 0.85rem;
+}
+.settings-dialog .hint kbd {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  background: #222834;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  color: var(--text);
+}
+.settings-section {
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+.settings-section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.settings-section h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.settings-section .note { margin: 0.4rem 0 0; }
+.check-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-bottom: 0.35rem;
+  cursor: pointer;
+}
+.check-row input { width: 1rem; height: 1rem; accent-color: var(--accent); }
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 0.25rem 0.5rem;
+  align-items: center;
+  margin-bottom: 0.55rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.slider-row input[type="range"] {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+.slider-row code {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--ok);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.settings-keys { margin: 0; padding-left: 1.1rem; }
+body[data-game-style="arcade"] .settings-dialog {
+  box-shadow: 0 12px 40px rgba(0,0,0,0.55), 0 0 24px rgba(255, 79, 216, 0.18);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+body[data-game-style="arcade"] .settings-dialog .hint kbd {
+  background: rgba(60, 20, 48, 0.9);
+}

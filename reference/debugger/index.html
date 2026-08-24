@@ -13,7 +13,7 @@
     }
     </script>
 </head>
-<body class="app-shell">
+<body class="app-shell" data-game-style="sim">
   <div class="viewport-wrap">
     <canvas id="view3d"></canvas>
     <div class="crosshair" aria-hidden="true" id="hipCrosshair"></div>
@@ -54,6 +54,7 @@
     <div class="equip-prompt" id="equipPrompt" hidden></div>
     <div class="breath-bar" id="breathBar" hidden><div class="breath-fill" id="breathFill"></div></div>
     <div class="score-hud" id="scoreHud">Score 0</div>
+    <div class="game-style-badge" id="gameStyleBadge" aria-live="polite">SIM</div>
     <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · <kbd>R</kbd> reset</div>
     <div id="floatLabels" class="float-labels" aria-hidden="true"></div>
     <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>C</kbd>/<kbd>Z</kbd> crouch</div>
@@ -67,6 +68,7 @@
           </div>
           <div class="meta">
             <button type="button" id="btnGuns" title="G">Guns…</button>
+            <button type="button" id="btnSettings" title="O">Settings…</button>
             <button type="button" id="btnAds" class="toggle" aria-pressed="false" title="Insert">ADS preview</button>
             <button type="button" id="btnSway" class="toggle" aria-pressed="true" title="Toggle viewmodel sway">Sway</button>
             <button type="button" id="btnCopy" title="Copy JSON">Copy JSON</button>
@@ -113,7 +115,14 @@
           <div class="ballistics-bar" id="ballisticsBar">
             <h2>Ballistics</h2>
             <div class="ballistics-row">
-              <label>Zero distance
+              <div class="game-style-control" role="group" aria-label="Game style">
+                <span class="gs-label">Game style</span>
+                <div class="segmented" id="gameStyleSeg">
+                  <button type="button" id="btnGameSim" class="seg" aria-pressed="true" title="Sim: HoB + ballistic zero (B)">Sim</button>
+                  <button type="button" id="btnGameArcade" class="seg" aria-pressed="false" title="Arcade: reticle-faithful aim (B)">Arcade</button>
+                </div>
+              </div>
+              <label id="zeroDistLabel">Zero distance
                 <select id="zeroDistSelect">
                   <option value="25">25 m</option>
                   <option value="50">50 m</option>
@@ -122,11 +131,11 @@
                   <option value="300">300 m</option>
                 </select>
               </label>
-              <button type="button" id="btnHobZero" class="toggle" aria-pressed="true" title="Toggle HoB + zero vs idealized bore=aim">HoB + zero</button>
               <button type="button" id="btnAimRays" class="toggle" aria-pressed="false" title="Draw sight ray vs bore/launch ray">Show aim/bore rays</button>
               <code id="hobReadout">HoB — cm</code>
             </div>
-            <p class="note">Sight ray = camera/optic aim. Bore launches from the muzzle along a <strong>ballistic zero</strong>: pitch/lead so the gravity arc meets the sight ray at the zero distance (default 100&nbsp;m). Toggle off for old Policy&nbsp;A (spawn at muzzle, velocity = camera forward).</p>
+            <p class="note" id="ballisticsNote">Sight ray = camera/optic aim. <strong>Sim</strong> launches along a ballistic zero so the gravity arc meets the sight ray at the zero distance (default 100&nbsp;m). <strong>Arcade</strong> is reticle-faithful: spawn at muzzle, velocity = camera forward (idealized bore=aim).</p>
+            <p class="note arcade-zero-hint" id="arcadeZeroHint" hidden>Zero distance mainly applies in Sim.</p>
           </div>
 
           <div class="split">
@@ -142,8 +151,10 @@
                 <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint (blocked while crouched)</li>
                 <li><kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS</li>
                 <li><kbd>Space</kbd> hold breath (damp sway)</li>
-                <li><kbd>-</kbd>/<kbd>=</kbd> cycle zero distance</li>
-                <li>LMB fire (tracers from muzzle; HoB + zero by default)</li>
+                <li><kbd>O</kbd> Settings (options)</li>
+                <li><kbd>B</kbd> cycle Arcade / Sim (game style)</li>
+                <li><kbd>-</kbd>/<kbd>=</kbd> cycle zero distance (Sim)</li>
+                <li>LMB fire (tracers from muzzle; Sim = HoB+zero by default)</li>
                 <li>Click canvas = mouse look</li>
                 <li>Table pickups = equip optic</li>
                 <li><kbd>Insert</kbd> ADS preview · Sway toggle in header</li>
@@ -199,6 +210,69 @@
       <div class="actions">
         <button type="button" id="btnGunCancel">Cancel</button>
         <button type="button" id="btnGunEquip">Equip</button>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="settingsModal" class="modal-backdrop settings-backdrop" hidden>
+    <div class="settings-dialog" role="dialog" aria-labelledby="settingsTitle">
+      <header class="settings-head">
+        <h2 id="settingsTitle">Settings</h2>
+        <button type="button" id="btnSettingsClose" title="Esc / O">Close</button>
+      </header>
+      <p class="hint">Press <kbd>O</kbd> anytime to open or close. Gameplay pauses while open.</p>
+
+      <div class="settings-section">
+        <h3>Game style</h3>
+        <div class="segmented" id="settingsGameStyleSeg" role="group" aria-label="Game style">
+          <button type="button" id="btnSettingsSim" class="seg" aria-pressed="true">Sim</button>
+          <button type="button" id="btnSettingsArcade" class="seg" aria-pressed="false">Arcade</button>
+        </div>
+        <p class="note"><strong>Sim</strong> = HoB + ballistic zero. <strong>Arcade</strong> = reticle-faithful (bore = camera aim).</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>Display</h3>
+        <label class="check-row"><input type="checkbox" id="chkHipReticle" checked /> Show hip reticle</label>
+        <label class="check-row"><input type="checkbox" id="chkAimRays" /> Show aim/bore rays</label>
+      </div>
+
+      <div class="settings-section">
+        <h3>Ballistics</h3>
+        <label>Zero distance
+          <select id="settingsZeroDist">
+            <option value="25">25 m</option>
+            <option value="50">50 m</option>
+            <option value="100" selected>100 m</option>
+            <option value="200">200 m</option>
+            <option value="300">300 m</option>
+          </select>
+        </label>
+        <p class="note arcade-zero-hint" id="settingsArcadeZeroHint" hidden>Zero distance mainly applies in Sim.</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>Look</h3>
+        <label class="slider-row">Hip look sensitivity
+          <input type="range" id="lookSensSlider" min="50" max="200" step="5" value="100" />
+          <code id="lookSensVal">100%</code>
+        </label>
+        <label class="slider-row">ADS look global mul
+          <input type="range" id="adsLookMulSlider" min="50" max="150" step="5" value="100" />
+          <code id="adsLookMulVal">1.00×</code>
+        </label>
+      </div>
+
+      <div class="settings-section">
+        <h3>Controls cheat sheet</h3>
+        <ul class="keys settings-keys">
+          <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint</li>
+          <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold</li>
+          <li><kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · LMB fire</li>
+          <li><kbd>Space</kbd> hold breath · <kbd>B</kbd> Arcade/Sim</li>
+          <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
+        </ul>
       </div>
     </div>
   </div>

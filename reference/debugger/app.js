@@ -148,6 +148,16 @@ const ADS_LOOK_MUL_BASE = 1;
 
 function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth01(t) {
+  t = clamp(t, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+/** Ease in, hold dipped, ease out over a 0–1 reload clock. */
+function reloadDipEnvelope(u) {
+  const enter = smooth01(u / 0.2);
+  const leave = 1 - smooth01((u - 0.8) / 0.2);
+  return enter * leave;
+}
 function resolve(p) {
   return {
     x: p.x, y: p.y, z: p.z,
@@ -208,7 +218,14 @@ function syncAmmoForLoadout({ refill = false } = {}) {
     state.reloading = false;
     state.reloadElapsed = 0;
   }
+  resetMagVisual();
   updateAmmoHud();
+}
+
+function resetMagVisual() {
+  if (!magMesh) return;
+  magMesh.visible = true;
+  magMesh.scale.set(1, 1, 1);
 }
 
 function updateAmmoHud() {
@@ -233,6 +250,7 @@ function beginReload() {
   state.reloading = true;
   state.reloadElapsed = 0;
   state.reloadDuration = spec.reloadSec;
+  sfx.play("dry"); // existing click — mag release
   updateAmmoHud();
 }
 
@@ -241,21 +259,25 @@ function finishReload() {
   state.ammoInMag = spec.capacity; // infinite reserve
   state.reloading = false;
   state.reloadElapsed = 0;
-  if (magMesh) magMesh.visible = true;
+  resetMagVisual();
+  sfx.play("dry"); // existing click — mag seated
   updateAmmoHud();
 }
 
 function updateReload(dt) {
   if (!state.reloading) {
-    if (magMesh && !magMesh.visible) magMesh.visible = true;
+    resetMagVisual();
     return;
   }
   state.reloadElapsed += dt;
   const dur = Math.max(0.05, state.reloadDuration || 1.2);
   const t = Math.min(1, state.reloadElapsed / dur);
-  // Mag visibility flash mid-swap
+  // Mag scale/hide flash mid-swap (eased out, then back in)
   if (magMesh) {
-    magMesh.visible = !(t > 0.18 && t < 0.72);
+    const gone = smooth01((t - 0.16) / 0.12) * (1 - smooth01((t - 0.70) / 0.14));
+    const s = 1 - 0.88 * gone;
+    magMesh.scale.set(s, s, s);
+    magMesh.visible = s > 0.08;
   }
   if (t >= 1) finishReload();
   else updateAmmoHud();
@@ -2639,14 +2661,14 @@ function applySwayAndRecoil(dt, moving) {
   player.recoilPunch.multiplyScalar(Math.exp(-10 * dt));
   player.recoilRot.multiplyScalar(Math.exp(-9 * dt));
 
-  // Simple reload dip (lower + pitch) while mag swap runs
+  // Reload dip: lower + pitch on swayRig, eased in/out over reload duration
   let reloadDipY = 0, reloadDipRx = 0;
   if (state.reloading) {
     const dur = Math.max(0.05, state.reloadDuration || 1.2);
     const u = Math.min(1, state.reloadElapsed / dur);
-    const envelope = Math.sin(Math.PI * u); // 0→1→0
-    reloadDipY = -0.055 * envelope;
-    reloadDipRx = 0.22 * envelope;
+    const envelope = reloadDipEnvelope(u);
+    reloadDipY = -0.07 * envelope;   // Y drop
+    reloadDipRx = 0.28 * envelope;   // slight +rotX tilt
   }
 
   swayRig.position.set(

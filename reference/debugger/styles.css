@@ -195,3 +195,33 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
   color: #fff; font: 600 1rem/1.2 ui-sans-serif, system-ui, sans-serif;
   text-shadow: 0 1px 4px #000; letter-spacing: 0.02em;
 }
+
+.float-labels {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 5;
+}
+.float-label {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  font: 700 18px/1.1 ui-sans-serif, system-ui, sans-serif;
+  color: #c5cddc;
+  text-shadow: 0 1px 3px #000, 0 0 8px rgba(0,0,0,0.8);
+  white-space: nowrap;
+  opacity: 0.9;
+}
+.float-popup {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  font: 800 28px/1 ui-sans-serif, system-ui, sans-serif;
+  color: #fff;
+  text-shadow: 0 2px 4px #000, 0 0 12px rgba(0,0,0,0.85);
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+.float-popup.bull { color: #ffe66d; }
+.float-popup.mid { color: #ffffff; }
+.float-popup.outer { color: #d0d6e0; }
+.float-popup.edge { color: #9aa6bd; }

@@ -729,7 +729,10 @@ function buildShootingRange() {
     { z: -380, pts: 30, label: "≈400m" },
   ];
   rangeTargets = [];
+  scorePopups.forEach((p) => p.el && p.el.remove());
   scorePopups = [];
+  const fl = el("floatLabels");
+  if (fl) fl.innerHTML = "";
 
   const strip = new THREE.Mesh(
     new THREE.PlaneGeometry(18, 420),
@@ -779,22 +782,24 @@ function buildShootingRange() {
     );
     flash.position.set(x, y, z + 0.02);
 
-    // Distance placard
-    const placard = makeScoreSprite(lane.label, "#9aa6bd", 128);
-    placard.position.set(x, y + 0.7 * scale, z);
-    placard.scale.set(0.9, 0.35, 1);
-
-    scene.add(board, ring1, ring2, bull, flash, placard);
+    scene.add(board, ring1, ring2, bull, flash);
+    const labelEl = document.createElement("div");
+    labelEl.className = "float-label";
+    labelEl.textContent = lane.label;
+    const host = el("floatLabels");
+    if (host) host.appendChild(labelEl);
     rangeTargets.push({
       mesh: board,
       flash,
       center: new THREE.Vector3(x, y, z),
+      labelAnchor: new THREE.Vector3(x, y + 0.55 * scale, z),
       radius: 0.48 * scale,
       bullRadius: 0.06 * scale,
       midRadius: 0.18 * scale,
       outerRadius: 0.32 * scale,
       basePts: lane.pts,
       label: lane.label,
+      labelEl,
       hitUntil: 0,
     });
   });
@@ -802,24 +807,18 @@ function buildShootingRange() {
   scene.add(makeBox(20, 4.5, 0.6, 0x2a2030, 0, 0.5, -410));
 }
 
-function makeScoreSprite(text, color = "#ffffff", size = 160) {
-  const canvas = document.createElement("canvas");
-  canvas.width = size * 2;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = `bold ${Math.floor(size * 0.55)}px ui-sans-serif, system-ui, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.lineWidth = 8;
-  ctx.strokeStyle = "rgba(0,0,0,0.75)";
-  ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
-  ctx.fillStyle = color;
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
-  return new THREE.Sprite(mat);
+function worldToScreen(world, out = { x: 0, y: 0, visible: false }) {
+  if (!camera) return out;
+  const canvas = el("view3d");
+  if (!canvas) return out;
+  const v = world.clone().project(camera);
+  const rect = canvas.getBoundingClientRect();
+  const parent = el("floatLabels")?.parentElement || canvas.parentElement;
+  const pref = parent.getBoundingClientRect();
+  out.visible = v.z > -1 && v.z < 1 && v.x >= -1.2 && v.x <= 1.2 && v.y >= -1.2 && v.y <= 1.2;
+  out.x = (v.x * 0.5 + 0.5) * rect.width + (rect.left - pref.left);
+  out.y = (-v.y * 0.5 + 0.5) * rect.height + (rect.top - pref.top);
+  return out;
 }
 
 function flashTarget(t, hitPos) {
@@ -827,47 +826,67 @@ function flashTarget(t, hitPos) {
   if (t.flash) t.flash.material.opacity = 1;
   const d = hitPos ? hitPos.distanceTo(t.center) : 0;
   let pts = t.basePts;
-  let color = "#ffffff";
+  let klass = "edge";
   if (d <= t.bullRadius) {
     pts = t.basePts * 2;
-    color = "#ffe66d";
+    klass = "bull";
   } else if (d <= t.midRadius) {
     pts = Math.round(t.basePts * 1.4);
-    color = "#ffffff";
+    klass = "mid";
   } else if (d <= t.outerRadius) {
     pts = t.basePts;
-    color = "#d0d6e0";
+    klass = "outer";
   } else {
     pts = Math.max(1, Math.round(t.basePts * 0.5));
-    color = "#9aa6bd";
+    klass = "edge";
   }
-  const spr = makeScoreSprite("+" + pts, color, 180);
-  const origin = (hitPos || t.center).clone();
-  origin.y += 0.35;
-  spr.position.copy(origin);
-  spr.scale.set(1.1, 0.45, 1);
-  scene.add(spr);
-  scorePopups.push({ sprite: spr, life: 1.1, vy: 1.1 });
+
+  const host = el("floatLabels");
+  if (host) {
+    const node = document.createElement("div");
+    node.className = "float-popup " + klass;
+    node.textContent = "+" + pts;
+    host.appendChild(node);
+    const anchor = (hitPos || t.center).clone();
+    anchor.y += 0.35;
+    scorePopups.push({ el: node, anchor, life: 1.15, drift: 0 });
+  }
+
   state.score = (state.score || 0) + pts;
   const hud = el("scoreHud");
   if (hud) hud.textContent = "Score " + state.score;
 }
 
 function updateScorePopups(dt) {
+  const tmp = { x: 0, y: 0, visible: false };
+  // Distance labels — fixed screen size, pinned near target
+  rangeTargets.forEach((t) => {
+    if (!t.labelEl) return;
+    worldToScreen(t.labelAnchor || t.center, tmp);
+    if (!tmp.visible) {
+      t.labelEl.style.display = "none";
+      return;
+    }
+    t.labelEl.style.display = "block";
+    t.labelEl.style.left = tmp.x + "px";
+    t.labelEl.style.top = tmp.y + "px";
+  });
+
   for (let i = scorePopups.length - 1; i >= 0; i--) {
     const p = scorePopups[i];
     p.life -= dt;
-    p.sprite.position.y += p.vy * dt;
-    p.sprite.material.opacity = Math.max(0, p.life / 1.1);
-    if (p.life <= 0) {
-      scene.remove(p.sprite);
-      if (p.sprite.material.map) p.sprite.material.map.dispose();
-      p.sprite.material.dispose();
+    p.drift += 48 * dt; // px upward on screen, constant size
+    worldToScreen(p.anchor, tmp);
+    if (!tmp.visible || p.life <= 0) {
+      p.el.remove();
       scorePopups.splice(i, 1);
+      continue;
     }
+    p.el.style.left = tmp.x + "px";
+    p.el.style.top = (tmp.y - p.drift) + "px";
+    p.el.style.opacity = String(Math.max(0, p.life / 1.15));
   }
 }
-
 
 function clearInputFlags() {
   input.forward = input.back = input.left = input.right = false;

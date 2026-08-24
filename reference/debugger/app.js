@@ -595,6 +595,41 @@ const sfx = {
       };
       tinkle(2480, 0, 0.14);
       tinkle(3720, 0.018, 0.12);
+      return;
+    }
+
+    if (kind === "shatter") {
+      // Cheap bottle break — burst noise + a few falling tinkles.
+      out.gain.setValueAtTime(0.0001, now);
+      out.gain.exponentialRampToValueAtTime(0.32, now + 0.002);
+      out.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+      const noise = c.createBufferSource();
+      noise.buffer = this.noiseBuffer(0.11);
+      const bp = c.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 3100;
+      bp.Q.value = 0.7;
+      noise.connect(bp);
+      bp.connect(out);
+      noise.start(now);
+      noise.stop(now + 0.1);
+      const tinkle = (freq, delay, dur, peak) => {
+        const osc = c.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + delay);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.45, now + delay + dur);
+        const g = c.createGain();
+        g.gain.setValueAtTime(0.0001, now + delay);
+        g.gain.exponentialRampToValueAtTime(peak, now + delay + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + delay + dur);
+        osc.connect(g);
+        g.connect(c.destination);
+        osc.start(now + delay);
+        osc.stop(now + delay + dur + 0.02);
+      };
+      tinkle(2650, 0, 0.16, 0.18);
+      tinkle(3920, 0.012, 0.14, 0.14);
+      tinkle(1840, 0.028, 0.18, 0.10);
     }
   },
 };
@@ -779,16 +814,28 @@ function applyFog() {
     return;
   }
 
+  // Night: pull fog in a little so near floods read, still hide the 410 m berm.
+  const pal = sampleTod(state.timeOfDay);
+  const nightBlend = clamp((0.25 - (pal.sunI || 0)) / 0.25, 0, 1);
+  let nearUse = near;
+  let farUse = far;
+  if (nightBlend > 0) {
+    const nightNear = Math.max(220, near * 0.78);
+    const nightFar = Math.max(nightNear + 40, Math.min(far, 450));
+    nearUse = lerp(near, nightNear, nightBlend);
+    farUse = lerp(far, nightFar, nightBlend);
+  }
+
   let hex = SCENE_BG_BASE;
   if (scene.background && scene.background.isColor) {
     hex = scene.background.getHex();
   }
   if (scene.fog && scene.fog.isFog) {
-    scene.fog.near = near;
-    scene.fog.far = far;
+    scene.fog.near = nearUse;
+    scene.fog.far = farUse;
     scene.fog.color.setHex(hex);
   } else {
-    scene.fog = new THREE.Fog(hex, near, far);
+    scene.fog = new THREE.Fog(hex, nearUse, farUse);
   }
 }
 
@@ -845,18 +892,20 @@ function formatClock(h) {
   return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
 }
 
-/** Keyframed scene lighting. 18:30 matches the previous dusk range (SCENE_BG_BASE / warm key). */
+/** Keyframed scene lighting. 18:30 keeps the dusk range (SCENE_BG_BASE / warm key) with a stronger key vs cooler fill. */
 const TOD_KEYS = [
-  { h: 0, sky: 0x000000, hemiSky: 0x1c2838, hemiGnd: 0x12100c, amb: 0x1a222c, sun: 0x1a2430, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.16, ambI: 0.09, fillI: 0.08, rimI: 0.05, moonI: 0.15 },
-  { h: 5.2, sky: 0x000000, hemiSky: 0x3a3050, hemiGnd: 0x1a1410, amb: 0x2a2438, sun: 0xff8860, fill: 0x7a90b8, rim: 0x3a3048, sunI: 0, hemiI: 0.22, ambI: 0.12, fillI: 0.12, rimI: 0.08, moonI: 0.10 },
-  { h: 6.4, sky: 0x5a6a88, hemiSky: 0xffd0b0, hemiGnd: 0x5a4030, amb: 0xc09070, sun: 0xffb080, fill: 0x8aa0c8, rim: 0x6a5870, sunI: 0.42, hemiI: 0.48, ambI: 0.22, fillI: 0.28, rimI: 0.16, moonI: 0.02 },
-  { h: 9.0, sky: 0x7a96b0, hemiSky: 0xe8f0f8, hemiGnd: 0x6a6050, amb: 0xc0c8d0, sun: 0xffeed8, fill: 0x90a8c8, rim: 0x6a7888, sunI: 0.88, hemiI: 0.82, ambI: 0.34, fillI: 0.42, rimI: 0.22, moonI: 0 },
-  { h: 12.0, sky: 0x8aa6b8, hemiSky: 0xf2f6fa, hemiGnd: 0x7a7468, amb: 0xd0d6dc, sun: 0xf4f1e6, fill: 0x9ab0cc, rim: 0x788898, sunI: 1.02, hemiI: 0.90, ambI: 0.36, fillI: 0.46, rimI: 0.24, moonI: 0 },
-  { h: 16.0, sky: 0x6a8498, hemiSky: 0xe4d8c8, hemiGnd: 0x6a5848, amb: 0xc8b8a8, sun: 0xffe2c0, fill: 0x88a0c0, rim: 0x667888, sunI: 0.92, hemiI: 0.80, ambI: 0.32, fillI: 0.44, rimI: 0.24, moonI: 0 },
-  { h: 18.5, sky: 0x1c2430, hemiSky: 0xd0dceb, hemiGnd: 0x4a4034, amb: 0x7a8898, sun: 0xfff1dd, fill: 0x7a9ccc, rim: 0x556677, sunI: 1.15, hemiI: 0.78, ambI: 0.32, fillI: 0.50, rimI: 0.26, moonI: 0 },
-  { h: 20.0, sky: 0x010101, hemiSky: 0x4a5870, hemiGnd: 0x2a241c, amb: 0x3a4450, sun: 0xff7040, fill: 0x6a88b0, rim: 0x334050, sunI: 0.06, hemiI: 0.28, ambI: 0.14, fillI: 0.16, rimI: 0.10, moonI: 0.08 },
-  { h: 22.0, sky: 0x000000, hemiSky: 0x243040, hemiGnd: 0x14120e, amb: 0x1c2430, sun: 0x202830, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.18, ambI: 0.10, fillI: 0.10, rimI: 0.06, moonI: 0.14 },
-  { h: 24.0, sky: 0x000000, hemiSky: 0x1c2838, hemiGnd: 0x12100c, amb: 0x1a222c, sun: 0x1a2430, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.16, ambI: 0.09, fillI: 0.08, rimI: 0.05, moonI: 0.15 },
+  { h: 0, sky: 0x000000, hemiSky: 0x141c28, hemiGnd: 0x0c0a08, amb: 0x121820, sun: 0x1a2430, fill: 0x6a7c94, rim: 0x283038, sunI: 0, hemiI: 0.06, ambI: 0.03, fillI: 0.04, rimI: 0.03, moonI: 0.08, exp: 1.05 },
+  { h: 5.2, sky: 0x000000, hemiSky: 0x2a2438, hemiGnd: 0x14100c, amb: 0x1c1828, sun: 0xff8860, fill: 0x5a6c88, rim: 0x2a2434, sunI: 0, hemiI: 0.08, ambI: 0.04, fillI: 0.06, rimI: 0.04, moonI: 0.06, exp: 1.04 },
+  { h: 6.05, sky: 0x241c1e, hemiSky: 0xffb090, hemiGnd: 0x4a3020, amb: 0x8a6050, sun: 0xff9966, fill: 0x6a7898, rim: 0x4a3c50, sunI: 0.32, hemiI: 0.18, ambI: 0.08, fillI: 0.14, rimI: 0.10, moonI: 0.03, exp: 1.02 },
+  { h: 6.7, sky: 0x4a5468, hemiSky: 0xffd0b0, hemiGnd: 0x5a4030, amb: 0xa07860, sun: 0xffb080, fill: 0x7a90b8, rim: 0x5a4c60, sunI: 0.58, hemiI: 0.26, ambI: 0.10, fillI: 0.18, rimI: 0.12, moonI: 0.01, exp: 0.98 },
+  { h: 9.0, sky: 0x6a8aa0, hemiSky: 0xd8e4f0, hemiGnd: 0x5a5448, amb: 0x9098a0, sun: 0xfff0dc, fill: 0x88a0c0, rim: 0x5a6878, sunI: 0.78, hemiI: 0.34, ambI: 0.12, fillI: 0.20, rimI: 0.14, moonI: 0, exp: 0.94 },
+  { h: 12.0, sky: 0x7a96aa, hemiSky: 0xe4ecf2, hemiGnd: 0x6a6458, amb: 0xa0a8b0, sun: 0xe8eef2, fill: 0x90a8c4, rim: 0x687888, sunI: 0.86, hemiI: 0.36, ambI: 0.12, fillI: 0.22, rimI: 0.14, moonI: 0, exp: 0.92 },
+  { h: 16.0, sky: 0x5a7488, hemiSky: 0xe0d0b8, hemiGnd: 0x5a4c40, amb: 0x988878, sun: 0xffd4a8, fill: 0x7890b0, rim: 0x586878, sunI: 0.80, hemiI: 0.32, ambI: 0.11, fillI: 0.20, rimI: 0.14, moonI: 0, exp: 0.96 },
+  { h: 18.5, sky: 0x1c2430, hemiSky: 0x8a9aac, hemiGnd: 0x3a3228, amb: 0x4a5460, sun: 0xfff1dd, fill: 0x5a7aaa, rim: 0x445566, sunI: 1.18, hemiI: 0.32, ambI: 0.12, fillI: 0.28, rimI: 0.18, moonI: 0, exp: 1.00 },
+  { h: 20.0, sky: 0x010101, hemiSky: 0x2a3444, hemiGnd: 0x181410, amb: 0x1c2430, sun: 0xff7040, fill: 0x4a6080, rim: 0x283038, sunI: 0.04, hemiI: 0.10, ambI: 0.05, fillI: 0.08, rimI: 0.05, moonI: 0.05, exp: 1.04 },
+  { h: 21.0, sky: 0x000000, hemiSky: 0x141c28, hemiGnd: 0x0c0a08, amb: 0x121820, sun: 0x202830, fill: 0x6a7c94, rim: 0x283038, sunI: 0, hemiI: 0.06, ambI: 0.03, fillI: 0.04, rimI: 0.03, moonI: 0.08, exp: 1.05 },
+  { h: 22.0, sky: 0x000000, hemiSky: 0x141c28, hemiGnd: 0x0c0a08, amb: 0x121820, sun: 0x202830, fill: 0x6a7c94, rim: 0x283038, sunI: 0, hemiI: 0.06, ambI: 0.03, fillI: 0.04, rimI: 0.03, moonI: 0.08, exp: 1.05 },
+  { h: 24.0, sky: 0x000000, hemiSky: 0x141c28, hemiGnd: 0x0c0a08, amb: 0x121820, sun: 0x1a2430, fill: 0x6a7c94, rim: 0x283038, sunI: 0, hemiI: 0.06, ambI: 0.03, fillI: 0.04, rimI: 0.03, moonI: 0.08, exp: 1.05 },
 ];
 
 function hexRgb(hex) {
@@ -893,6 +942,7 @@ function sampleTod(hour) {
     fillI: mixN("fillI"),
     rimI: mixN("rimI"),
     moonI: mixN("moonI"),
+    exp: mixN("exp"),
   };
 }
 
@@ -938,6 +988,29 @@ function ensureSkyDiscs() {
   }
 }
 
+/** Place the sun shadow ortho camera on the player XZ (floor Y). Direction from ToD sun path. */
+function updateKeyLightShadow() {
+  if (!keyLight) return;
+  const px = (player && player.pos) ? player.pos.x : 0;
+  const pz = (player && player.pos) ? player.pos.z : SPAWN_Z;
+  const ty = FLOOR_Y;
+  const dir = (keyLight.userData && keyLight.userData.sunDir) || _keySunDir;
+  let dx = dir.x, dy = dir.y, dz = dir.z;
+  if (dy < 0.14) {
+    dy = 0.14;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    dx /= len; dy /= len; dz /= len;
+  }
+  keyLight.target.position.set(px, ty, pz);
+  keyLight.position.set(
+    px + dx * KEY_SHADOW_DIST,
+    ty + dy * KEY_SHADOW_DIST,
+    pz + dz * KEY_SHADOW_DIST
+  );
+  keyLight.target.updateMatrixWorld();
+  keyLight.updateMatrixWorld();
+}
+
 function applyTimeOfDay() {
   const pal = sampleTod(state.timeOfDay);
   const path = sunPath(state.timeOfDay);
@@ -949,9 +1022,14 @@ function applyTimeOfDay() {
   const sunY = Math.sin(elRad) * dist;
   const sunZ = Math.cos(azRad) * cosE * dist;
   if (keyLight) {
-    keyLight.position.set(sunX, Math.max(sunY, -20), sunZ);
+    _keySunDir.set(Math.sin(azRad) * cosE, Math.sin(elRad), Math.cos(azRad) * cosE);
+    if (_keySunDir.lengthSq() < 1e-8) _keySunDir.set(0.35, 0.78, 0.4);
+    _keySunDir.normalize();
+    keyLight.userData.sunDir = _keySunDir;
     keyLight.color.copy(pal.sun);
     keyLight.userData.todBase = pal.sunI;
+    keyLight.castShadow = pal.sunI > 0.05;
+    updateKeyLightShadow();
   }
   if (hemiLight) {
     hemiLight.color.copy(pal.hemiSky);
@@ -993,7 +1071,7 @@ function applyTimeOfDay() {
     moonDisc.visible = show;
     if (show) {
       moonDisc.position.set(-Math.sin(azRad) * cosE * skyR, 48, -Math.cos(azRad) * cosE * skyR);
-      moonDisc.material.opacity = clamp(pal.moonI * 3.2, 0.2, 0.7);
+      moonDisc.material.opacity = clamp(pal.moonI * 2.8, 0.16, 0.5);
     }
   }
   if (scene) {
@@ -1042,6 +1120,11 @@ function applyDisplayLook() {
     else scene.background = sky.clone();
   }
   applyFog();
+
+  if (renderer) {
+    const exp = pal && pal.exp != null ? pal.exp : 1;
+    renderer.toneMappingExposure = exp;
+  }
 
   const lightMul = 0.88 + 0.12 * b;
   const todI = (obj, fallback) => {
@@ -1421,18 +1504,22 @@ let renderer, camera, scene, holdRoot, gunRoot;
 let hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight;
 let sunDisc = null;
 let moonDisc = null;
-/** Side-bay flood PointLights (+ fake floor pools) so the long lane reads at night. */
+/** Side-bay flood SpotLights (+ fake floor pools) so the long lane reads at night. */
 let floodLights = [];
 /** Fixture records: lamp/head hit, pool meshes, shot-out flag. */
 let floodFixtures = [];
 const SCENE_BG_BASE = 0x1c2430;
 /** Default clock (18:30) — palettes below are keyed so this hour matches SCENE_BG_BASE. */
 const TOD_DEFAULT = 18.5;
-const HEMI_INT_BASE = 0.78;
-const AMB_INT_BASE = 0.32;
-const KEY_INT_BASE = 1.15;
-const FILL_INT_BASE = 0.50;
-const RIM_INT_BASE = 0.26;
+const HEMI_INT_BASE = 0.32;
+const AMB_INT_BASE = 0.12;
+const KEY_INT_BASE = 1.18;
+const FILL_INT_BASE = 0.28;
+const RIM_INT_BASE = 0.18;
+/** Player-follow sun shadow: single ortho cascade around the player (not CSM). */
+const KEY_SHADOW_EXTENT = 23;
+const KEY_SHADOW_DIST = 46;
+const _keySunDir = new THREE.Vector3(0.35, 0.78, 0.4);
 let opticRoot, gripMesh, muzzleFlash, muzzleSocket, ejectionPort, swayRig, magMesh, boltMesh;
 let tracers = [];
 /** Short-lived bullet spark bursts (MeshBasic quads). */
@@ -1459,6 +1546,13 @@ const FLOOR_Y = -1.4;
 let casings = [];
 const CASING_MAX = 28;
 const CASING_GRAVITY = 12;
+/** Breakable beer bottles on the 15–25 m side benches. */
+let beerBottles = [];
+/** Tiny glass shards from broken bottles — bounce, then TTL or table reset. */
+let glassShards = [];
+const GLASS_SHARD_MAX = 48;
+const GLASS_SHARD_LIFE = 6.5;
+let _shardGeo = null;
 const MUZZLE_FLASH_MS = 80;
 let _casingGeo = null;
 let _casingMat = null;
@@ -1816,7 +1910,7 @@ function makeBermTexture() {
 function registerLeanSolid(obj) {
   if (!obj) return obj;
   obj.traverse((c) => {
-    if (c.isMesh && !c.userData.leanSolid) {
+    if (c.isMesh && !c.userData.leanSolid && !c.userData.breakable) {
       c.userData.leanSolid = true;
       leanSolids.push(c);
     }
@@ -1960,7 +2054,7 @@ function makeBarrel(r, h, x, y, z, color = 0x3d4a3a) {
 function makeSandbagMat(color) {
   return new THREE.MeshStandardMaterial({
     color,
-    roughness: 0.93,
+    roughness: 0.97,
     metalness: 0.02,
   });
 }
@@ -2041,6 +2135,256 @@ function makeStallBench(cx, cz, seatW = 1.1) {
     }
   }
   return markVaultable(group);
+}
+
+/** Waist-high wood range bench — plank language matches spawn tables, vaultable lip. */
+function makeRangePicnicBench(cx, cz, opts = {}) {
+  const group = new THREE.Group();
+  group.position.set(cx, FLOOR_Y, cz);
+  group.rotation.y = opts.rotY || 0;
+  const woodTex = makeWoodTexture();
+  const plank = new THREE.MeshStandardMaterial({
+    map: woodTex,
+    color: 0xa07a4c,
+    roughness: 0.88,
+    metalness: 0.04,
+  });
+  const postMat = new THREE.MeshStandardMaterial({
+    map: woodTex,
+    color: 0x6a4c2c,
+    roughness: 0.9,
+    metalness: 0.03,
+  });
+  const seatW = opts.seatW != null ? opts.seatW : 1.52;
+  const seatD = 0.42;
+  const seatH = 0.055;
+  const seatY = 0.96;
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(seatW, seatH, seatD), plank);
+  seat.position.set(0, seatY, 0);
+  seat.castShadow = true;
+  seat.receiveShadow = true;
+  group.add(seat);
+  const apron = new THREE.Mesh(new THREE.BoxGeometry(seatW + 0.03, 0.04, 0.035), postMat);
+  apron.position.set(0, seatY - 0.04, seatD * 0.5 - 0.01);
+  apron.castShadow = true;
+  apron.receiveShadow = true;
+  group.add(apron);
+  const apronB = apron.clone();
+  apronB.position.z = -seatD * 0.5 + 0.01;
+  group.add(apronB);
+  const legH = seatY - seatH * 0.5;
+  const ix = seatW * 0.42;
+  const iz = seatD * 0.32;
+  for (const dx of [-ix, ix]) {
+    for (const dz of [-iz, iz]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, legH, 0.06), postMat);
+      leg.position.set(dx, legH * 0.5, dz);
+      leg.castShadow = true;
+      leg.receiveShadow = true;
+      group.add(leg);
+    }
+  }
+  const stretch = new THREE.Mesh(new THREE.BoxGeometry(seatW * 0.78, 0.04, 0.04), postMat);
+  stretch.position.set(0, 0.28, 0);
+  stretch.castShadow = true;
+  stretch.receiveShadow = true;
+  group.add(stretch);
+  group.userData.seatTop = seatY + seatH * 0.5;
+  group.userData.seatW = seatW;
+  markVaultable(group);
+  return group;
+}
+
+/** Simple beer bottle — body + shoulder + neck + cap. Origin at the base. */
+function makeBeerBottle(colorHex) {
+  const g = new THREE.Group();
+  const glass = new THREE.MeshStandardMaterial({
+    color: colorHex,
+    roughness: 0.22,
+    metalness: 0.12,
+    transparent: true,
+    opacity: 0.78,
+  });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.028, 0.118, 10), glass);
+  body.position.y = 0.059;
+  const shoulder = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.026, 0.028, 10), glass);
+  shoulder.position.y = 0.132;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.012, 0.048, 8), glass);
+  neck.position.y = 0.170;
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.013, 0.013, 0.01, 8),
+    new THREE.MeshStandardMaterial({ color: 0x8a7a38, roughness: 0.45, metalness: 0.55 })
+  );
+  cap.position.y = 0.199;
+  g.add(body, shoulder, neck, cap);
+  g.traverse((c) => {
+    if (c.isMesh) {
+      c.castShadow = true;
+      c.receiveShadow = true;
+      c.userData.breakable = true;
+    }
+  });
+  return g;
+}
+
+/** Side-bay waist-high benches ~15–25 m downrange, clear of the 0-lane walk. */
+function buildRangeBenches() {
+  beerBottles = [];
+  const greens = [0x1e5a32, 0x245c38];
+  const browns = [0x5a3218, 0x6a3a1c];
+  const layouts = [
+    { x: -6.15, meters: 16.5, rotY: 0.04, n: 4 },
+    { x: 6.25, meters: 20.5, rotY: -0.05, n: 3 },
+    { x: -5.9, meters: 24.0, rotY: 0.07, n: 4 },
+  ];
+  for (const L of layouts) {
+    const bench = makeRangePicnicBench(L.x, rangeZ(L.meters), { rotY: L.rotY });
+    const seatTop = bench.userData.seatTop || 0.9875;
+    const seatW = bench.userData.seatW || 1.52;
+    const span = seatW * 0.32;
+    for (let i = 0; i < L.n; i++) {
+      const hex = (i % 2 === 0) ? greens[i % greens.length] : browns[i % browns.length];
+      const bottle = makeBeerBottle(hex);
+      const t = L.n === 1 ? 0.5 : i / (L.n - 1);
+      const lx = -span + 2 * span * t;
+      const lz = ((i % 2) * 2 - 1) * 0.08;
+      bottle.position.set(lx, seatTop, lz);
+      bottle.rotation.y = (i - 1.2) * 0.11;
+      bench.add(bottle);
+      const rec = {
+        group: bottle,
+        color: hex,
+        broken: false,
+        zone: { center: new THREE.Vector3(), radius: 0.048 },
+      };
+      bottle.userData.beerBottle = rec;
+      beerBottles.push(rec);
+    }
+    addLeanSolid(bench);
+  }
+  syncBeerBottleZones();
+}
+
+function syncBeerBottleZones() {
+  const wp = new THREE.Vector3();
+  for (const bot of beerBottles) {
+    if (!bot.group || !bot.zone) continue;
+    bot.group.getWorldPosition(wp);
+    bot.zone.center.set(wp.x, wp.y + 0.09, wp.z);
+  }
+}
+
+function getShardGeo() {
+  if (!_shardGeo) _shardGeo = new THREE.BoxGeometry(0.02, 0.012, 0.006);
+  return _shardGeo;
+}
+
+function spawnGlassShards(pos, color) {
+  if (!scene || !pos) return;
+  const n = 4 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < n; i++) {
+    let rec;
+    if (glassShards.length >= GLASS_SHARD_MAX) {
+      rec = glassShards.shift();
+      if (rec.mesh.parent) rec.mesh.parent.remove(rec.mesh);
+      if (rec.mesh.material) rec.mesh.material.dispose();
+    }
+    const mat = new THREE.MeshStandardMaterial({
+      color: color || 0x2a6a38,
+      roughness: 0.2,
+      metalness: 0.08,
+      transparent: true,
+      opacity: 0.85,
+    });
+    rec = {
+      mesh: new THREE.Mesh(getShardGeo(), mat),
+      vel: new THREE.Vector3(),
+      angVel: new THREE.Vector3(),
+      bounced: false,
+      sleeping: false,
+      life: GLASS_SHARD_LIFE,
+    };
+    rec.mesh.castShadow = false;
+    rec.mesh.receiveShadow = true;
+    rec.mesh.position.copy(pos);
+    rec.mesh.position.y += 0.02;
+    rec.mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    rec.mesh.scale.set(0.55 + Math.random() * 0.9, 0.45 + Math.random() * 0.8, 0.6 + Math.random() * 1.1);
+    rec.vel.set(
+      (Math.random() - 0.5) * 3.6,
+      1.25 + Math.random() * 2.15,
+      (Math.random() - 0.5) * 3.6
+    );
+    rec.angVel.set(
+      (Math.random() - 0.5) * 22,
+      (Math.random() - 0.5) * 16,
+      (Math.random() - 0.5) * 22
+    );
+    scene.add(rec.mesh);
+    glassShards.push(rec);
+  }
+}
+
+function updateGlassShards(dt) {
+  const floorY = FLOOR_Y + 0.006;
+  for (let i = glassShards.length - 1; i >= 0; i--) {
+    const s = glassShards[i];
+    s.life -= dt;
+    if (s.life <= 0) {
+      if (s.mesh.parent) s.mesh.parent.remove(s.mesh);
+      if (s.mesh.material) s.mesh.material.dispose();
+      glassShards.splice(i, 1);
+      continue;
+    }
+    if (s.mesh.material && s.life < 1.1) {
+      s.mesh.material.opacity = 0.85 * Math.max(0, s.life / 1.1);
+    }
+    if (s.sleeping) continue;
+    s.vel.y -= CASING_GRAVITY * dt;
+    s.mesh.position.addScaledVector(s.vel, dt);
+    s.mesh.rotation.x += s.angVel.x * dt;
+    s.mesh.rotation.y += s.angVel.y * dt;
+    s.mesh.rotation.z += s.angVel.z * dt;
+    if (s.mesh.position.y <= floorY) {
+      s.mesh.position.y = floorY;
+      if (!s.bounced) {
+        s.bounced = true;
+        s.vel.y = Math.abs(s.vel.y) * 0.28;
+        s.vel.x *= 0.45;
+        s.vel.z *= 0.45;
+        s.angVel.multiplyScalar(0.4);
+        if (s.vel.y < 0.4) s.vel.y = 0.4;
+      } else if (s.vel.y <= 0) {
+        s.vel.set(0, 0, 0);
+        s.angVel.set(0, 0, 0);
+        s.sleeping = true;
+      }
+    }
+  }
+}
+
+function breakBeerBottle(bot, hitPos) {
+  if (!bot || bot.broken) return;
+  bot.broken = true;
+  if (bot.group) bot.group.visible = false;
+  sfx.play("shatter");
+  const p = hitPos || (bot.zone && bot.zone.center);
+  spawnGlassShards(p, bot.color);
+}
+
+function restoreBeerBottles() {
+  for (const bot of beerBottles) {
+    bot.broken = false;
+    if (bot.group) bot.group.visible = true;
+  }
+}
+
+function clearGlassShards() {
+  for (const s of glassShards) {
+    if (s.mesh && s.mesh.parent) s.mesh.parent.remove(s.mesh);
+    if (s.mesh && s.mesh.material) s.mesh.material.dispose();
+  }
+  glassShards = [];
 }
 
 /** Optional matOpts: { roughness, metalness } — metal vs polymer separation on guns. */
@@ -2486,8 +2830,8 @@ function buildRoom() {
   const floorMat = new THREE.MeshStandardMaterial({
     map: floorTex,
     color: 0xe6eef6,
-    roughness: 0.92,
-    metalness: 0.04,
+    roughness: 0.96,
+    metalness: 0.02,
   });
   // Bay geometry centered on the 200 m mark so spawn→berm (~410 m) stays covered.
   const rangeCenterZ = rangeZ(200);
@@ -2511,13 +2855,13 @@ function buildRoom() {
   const wallMat = new THREE.MeshStandardMaterial({
     map: makeDirtConcreteTexture(2, 30),
     color: 0xaab6c4,
-    roughness: 0.9,
-    metalness: 0.05,
+    roughness: 0.93,
+    metalness: 0.04,
   });
   for (const side of [-12, 12]) {
     const wall = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 430), wallMat.clone());
     wall.position.set(side, -0.2, rangeCenterZ);
-    wall.castShadow = true;
+    wall.castShadow = false;
     wall.receiveShadow = true;
     addLeanSolid(wall);
   }
@@ -2526,6 +2870,7 @@ function buildRoom() {
   buildWeaponsBench();
   buildRangeProps();
   buildFiringLineStall();
+  buildRangeBenches();
   try {
     buildRangeFloodlights();
   } catch (err) {
@@ -3195,14 +3540,14 @@ function buildBackBerm() {
   // Main mound
   const main = new THREE.Mesh(new THREE.BoxGeometry(28, 5.2, 3.2), dirtMat);
   main.position.set(0, 0.7, bermZ);
-  main.castShadow = true;
+  main.castShadow = false;
   main.receiveShadow = true;
   addLeanSolid(main);
   // Front slope / face toward shooter
   const face = new THREE.Mesh(new THREE.BoxGeometry(26, 3.6, 2.4), dirtMat.clone());
   face.position.set(0, -0.15, bermZ + 2.8);
   face.rotation.x = -0.35;
-  face.castShadow = true;
+  face.castShadow = false;
   face.receiveShadow = true;
   addLeanSolid(face);
   // Crest / uneven top chunks
@@ -3210,7 +3555,7 @@ function buildBackBerm() {
     const chunk = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), darkMat.clone());
     chunk.position.set(x, y, bermZ + zOff);
     chunk.rotation.y = (x % 3) * 0.05;
-    chunk.castShadow = true;
+    chunk.castShadow = false;
     chunk.receiveShadow = true;
     addLeanSolid(chunk);
   }
@@ -3218,7 +3563,7 @@ function buildBackBerm() {
   for (const side of [-14, 14]) {
     const pile = new THREE.Mesh(new THREE.BoxGeometry(6, 3.2, 4), dirtMat.clone());
     pile.position.set(side, 0.1, bermZ + 2);
-    pile.castShadow = true;
+    pile.castShadow = false;
     pile.receiveShadow = true;
     addLeanSolid(pile);
   }
@@ -3316,8 +3661,8 @@ function makeFloodPoolMaterial(map) {
 
 /**
  * Cheap range floodlight: steel post + arm + glowing fixture head.
- * Uses a warm PointLight (reliable on MeshStandard) plus a large soft fake
- * floor pool disc so lanes read even when realtime lights struggle vs fog/albedo.
+ * Uses a warm SpotLight aimed at the floor pool (tight cone, no shadow map)
+ * plus a large soft fake floor pool disc so lanes read even when realtime lights struggle vs fog/albedo.
  */
 function makeFloodlight(x, z, opts = {}) {
   const inward = x >= 0 ? -1 : 1;
@@ -3371,15 +3716,6 @@ function makeFloodlight(x, z, opts = {}) {
 
   group.add(base, post, arm, head, lamp);
 
-  const intensity = opts.intensity != null ? opts.intensity : 55;
-  const distance = opts.distance != null ? opts.distance : 50;
-  // PointLight reads more reliably than Spot on dark MeshStandard + fog.
-  const light = new THREE.PointLight(0xffe0b8, intensity, distance, 2);
-  light.castShadow = false;
-  light.position.set(headX, headY - 0.06, -0.04);
-  group.add(light);
-  light.userData.floodIntBase = intensity;
-
   // Floor pool under the fixture (visual only — no raycast / lean).
   // radius ~10–14, y=0.04, inward 4–6; depthTest:false + renderOrder 1000 vs log-depth/transparent fights.
   const poolR = opts.poolRadius != null ? opts.poolRadius : 14;
@@ -3387,6 +3723,21 @@ function makeFloodlight(x, z, opts = {}) {
   const poolX = inward * poolInward;
   const poolY = 0.04;
   const poolZ = opts.poolZ != null ? opts.poolZ : 0; // under the light, not aimZ*0.35 downrange
+
+  const intensity = opts.intensity != null ? opts.intensity : 55;
+  const distance = opts.distance != null ? opts.distance : 50;
+  const lightY = headY - 0.06;
+  const aimLen = Math.hypot(poolX - headX, poolY - lightY, poolZ + 0.04);
+  const coverR = Math.min(poolR * 0.5, 7.2);
+  const angle = clamp(Math.atan(coverR / Math.max(aimLen, 1.5)), 0.40, 0.68);
+  // Isolated cones, no overlapping, no shadow maps (sun follow is enough).
+  const light = new THREE.SpotLight(0xffe0b8, intensity, distance, angle, 0.45, 2);
+  light.castShadow = false;
+  light.position.set(headX, lightY, -0.04);
+  light.target.position.set(poolX, poolY, poolZ);
+  group.add(light);
+  group.add(light.target);
+  light.userData.floodIntBase = intensity;
 
   const pool = new THREE.Mesh(
     new THREE.CircleGeometry(poolR, 48),
@@ -3433,11 +3784,11 @@ function makeFloodlight(x, z, opts = {}) {
   return fixture;
 }
 
-/** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m from spawn — PointLights + fake pools. */
+/** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m from spawn — SpotLights + fake pools. */
 function buildRangeFloodlights() {
   floodLights = [];
   floodFixtures = [];
-  // PointLight intensity/distance sized to read on MeshStandard; soft peach discs sell the spill.
+  // SpotLight intensity/distance sized to read on MeshStandard; soft peach discs sell the spill.
   // Pool radii ~10–14 m under fixture; depthTest:false NormalBlending so they stay visible.
   const posts = [
     { x: -9.2, meters: 25, intensity: 48, distance: 45, poolRadius: 14, poolCoreRadius: 4.5, poolInward: 5.5 },
@@ -3717,6 +4068,8 @@ function resetRangeTargets() {
   resetSilhouettes();
   resetBermPopups();
   restoreFloodlights();
+  restoreBeerBottles();
+  clearGlassShards();
   clearPaperDecals();
   showToast("Targets reset");
 }
@@ -3753,6 +4106,26 @@ function worldToScreen(world, out = { x: 0, y: 0, visible: false }) {
   out.x = (v.x * 0.5 + 0.5) * rect.width + (rect.left - pref.left);
   out.y = (-v.y * 0.5 + 0.5) * rect.height + (rect.top - pref.top);
   return out;
+}
+
+function hitSphereSegment(prev, curr, center, radius) {
+  const dx = curr.x - prev.x, dy = curr.y - prev.y, dz = curr.z - prev.z;
+  const fx = prev.x - center.x, fy = prev.y - center.y, fz = prev.z - center.z;
+  const a = dx * dx + dy * dy + dz * dz;
+  if (a < 1e-10) return null;
+  const b = 2 * (fx * dx + fy * dy + fz * dz);
+  const c0 = fx * fx + fy * fy + fz * fz - radius * radius;
+  const disc = b * b - 4 * a * c0;
+  if (disc < 0) return null;
+  const s = Math.sqrt(disc);
+  let t = (-b - s) / (2 * a);
+  if (t < 0 || t > 1) t = (-b + s) / (2 * a);
+  if (t < 0 || t > 1) return null;
+  const hit = new THREE.Vector3(prev.x + dx * t, prev.y + dy * t, prev.z + dz * t);
+  const n = hit.clone().sub(center);
+  if (n.lengthSq() < 1e-8) n.set(0, 1, 0);
+  else n.normalize();
+  return { hit, normal: n, u: t };
 }
 
 function hitTargetDiskInfo(prev, curr, t) {
@@ -3840,6 +4213,9 @@ function initThree() {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setClearColor(SCENE_BG_BASE, 1);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -3857,28 +4233,30 @@ function initThree() {
   leanPivot.add(camera);
   scene.add(playerRoot);
 
-  hemiLight = new THREE.HemisphereLight(0xd0dceb, 0x4a4034, HEMI_INT_BASE);
+  hemiLight = new THREE.HemisphereLight(0x8a9aac, 0x3a3228, HEMI_INT_BASE);
   scene.add(hemiLight);
-  ambLight = new THREE.AmbientLight(0x7a8898, AMB_INT_BASE);
+  ambLight = new THREE.AmbientLight(0x4a5460, AMB_INT_BASE);
   scene.add(ambLight);
   keyLight = new THREE.DirectionalLight(0xfff1dd, KEY_INT_BASE);
   keyLight.position.set(10, 22, 8);
   keyLight.castShadow = true;
-  keyLight.shadow.mapSize.set(1024, 1024);
-  keyLight.shadow.camera.near = 2;
-  keyLight.shadow.camera.far = 90;
-  keyLight.shadow.camera.left = -24;
-  keyLight.shadow.camera.right = 24;
-  keyLight.shadow.camera.top = 24;
-  keyLight.shadow.camera.bottom = -24;
-  keyLight.shadow.bias = -0.0004;
-  keyLight.shadow.normalBias = 0.02;
-  keyLight.shadow.radius = 3.5;
+  keyLight.shadow.mapSize.set(2048, 2048);
+  keyLight.shadow.camera.near = 1;
+  keyLight.shadow.camera.far = KEY_SHADOW_DIST + KEY_SHADOW_EXTENT + 16;
+  keyLight.shadow.camera.left = -KEY_SHADOW_EXTENT;
+  keyLight.shadow.camera.right = KEY_SHADOW_EXTENT;
+  keyLight.shadow.camera.top = KEY_SHADOW_EXTENT;
+  keyLight.shadow.camera.bottom = -KEY_SHADOW_EXTENT;
+  keyLight.shadow.bias = -0.0002;
+  keyLight.shadow.normalBias = 0.035;
+  keyLight.shadow.radius = 2.5;
+  keyLight.shadow.camera.updateProjectionMatrix();
   scene.add(keyLight);
-  fillLight = new THREE.DirectionalLight(0x7a9ccc, FILL_INT_BASE);
+  scene.add(keyLight.target);
+  fillLight = new THREE.DirectionalLight(0x5a7aaa, FILL_INT_BASE);
   fillLight.position.set(-8, 10, -2);
   scene.add(fillLight);
-  rimLight = new THREE.DirectionalLight(0x556677, RIM_INT_BASE);
+  rimLight = new THREE.DirectionalLight(0x445566, RIM_INT_BASE);
   rimLight.position.set(0, 8, -30);
   scene.add(rimLight);
   moonLight = new THREE.DirectionalLight(0xb8c8dc, 0);
@@ -4684,6 +5062,7 @@ function updateTracers(dt) {
   });
 
   syncFloodLampZones();
+  syncBeerBottleZones();
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i];
     tr.life -= dt;
@@ -4738,6 +5117,13 @@ function updateTracers(dt) {
           best = { kind: "flood", fixture: fx, hit: info.hit, normal: fx.zone.normal, u: info.u };
         }
       }
+      for (const bot of beerBottles) {
+        if (bot.broken || !bot.zone) continue;
+        const info = hitSphereSegment(prev, tr.mesh.position, bot.zone.center, bot.zone.radius);
+        if (info && (!best || info.u < best.u)) {
+          best = { kind: "bottle", bottle: bot, hit: info.hit, normal: info.normal, u: info.u };
+        }
+      }
       const env = hitEnvironmentSegment(prev, tr.mesh.position);
       if (env && (!best || env.u < best.u)) {
         const fx = env.object && env.object.userData && env.object.userData.floodFixture;
@@ -4770,6 +5156,8 @@ function updateTracers(dt) {
           });
         } else if (best.kind === "flood") {
           shootOutFlood(best.fixture, best.hit, best.normal);
+        } else if (best.kind === "bottle") {
+          breakBeerBottle(best.bottle, best.hit);
         } else {
           sfx.play("miss");
           spawnImpactFX(best.hit, best.normal, "scuff");
@@ -5241,6 +5629,7 @@ function updatePlayer(dt) {
   updateHobReadout();
   updateTracers(dt);
   updateCasings(dt);
+  updateGlassShards(dt);
   updateImpactFX(dt);
   updateSilhouettes(dt);
   updateBermPopups(dt);
@@ -5419,6 +5808,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   updatePlayer(dt);
+  updateKeyLightShadow();
   renderer.render(scene, camera);
 }
 

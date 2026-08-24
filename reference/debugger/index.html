@@ -166,10 +166,11 @@
                 <li><kbd>B</kbd> fire mode (semi / auto — SMG only)</li>
                 <li><kbd>-</kbd>/<kbd>=</kbd> cycle optic zero (Sim) · irons locked 100 m</li>
                 <li>LMB fire (semi = click; SMG AUTO = hold; tracers from muzzle; Sim = HoB+zero by default)</li>
-                <li><kbd>R</kbd> reload mag · <kbd>F</kbd> bench pickup / table reset button</li>
+                <li><kbd>R</kbd> reload mag · <kbd>F</kbd> bench pickup / mag / suppressor / table reset</li>
                 <li>Click canvas = mouse look</li>
                 <li>Optics table = <kbd>F</kbd>/click attach (SMG: holo/acog · Rifle: all rail optics · Sniper: iron/sniper · illegal = toast)</li>
                 <li>Weapons bench = <kbd>F</kbd>/click equip Example SMG / Rifle / Sniper · red <strong>RESET TARGETS</strong> button clears paper holes, stands silhouettes, drops berm popups, restores floods</li>
+                <li>Kit table (left) = <kbd>F</kbd>/click seat mag (SMG 20 stick / 45 banana / 60 double drum · Rifle 20 · Sniper 5) or mount/unmount that gun's suppressor. Wrong-gun mag/can does not highlight</li>
                 <li><kbd>Insert</kbd> ADS preview · Sway toggle in header</li>
                 <li><kbd>End</kbd> cycle pose</li>
                 <li><kbd>↑</kbd><kbd>↓</kbd> select axis · <kbd>←</kbd><kbd>→</kbd> nudge</li>
@@ -352,7 +353,7 @@
           <input type="range" id="barrelHeatSlider" min="0" max="2" step="0.01" value="1.00" />
           <code id="barrelHeatVal">1.00</code>
         </label>
-        <p class="note">Orange/amber barrel glow from rounds through the tube. SMG auto dumps cook fast; rifle warms on rapid fire; bolt barely ticks. Cools over a few seconds. 0 = off.</p>
+        <p class="note">Orange/amber barrel glow from rounds through the tube. A mounted suppressor takes some of that heat on the can. SMG auto dumps cook fast; rifle warms on rapid fire; bolt barely ticks. Cools over a few seconds. 0 = off.</p>
       </div>
 
       <div class="settings-section">
@@ -436,7 +437,7 @@
           <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · RMB ADS · LMB fire</li>
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
-          <li><kbd>F</kbd> bench pickup / reset-targets button (weapons + optics; <kbd>G</kbd> backup)</li>
+          <li><kbd>F</kbd> bench pickup / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
           <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + barrel heat) · Materials (concrete wear) · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
@@ -445,6 +446,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v22"></script>
+    <script type="module" src="app.js?v=20260824v23"></script>
 </body>
 </html>

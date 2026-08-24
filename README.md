@@ -24,8 +24,8 @@ What the range is exercising:
 
 - Two-tab **tuner** (`` ` ``) — live hip/ADS holds, attachments, Copy JSON
 - ~400 m lane with fog, time of day + procedural sky (Settings `O`), procedural bay concrete, and shootable flood bulbs
-- Berm-peak popup figures; **F** bench pickups (guns / optics / table reset)
-- **R** reload; crouch / slide; wall-clamped lean; vault; Sim vs Arcade ballistics (HoB / zero)
+- Berm-peak popup figures; **F** bench pickups (guns / optics / mags / suppressors / table reset)
+- **R** reload (mag-out / slam-in); crouch / slide; wall-clamped lean; vault; Sim vs Arcade ballistics (HoB / zero)
 - **SMG auto, in-line recoil** — **B** semi/auto (SMG only); hold LMB in AUTO (~1200 rpm)
 
 Contracts here can travel to a real engine later. This demo is the feel lab.

@@ -42,7 +42,7 @@ const ADS_LOOK_MUL = {
 const BALLISTICS = {
   // Demo units ≈ meters.
   example_smg: { speed: 300, gravity: 14, life: 3.2, tracerLen: 0.55 }, // .45 ACP-ish PDW
-  // 7.62×51 M118LR from 20" (Mk 11 / SR-25 class). 785 m/s ≈ 2571 fps.
+  // 7.62×51 from a 20" DMR. 785 m/s ≈ 2571 fps.
   example_rifle: { speed: 785, gravity: 9.8, life: 3.5, tracerLen: 0.75 },
   // 7.62×51 24"-class bolt (M24-ish). ~810 m/s.
   example_sniper: { speed: 810, gravity: 9.8, life: 4.0, tracerLen: 0.85 },
@@ -113,11 +113,30 @@ const DEFAULT_OPTIC = {
   example_sniper: "sniper_scope",
 };
 
-/** Mag capacity + reload duration by weapon (not by optic). Infinite reserve for range demo. */
-const MAG_SPEC = {
-  example_smg: { capacity: 20, reloadSec: 1.2 },
-  example_rifle: { capacity: 20, reloadSec: 1.4 }, // heavier 7.62 20-rd
-  example_sniper: { capacity: 5, reloadSec: 2.0 },
+/** Mag catalog. Capacity follows the seated mag, not the optic. Infinite reserve. */
+const MAG_KINDS = {
+  smg_20: { id: "smg_20", weaponId: "example_smg", capacity: 20, shape: "stick", label: "SMG 20" },
+  smg_45: { id: "smg_45", weaponId: "example_smg", capacity: 45, shape: "banana", label: "SMG 45" },
+  smg_60: { id: "smg_60", weaponId: "example_smg", capacity: 60, shape: "drum", label: "SMG 60" },
+  rifle_20: { id: "rifle_20", weaponId: "example_rifle", capacity: 20, shape: "box", label: "Rifle 20" },
+  sniper_5: { id: "sniper_5", weaponId: "example_sniper", capacity: 5, shape: "clip", label: "Sniper 5" },
+};
+const DEFAULT_MAG = {
+  example_smg: "smg_20",
+  example_rifle: "rifle_20",
+  example_sniper: "sniper_5",
+};
+/** Reload window by weapon. Mag motion plays inside this. */
+const MAG_RELOAD_SEC = {
+  example_smg: 1.2,
+  example_rifle: 1.4,
+  example_sniper: 2.0,
+};
+/** Per-gun suppressor: short SMG can, longer 7.62 rifle can, unique long bolt can. */
+const SUPPRESSOR_SPEC = {
+  example_smg: { label: "SMG suppressor", mount: [0, 0.016, -0.405], tipZ: -0.507, y: 0.016 },
+  example_rifle: { label: "Rifle suppressor", mount: [0, 0.018, -0.805], tipZ: -0.970, y: 0.018 },
+  example_sniper: { label: "Sniper suppressor", mount: [0, 0.014, -0.852], tipZ: -1.052, y: 0.014 },
 };
 
 /** Bolt-action cycle (example_sniper only). Semi DMR does not use this. */
@@ -228,6 +247,18 @@ const state = {
   showAimRays: false,
   /** 3px hip crosshair visibility (ADS optic HUD unaffected). */
   showHipReticle: true,
+  /** Seated mag id per weapon (table pickup). */
+  magByWeapon: {
+    example_smg: "smg_20",
+    example_rifle: "rifle_20",
+    example_sniper: "sniper_5",
+  },
+  /** Suppressor mounted per weapon (table toggle). */
+  suppressorByWeapon: {
+    example_smg: false,
+    example_rifle: false,
+    example_sniper: false,
+  },
   /** Rounds currently in the magazine. */
   ammoInMag: 20,
   /** True while a timed reload is in progress (blocks fire). */
@@ -351,9 +382,28 @@ function typingFocus() {
   return t && (t.matches("input, select, textarea") || t.isContentEditable);
 }
 
+function currentMagId(weaponId = state.weaponId) {
+  return state.magByWeapon[weaponId] || DEFAULT_MAG[weaponId] || "smg_20";
+}
+
 function magSpecForLoadout() {
-  // Capacity follows the weapon, not the optic — a scope on the DMR keeps the 20-rd mag.
-  return MAG_SPEC[state.weaponId] || MAG_SPEC.example_smg;
+  // Capacity follows the seated mag, not the optic — a scope on the DMR keeps the 20-rd mag.
+  const mag = MAG_KINDS[currentMagId()] || MAG_KINDS.smg_20;
+  return {
+    capacity: mag.capacity,
+    reloadSec: MAG_RELOAD_SEC[state.weaponId] || 1.2,
+    magId: mag.id,
+    shape: mag.shape,
+  };
+}
+
+function suppressorMounted(weaponId = state.weaponId) {
+  return !!state.suppressorByWeapon[weaponId];
+}
+
+function magAllowedOnWeapon(magId, weaponId = state.weaponId) {
+  const mag = MAG_KINDS[magId];
+  return !!(mag && mag.weaponId === weaponId);
 }
 
 function isBoltGun(weaponId = state.weaponId) {
@@ -455,6 +505,8 @@ function syncAmmoForLoadout({ refill = false } = {}) {
 function resetMagVisual() {
   if (!magMesh) return;
   magMesh.visible = true;
+  magMesh.position.set(0, 0, 0);
+  magMesh.rotation.set(0, 0, 0);
   magMesh.scale.set(1, 1, 1);
 }
 
@@ -503,15 +555,46 @@ function updateReload(dt) {
   state.reloadElapsed += dt;
   const dur = Math.max(0.05, state.reloadDuration || 1.2);
   const t = Math.min(1, state.reloadElapsed / dur);
-  // Mag scale/hide flash mid-swap (eased out, then back in)
+  // Mag unseats, drops, then the seated size/shape slams in — inside the existing dip window.
   if (magMesh) {
-    const gone = smooth01((t - 0.16) / 0.12) * (1 - smooth01((t - 0.70) / 0.14));
-    const s = 1 - 0.88 * gone;
-    magMesh.scale.set(s, s, s);
-    magMesh.visible = s > 0.08;
+    applyReloadMagMotion(t);
   }
   if (t >= 1) finishReload();
   else updateAmmoHud();
+}
+
+function applyReloadMagMotion(u) {
+  const m = magMesh;
+  if (!m) return;
+  m.scale.set(1, 1, 1);
+  if (u < 0.16) {
+    const k = smooth01(u / 0.16);
+    m.visible = true;
+    m.position.set(0.004 * k, -0.028 * k, 0.006 * k);
+    m.rotation.set(0.22 * k, 0, 0.08 * k);
+  } else if (u < 0.42) {
+    const k = (u - 0.16) / 0.26;
+    const fall = k * k;
+    m.visible = k < 0.92;
+    m.position.set(0.01 + 0.10 * fall, -0.028 - 0.42 * fall, 0.01 + 0.04 * fall);
+    m.rotation.set(0.22 + 0.55 * k, 0.15 * k, 0.08 + 0.7 * k);
+  } else if (u < 0.58) {
+    m.visible = false;
+    m.position.set(0.02, -0.28, 0.02);
+    m.rotation.set(0.35, 0, 0.2);
+  } else if (u < 0.88) {
+    const k = smooth01((u - 0.58) / 0.30);
+    m.visible = true;
+    // Overshoot the well then we'll settle — slam.
+    const y = lerp(-0.26, 0.014, k);
+    m.position.set(lerp(0.03, 0, k), y, lerp(-0.02, 0, k));
+    m.rotation.set(lerp(0.42, 0, k), 0, lerp(-0.12, 0, k));
+  } else {
+    const k = smooth01((u - 0.88) / 0.12);
+    m.visible = true;
+    m.position.set(0, lerp(0.014, 0, k), 0);
+    m.rotation.set(0, 0, 0);
+  }
 }
 
 
@@ -2118,7 +2201,7 @@ const RIM_INT_BASE = 0.18;
 const KEY_SHADOW_EXTENT = 23;
 const KEY_SHADOW_DIST = 46;
 const _keySunDir = new THREE.Vector3(0.35, 0.78, 0.4);
-let opticRoot, gripMesh, muzzleFlash, muzzleSocket, ejectionPort, swayRig, magMesh, boltMesh;
+let opticRoot, gripMesh, muzzleFlash, muzzleSocket, ejectionPort, swayRig, magMesh, magSocket, boltMesh, suppressorRoot;
 let tracers = [];
 /** Short-lived bullet spark bursts (MeshBasic quads). */
 let impactSparks = [];
@@ -3638,8 +3721,9 @@ function applyBarrelHeatVisual() {
   gunRoot.traverse((o) => {
     if (!o.isMesh) return;
     if (o.userData.barrelHeat && o.material) {
-      const tip = o.userData.barrelHeat === "tip" ? 1.28 : 1;
-      o.material.emissive.setRGB(r, g * (o.userData.barrelHeat === "tip" ? 1.05 : 1), b);
+      const role = o.userData.barrelHeat;
+      const tip = role === "tip" ? 1.28 : role === "can" ? 1.38 : 1;
+      o.material.emissive.setRGB(r, g * (role === "tip" || role === "can" ? 1.05 : 1), b);
       o.material.emissiveIntensity = punch * tip;
     }
     if (o.userData.barrelHeatShimmer && o.material) {
@@ -3659,6 +3743,236 @@ function tickBarrelHeat(dt) {
     barrelHeatShimmerMap.offset.x = Math.sin(barrelHeatClock * 3.1) * 0.04;
   }
   applyBarrelHeatVisual();
+}
+
+
+/* ---- Mag + suppressor meshes (table pickups + viewmodel) ----
+ * Beer-bottle quality: basic shapes, decent segs, a bit of material care.
+ * SMG: 20 stick / 45 banana / 60 double drum. Rifle: 20 box. Sniper: 5-rd clip.
+ */
+function magKind(id) {
+  return MAG_KINDS[id] || MAG_KINDS.smg_20;
+}
+
+function makeMagMesh(magId) {
+  const spec = magKind(magId);
+  const g = new THREE.Group();
+  g.name = "mag_" + spec.id;
+  g.userData.magId = spec.id;
+  const poly = GUN_MAT.polymer;
+  const polyD = GUN_MAT.polymerDark;
+  const dark = GUN_MAT.darkMetal;
+  const metal = GUN_MAT.metal;
+  if (spec.shape === "banana") {
+    // Curved 45 — stacked segments along a forward arc (bottom toward muzzle).
+    const n = 8;
+    const R = 0.155;
+    const arc = 0.7;
+    g.add(makeBox(0.036, 0.014, 0.046, 0x323840, 0, -0.006, 0, poly));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      const a = t * arc;
+      const y = -R * Math.sin(a);
+      const z = -R * (1 - Math.cos(a));
+      const h = (R * arc) / n * 1.12;
+      const col = i === n - 1 ? 0x1a1e26 : (i % 2 ? 0x2a3038 : 0x262c34);
+      const seg = makeBox(0.034, h, 0.042, col, 0, y, z, polyD);
+      seg.rotation.x = -a;
+      g.add(seg);
+    }
+    const aEnd = arc;
+    const plate = makeBox(
+      0.038, 0.01, 0.048, 0x1c2028,
+      0, -R * Math.sin(aEnd) - 0.002, -R * (1 - Math.cos(aEnd)),
+      poly
+    );
+    plate.rotation.x = -aEnd;
+    g.add(plate);
+    const rib = makeBox(
+      0.037, 0.008, 0.044, 0x3a404c,
+      0, -R * Math.sin(arc * 0.35), -R * (1 - Math.cos(arc * 0.35)),
+      poly
+    );
+    rib.rotation.x = -arc * 0.35;
+    g.add(rib);
+  } else if (spec.shape === "drum") {
+    // Double drum 60 — feed tower + two side drums (axes along the barrel).
+    const tower = makeBox(0.036, 0.044, 0.044, 0x2e343e, 0, -0.022, 0, polyD);
+    const towerLip = makeBox(0.038, 0.01, 0.046, 0x3a404c, 0, -0.004, 0, poly);
+    const left = makeCyl(0.038, 0.038, 0.04, 0x1e2228, -0.038, -0.072, 0, Math.PI / 2, 0, 0, 16, polyD);
+    const right = makeCyl(0.038, 0.038, 0.04, 0x1e2228, 0.038, -0.072, 0, Math.PI / 2, 0, 0, 16, polyD);
+    const hubL = makeCyl(0.012, 0.012, 0.044, 0x4a5568, -0.038, -0.072, 0, Math.PI / 2, 0, 0, 10, metal);
+    const hubR = makeCyl(0.012, 0.012, 0.044, 0x4a5568, 0.038, -0.072, 0, Math.PI / 2, 0, 0, 10, metal);
+    const coupler = makeBox(0.078, 0.028, 0.036, 0x2a3038, 0, -0.072, 0, poly);
+    const frontPlate = makeBox(0.082, 0.006, 0.042, 0x323840, 0, -0.072, -0.022, polyD);
+    const floor = makeBox(0.08, 0.01, 0.04, 0x161a20, 0, -0.112, 0, poly);
+    g.add(towerLip, tower, left, right, hubL, hubR, coupler, frontPlate, floor);
+  } else if (spec.shape === "box") {
+    // Rifle 20-rd — fatter 7.62 body, slight forward rake, floorplate.
+    const body = makeBox(0.04, 0.122, 0.05, 0x1c2028, 0, -0.064, 0.004, polyD);
+    body.rotation.x = 0.06;
+    const lip = makeBox(0.042, 0.012, 0.052, 0x2a3038, 0, -0.006, 0, poly);
+    const rib = makeBox(0.043, 0.01, 0.054, 0x323840, 0, -0.042, 0.002, poly);
+    const rib2 = makeBox(0.043, 0.01, 0.054, 0x323840, 0, -0.078, 0.006, poly);
+    const plate = makeBox(0.044, 0.01, 0.056, 0x161a20, 0, -0.128, 0.01, poly);
+    plate.rotation.x = 0.06;
+    const spine = makeBox(0.008, 0.1, 0.048, 0x242a32, 0, -0.062, 0.004, polyD);
+    g.add(lip, body, rib, rib2, plate, spine);
+  } else if (spec.shape === "clip") {
+    // Sniper 5-rd box clip — short metal/polymer protrusion.
+    const body = makeBox(0.03, 0.042, 0.044, 0x2a3038, 0, -0.024, 0, polyD);
+    const lip = makeBox(0.032, 0.008, 0.046, 0x4a5568, 0, -0.004, 0, metal);
+    const plate = makeBox(0.034, 0.008, 0.048, 0x1a1e24, 0, -0.048, 0, dark);
+    const catch_ = makeBox(0.012, 0.008, 0.016, 0x6e7a8c, 0.018, -0.02, 0, metal);
+    g.add(lip, body, plate, catch_);
+  } else {
+    // SMG 20 — short straight stick (default). Not a 30.
+    const lip = makeBox(0.034, 0.012, 0.044, 0x3a404c, 0, -0.006, 0, poly);
+    const body = makeBox(0.032, 0.056, 0.04, 0x2e343e, 0, -0.04, 0, polyD);
+    const taper = makeBox(0.03, 0.016, 0.038, 0x262c34, 0, -0.074, 0, polyD);
+    const plate = makeBox(0.036, 0.008, 0.046, 0x1a1e24, 0, -0.086, 0, poly);
+    const rib = makeBox(0.035, 0.008, 0.042, 0x3a404c, 0, -0.028, 0, poly);
+    const notch = makeBox(0.01, 0.01, 0.014, 0x4a5568, 0.02, -0.02, 0, metal);
+    g.add(lip, body, taper, plate, rib, notch);
+  }
+  return g;
+}
+
+function sitOnTable(obj) {
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  if (Number.isFinite(box.min.y)) obj.position.y -= box.min.y;
+  return obj;
+}
+
+function makeSuppressorMesh(weaponId, { heat = false } = {}) {
+  const g = new THREE.Group();
+  g.name = "suppressor_" + weaponId;
+  const dark = GUN_MAT.darkMetal;
+  const metal = GUN_MAT.metal;
+  const tag = (mesh, role) => { if (heat) tagBarrelHeatMesh(mesh, role); return mesh; };
+  const cyl = (r0, r1, h, col, z, segs, mat, role) =>
+    tag(makeCyl(r0, r1, h, col, 0, 0, z, Math.PI / 2, 0, 0, segs, mat), role);
+  if (weaponId === "example_rifle") {
+    // Longer 7.62 can
+    g.add(cyl(0.016, 0.017, 0.024, 0x2a3038, -0.012, 12, metal, "can"));
+    g.add(cyl(0.021, 0.021, 0.128, 0x1a1e26, -0.088, 14, dark, "tube"));
+    g.add(cyl(0.0225, 0.0225, 0.007, 0x12161c, -0.042, 14, dark, "can"));
+    g.add(cyl(0.0225, 0.0225, 0.007, 0x12161c, -0.088, 14, dark, "can"));
+    g.add(cyl(0.0225, 0.0225, 0.007, 0x12161c, -0.128, 14, dark, "can"));
+    const cap = makeRingTube(0.0075, 0.02, 0.014, 0x12161c, 16, dark);
+    cap.position.z = -0.158;
+    cap.traverse((o) => { if (o.isMesh) tag(o, "tip"); });
+    g.add(cap);
+  } else if (weaponId === "example_sniper") {
+    // Unique long precision can (bolt can take one)
+    g.add(cyl(0.014, 0.015, 0.02, 0x2a3140, -0.01, 12, metal, "can"));
+    g.add(cyl(0.016, 0.018, 0.16, 0x161a22, -0.10, 16, dark, "tube"));
+    g.add(cyl(0.019, 0.019, 0.008, 0x0e1014, -0.055, 14, dark, "can"));
+    g.add(cyl(0.019, 0.019, 0.008, 0x0e1014, -0.12, 14, dark, "can"));
+    g.add(cyl(0.017, 0.015, 0.028, 0x1a1e26, -0.186, 14, dark, "tip"));
+    const cap = makeRingTube(0.0065, 0.015, 0.012, 0x10141a, 16, dark);
+    cap.position.z = -0.206;
+    cap.traverse((o) => { if (o.isMesh) tag(o, "tip"); });
+    g.add(cap);
+  } else {
+    // Short SMG can
+    g.add(cyl(0.015, 0.016, 0.018, 0x2a3038, -0.009, 12, metal, "can"));
+    g.add(cyl(0.019, 0.019, 0.07, 0x1a1e26, -0.053, 14, dark, "tube"));
+    g.add(cyl(0.0205, 0.0205, 0.006, 0x12161c, -0.03, 14, dark, "can"));
+    g.add(cyl(0.0205, 0.0205, 0.006, 0x12161c, -0.072, 14, dark, "can"));
+    const cap = makeRingTube(0.007, 0.018, 0.012, 0x12161c, 14, dark);
+    cap.position.z = -0.094;
+    cap.traverse((o) => { if (o.isMesh) tag(o, "tip"); });
+    g.add(cap);
+  }
+  return g;
+}
+
+function makeMagSocket(x, y, z) {
+  magSocket = new THREE.Group();
+  magSocket.name = "magSocket";
+  magSocket.position.set(x, y, z);
+  return magSocket;
+}
+
+function attachSeatedMag() {
+  if (!magSocket) return;
+  while (magSocket.children.length) {
+    const c = magSocket.children.pop();
+    c.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+        else o.material.dispose();
+      }
+    });
+  }
+  magMesh = makeMagMesh(currentMagId());
+  magMesh.name = "mag";
+  magSocket.add(magMesh);
+  resetMagVisual();
+  if (holdRoot) stampViewmodelLayer(magSocket);
+}
+
+function mountSuppressorForGun(style) {
+  if (suppressorRoot && suppressorRoot.parent) suppressorRoot.parent.remove(suppressorRoot);
+  suppressorRoot = makeSuppressorMesh(style, { heat: true });
+  const spec = SUPPRESSOR_SPEC[style] || SUPPRESSOR_SPEC.example_smg;
+  suppressorRoot.position.set(spec.mount[0], spec.mount[1], spec.mount[2]);
+  gunRoot.add(suppressorRoot);
+  syncSuppressorVisual();
+}
+
+function syncSuppressorVisual() {
+  if (!gunRoot) return;
+  const on = suppressorMounted();
+  const spec = SUPPRESSOR_SPEC[state.weaponId] || SUPPRESSOR_SPEC.example_smg;
+  if (suppressorRoot) suppressorRoot.visible = on;
+  gunRoot.traverse((o) => {
+    if (o.userData && o.userData.hideWhenSuppressed) o.visible = !on;
+  });
+  if (muzzleFlash) {
+    if (!muzzleFlash.userData.nativePos) {
+      muzzleFlash.userData.nativePos = muzzleFlash.position.clone();
+    }
+    const native = muzzleFlash.userData.nativePos;
+    if (on) muzzleFlash.position.set(native.x, spec.y, spec.tipZ);
+    else muzzleFlash.position.copy(native);
+  }
+  if (muzzleSocket) {
+    if (!muzzleSocket.userData.nativePos) {
+      muzzleSocket.userData.nativePos = muzzleSocket.position.clone();
+    }
+    const native = muzzleSocket.userData.nativePos;
+    if (on) muzzleSocket.position.set(native.x, spec.y, spec.tipZ);
+    else muzzleSocket.position.copy(native);
+  }
+  if (holdRoot) stampViewmodelLayer(gunRoot);
+  applyBarrelHeatVisual();
+}
+
+function equipMag(magId) {
+  const mag = MAG_KINDS[magId];
+  if (!mag || mag.weaponId !== state.weaponId) return;
+  if (currentMagId() === magId) {
+    showToast(mag.label + " already seated");
+    return;
+  }
+  state.magByWeapon[state.weaponId] = magId;
+  attachSeatedMag();
+  syncAmmoForLoadout({ refill: true });
+  refreshTableAvailability();
+  showToast("Mag: " + mag.label + "  (" + mag.capacity + ")");
+}
+
+function toggleSuppressor(weaponId) {
+  if (weaponId !== state.weaponId) return;
+  state.suppressorByWeapon[weaponId] = !state.suppressorByWeapon[weaponId];
+  syncSuppressorVisual();
+  const spec = SUPPRESSOR_SPEC[weaponId];
+  const lab = (spec && spec.label) || "Suppressor";
+  showToast(suppressorMounted(weaponId) ? lab + " on" : lab + " off");
 }
 
 function buildBlockGun(style) {
@@ -3688,7 +4002,7 @@ function buildBlockGun(style) {
   boltMesh = null;
 
   if (isRifle) {
-    // 7.62 AR DMR / SR-25 class — Mk 11 MOD 0 silhouette (20" / RAS / A2 stock).
+    // 7.62 AR DMR — long rail, fixed stock.
     // Stock — dark polymer M16A2 fixed (in-line, no wood comb)
     const buffer = makeBox(0.036, 0.036, 0.09, 0x3a4048, 0, 0.006, 0.168, poly);
     const stock = makeBox(0.046, 0.074, 0.16, 0x2a3038, 0, -0.012, 0.248, poly);
@@ -3726,13 +4040,13 @@ function buildBlockGun(style) {
     tagBarrelHeatMesh(prongT, "tip");
     tagBarrelHeatMesh(prongL, "tip");
     tagBarrelHeatMesh(prongR, "tip");
-    // 20-round 7.62 box — slightly fatter than 5.56, straight-ish, dark polymer
+    flashBody.userData.hideWhenSuppressed = true;
+    prongT.userData.hideWhenSuppressed = true;
+    prongL.userData.hideWhenSuppressed = true;
+    prongR.userData.hideWhenSuppressed = true;
+    // 20-round 7.62 mag well — seated mag comes from makeMagMesh
     const magWell = makeBox(0.046, 0.024, 0.062, 0x4a5568, 0, -0.044, 0.005, metal);
-    const mag = makeBox(0.042, 0.145, 0.052, 0x1c2028, 0, -0.118, 0.005, polyD);
-    const magRib = makeBox(0.044, 0.012, 0.054, 0x2a3038, 0, -0.08, 0.005, poly);
-    mag.name = "mag";
-    mag.add(magRib);
-    magMesh = mag;
+    const magSock = makeMagSocket(0, -0.054, 0.005);
     // A2 pistol grip — dark polymer
     const pistol = makeBox(0.032, 0.10, 0.042, 0x2a3038, 0, -0.088, 0.095, poly);
     pistol.rotation.x = 0.28;
@@ -3746,7 +4060,7 @@ function buildBlockGun(style) {
       lower, receiver, receiverTop, ejectionHood, chHump, chLatch, rail,
       handguard, hgTop, hgBevelL, hgBevelR, hgRail, hgSideL, hgSideR,
       barrel, gasBlock, frontBuis, flashBody, prongT, prongL, prongR,
-      magWell, mag, pistol, pistolBump, gripMesh, muzzleFlash
+      magWell, magSock, pistol, pistolBump, gripMesh, muzzleFlash
     );
     gripMesh.userData.base = { x: 0, y: -0.022, z: -0.26, rotX: 0, rotY: 0, rotZ: 0 };
     opticRoot = new THREE.Group();
@@ -3781,9 +4095,8 @@ function buildBlockGun(style) {
     const crown = makeCyl(0.011, 0.009, 0.016, 0x12161c, 0, 0.014, -0.85, Math.PI / 2, 0, 0, 10, dark);
     tagBarrelHeatMesh(crown, "tip");
     const magWell = makeBox(0.036, 0.016, 0.052, 0x4a5568, 0, -0.028, 0.01, metal);
-    const mag = makeBox(0.032, 0.055, 0.048, 0x1c2028, 0, -0.055, 0.01, polyD);
-    mag.name = "mag";
-    magMesh = mag;
+    const magSock = makeMagSocket(0, -0.036, 0.01);
+    crown.userData.hideWhenSuppressed = true;
     gripMesh = makeBox(0.028, 0.014, 0.08, 0x2a3038, 0, -0.022, -0.2, poly);
     muzzleFlash = makeMuzzleFlashSprite(0, 0.014, -0.87, 1.2);
     addBarrelHeatShimmer(0, 0.034, -0.72, 0.32);
@@ -3791,7 +4104,7 @@ function buildBlockGun(style) {
       stock, stockComb, stockPad, stockWrist,
       receiver, receiverTop, rail, bolt,
       forend, forendTip, barrel, crown,
-      magWell, mag, gripMesh, muzzleFlash
+      magWell, magSock, gripMesh, muzzleFlash
     );
     gripMesh.userData.base = { x: 0, y: -0.022, z: -0.2, rotX: 0, rotY: 0, rotZ: 0 };
     opticRoot = new THREE.Group();
@@ -3813,11 +4126,9 @@ function buildBlockGun(style) {
     const flashHiderRing = makeCyl(0.016, 0.015, 0.01, 0x0a0c10, 0, 0.016, -0.418, Math.PI / 2, 0, 0, 10, dark);
     tagBarrelHeatMesh(flashHiderRing, "tip");
     const magWell = makeBox(0.044, 0.02, 0.056, 0x4a5568, 0, -0.04, 0.01, metal);
-    const mag = makeBox(0.036, 0.115, 0.048, 0x2e343e, 0, -0.102, 0.01, polyD);
-    const magRib = makeBox(0.038, 0.01, 0.05, 0x3a404c, 0, -0.07, 0.01, poly);
-    mag.name = "mag";
-    mag.add(magRib);
-    magMesh = mag;
+    const magSock = makeMagSocket(0, -0.048, 0.01);
+    muzzleDevice.userData.hideWhenSuppressed = true;
+    flashHiderRing.userData.hideWhenSuppressed = true;
     const pistol = makeBox(0.032, 0.084, 0.04, 0x2a3038, 0, -0.078, 0.07, poly);
     pistol.rotation.x = 0.28;
     gripMesh = makeBox(0.032, 0.046, 0.046, 0x5c4a3a, 0, -0.052, -0.1, poly);
@@ -3828,7 +4139,7 @@ function buildBlockGun(style) {
     gunRoot.add(
       stock, stockPad, receiver, receiverTop, rail,
       handguard, hgBevel, barrel, muzzleDevice, flashHiderRing,
-      magWell, mag, pistol, gripMesh, muzzleFlash
+      magWell, magSock, pistol, gripMesh, muzzleFlash
     );
     gripMesh.userData.base = { x: 0, y: -0.052, z: -0.1, rotX: 0, rotY: 0, rotZ: 0 };
     opticRoot = new THREE.Group();
@@ -3850,6 +4161,8 @@ function buildBlockGun(style) {
   gunRoot.add(ejectionPort);
   gunRoot.add(opticRoot);
   rebuildOpticMeshes();
+  attachSeatedMag();
+  mountSuppressorForGun(style);
   swayRig.add(gunRoot);
   stampViewmodelLayer(holdRoot);
   applyBarrelHeatVisual();
@@ -3882,12 +4195,25 @@ function updateOpticVisibility() {
   });
 }
 
-/** Dim table props the current weapon cannot host (still lookable; equip blocked). */
+function pickupCompatible(p) {
+  const ud = (p && p.userData) || {};
+  if (ud.magId) return magAllowedOnWeapon(ud.magId);
+  if (ud.suppressorWeaponId) return ud.suppressorWeaponId === state.weaponId;
+  if (ud.opticId) return weaponAllowsOptic(ud.opticId);
+  return true;
+}
+
+/** Dim table props the current weapon cannot host. Optics stay lookable; mags/cans do not highlight. */
 function refreshOpticsTableAvailability() {
+  refreshTableAvailability();
+}
+
+function refreshTableAvailability() {
   if (!pickups || !pickups.length) return;
   pickups.forEach((p) => {
-    if (!p.userData.opticId) return;
-    const ok = weaponAllowsOptic(p.userData.opticId);
+    const ud = p.userData || {};
+    if (!ud.opticId && !ud.magId && !ud.suppressorWeaponId) return;
+    const ok = pickupCompatible(p);
     p.userData.allowed = ok;
     p.traverse((o) => {
       if (!o.isMesh || o === p.userData.highlight || !o.material) return;
@@ -3939,6 +4265,7 @@ function buildRoom() {
 
   buildOpticsTable();
   buildWeaponsBench();
+  buildKitTable();
   buildRangeProps();
   buildFiringLineStall();
   buildRangeBenches();
@@ -4023,13 +4350,15 @@ function makeWeaponBenchProp(style) {
   const isRifle = style === "example_rifle";
   const isSniper = style === "example_sniper";
   if (isRifle) {
-    // Mk 11 / SR-25 class — A2 stock, long RAS, 20" barrel, 20-rd mag
+    // 7.62 DMR — fixed stock, long rail, 20" barrel, 20-rd mag
     g.add(makeBox(0.046, 0.074, 0.16, 0x2a3038, 0, -0.012, 0.248, poly));
     g.add(makeBox(0.056, 0.05, 0.23, 0x6e7a8c, 0, 0.018, 0.028, metal));
     g.add(makeBox(0.054, 0.048, 0.30, 0x2a3038, 0, 0.008, -0.28, poly));
     g.add(makeCyl(0.009, 0.012, 0.44, 0x1e2430, 0, 0.018, -0.56, Math.PI / 2, 0, 0, 12, dark));
     g.add(makeCyl(0.013, 0.011, 0.026, 0x12161c, 0, 0.018, -0.795, Math.PI / 2, 0, 0, 10, dark));
-    g.add(makeBox(0.042, 0.145, 0.052, 0x1c2028, 0, -0.118, 0.005, polyD));
+    const magR = makeMagMesh("rifle_20");
+    magR.position.set(0, -0.054, 0.005);
+    g.add(magR);
     const pistol = makeBox(0.032, 0.10, 0.042, 0x2a3038, 0, -0.088, 0.095, poly);
     pistol.rotation.x = 0.28;
     g.add(pistol);
@@ -4039,7 +4368,9 @@ function makeWeaponBenchProp(style) {
     g.add(makeBox(0.042, 0.048, 0.16, 0x5a6578, 0, 0.016, 0.02, metal));
     g.add(makeBox(0.042, 0.036, 0.22, 0x2a3038, 0, 0.0, -0.18, poly));
     g.add(makeCyl(0.008, 0.012, 0.52, 0x1e2430, 0, 0.014, -0.58, Math.PI / 2, 0, 0, 12, dark));
-    g.add(makeBox(0.032, 0.055, 0.048, 0x1c2028, 0, -0.055, 0.01, polyD));
+    const magS = makeMagMesh("sniper_5");
+    magS.position.set(0, -0.036, 0.01);
+    g.add(magS);
     g.add(makeCyl(0.005, 0.005, 0.055, 0x6e7a8c, 0.032, 0.028, 0.078, 0, 0, Math.PI / 2, 8, metal));
     const wrist = makeBox(0.036, 0.09, 0.05, 0x2a3038, 0, -0.08, 0.08, poly);
     wrist.rotation.x = 0.18;
@@ -4049,7 +4380,9 @@ function makeWeaponBenchProp(style) {
     g.add(makeBox(0.056, 0.068, 0.17, 0x6e7a8c, 0, 0.002, 0.01, metal));
     g.add(makeBox(0.048, 0.046, 0.115, 0x323840, 0, 0.004, -0.13, poly));
     g.add(makeCyl(0.0085, 0.012, 0.2, 0x1e2430, 0, 0.016, -0.28, Math.PI / 2, 0, 0, 12, dark));
-    g.add(makeBox(0.036, 0.115, 0.048, 0x2e343e, 0, -0.102, 0.01, polyD));
+    const magP = makeMagMesh("smg_20");
+    magP.position.set(0, -0.048, 0.01);
+    g.add(magP);
     const pistol = makeBox(0.032, 0.084, 0.04, 0x2a3038, 0, -0.078, 0.07, poly);
     pistol.rotation.x = 0.28;
     g.add(pistol);
@@ -4120,6 +4453,108 @@ function buildWeaponsBench() {
     pickups.push(group);
   });
   buildRangeResetButton(tableX, tableY, tableZ);
+}
+
+
+/** Left kit table: mag bodies + per-gun cans. F like guns/optics. */
+function buildKitTable() {
+  const tableY = -0.85;
+  const tableZ = -0.35;
+  const tableX = -2.12;
+  const woodTex = makeWoodTexture();
+  const topMat = new THREE.MeshStandardMaterial({
+    map: woodTex,
+    color: 0xb89872,
+    roughness: 0.74,
+    metalness: 0.04,
+  });
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.055, 0.62), topMat);
+  top.position.set(tableX, tableY, tableZ);
+  top.castShadow = true;
+  top.receiveShadow = true;
+  markVaultable(top);
+  const apron = makeBox(1.92, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ + 0.29);
+  const apronB = makeBox(1.92, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ - 0.29);
+  const legMat = 0x2e241c;
+  const legL = makeBox(0.06, 0.55, 0.06, legMat, tableX - 0.84, tableY - 0.3, tableZ - 0.22);
+  const legR = makeBox(0.06, 0.55, 0.06, legMat, tableX + 0.84, tableY - 0.3, tableZ - 0.22);
+  const legL2 = makeBox(0.06, 0.55, 0.06, legMat, tableX - 0.84, tableY - 0.3, tableZ + 0.22);
+  const legR2 = makeBox(0.06, 0.55, 0.06, legMat, tableX + 0.84, tableY - 0.3, tableZ + 0.22);
+  scene.add(top, apron, apronB, legL, legR, legL2, legR2);
+  registerLeanSolid(top);
+  registerLeanSolid(apron);
+  registerLeanSolid(apronB);
+  registerLeanSolid(legL);
+  registerLeanSolid(legR);
+  registerLeanSolid(legL2);
+  registerLeanSolid(legR2);
+
+  const magDefs = [
+    { id: "smg_20", x: -0.72 },
+    { id: "smg_45", x: -0.36 },
+    { id: "smg_60", x: 0.0 },
+    { id: "rifle_20", x: 0.36 },
+    { id: "sniper_5", x: 0.72 },
+  ];
+  magDefs.forEach((d) => {
+    const mag = magKind(d.id);
+    const group = new THREE.Group();
+    const y = tableY + 0.03;
+    group.position.set(tableX + d.x, y, tableZ + 0.14);
+    const prop = makeMagMesh(d.id);
+    prop.scale.setScalar(1.15);
+    prop.rotation.y = 0.35;
+    sitOnTable(prop);
+    group.add(prop);
+    const highlight = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.018, 0.14),
+      new THREE.MeshBasicMaterial({ color: 0x6ea8ff, transparent: true, opacity: 0.0 })
+    );
+    highlight.position.y = 0.006;
+    group.add(highlight);
+    group.userData = {
+      magId: d.id,
+      label: mag.label,
+      highlight,
+      baseY: y,
+      allowed: true,
+    };
+    scene.add(group);
+    pickups.push(group);
+  });
+
+  const canDefs = [
+    { id: "example_smg", x: -0.52 },
+    { id: "example_rifle", x: 0.0 },
+    { id: "example_sniper", x: 0.52 },
+  ];
+  canDefs.forEach((d) => {
+    const spec = SUPPRESSOR_SPEC[d.id];
+    const group = new THREE.Group();
+    const y = tableY + 0.04;
+    group.position.set(tableX + d.x, y, tableZ - 0.14);
+    const prop = makeSuppressorMesh(d.id, { heat: false });
+    prop.rotation.y = 0.55;
+    prop.rotation.x = 0.18;
+    sitOnTable(prop);
+    group.add(prop);
+    const highlight = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.018, 0.12),
+      new THREE.MeshBasicMaterial({ color: 0x6ea8ff, transparent: true, opacity: 0.0 })
+    );
+    highlight.position.y = 0.006;
+    group.add(highlight);
+    group.userData = {
+      suppressorWeaponId: d.id,
+      label: spec.label,
+      highlight,
+      baseY: y,
+      allowed: true,
+    };
+    scene.add(group);
+    pickups.push(group);
+  });
+  refreshTableAvailability();
 }
 
 function makeResetLabelTexture() {
@@ -8000,8 +8435,9 @@ function updatePlayer(dt) {
       muzzleFlash.rotation.z += dt * 36;
       const remain = Math.max(0, player.flashUntil - now) / MUZZLE_FLASH_MS;
       const base = muzzleFlash.userData.flashScale || 1;
+      const canMul = suppressorMounted() ? 0.42 : 1;
       // Stronger early peak so the longer flash still reads on screen.
-      const sc = base * (1.05 + 0.95 * remain);
+      const sc = base * canMul * (1.05 + 0.95 * remain);
       muzzleFlash.scale.setScalar(sc);
     } else {
       muzzleFlash.scale.setScalar(muzzleFlash.userData.flashScale || 1);
@@ -8046,7 +8482,8 @@ function syncAdsSlider() {
 
 function isPickupNode(o) {
   if (!o || !o.userData) return false;
-  return !!(o.userData.opticId || o.userData.weaponId || o.userData.resetTargets);
+  return !!(o.userData.opticId || o.userData.weaponId || o.userData.resetTargets
+    || o.userData.magId || o.userData.suppressorWeaponId);
 }
 
 function updatePickupHover() {
@@ -8059,6 +8496,8 @@ function updatePickupHover() {
     let o = h.object;
     while (o && !isPickupNode(o)) o = o.parent;
     if (o && isPickupNode(o)) {
+      // Wrong-gun mag/can: no highlight, skip (F no-ops). Optics stay lookable.
+      if ((o.userData.magId || o.userData.suppressorWeaponId) && !pickupCompatible(o)) continue;
       const dx = o.position.x - player.pos.x;
       const dz = o.position.z - player.pos.z;
       if (Math.hypot(dx, dz) < 2.8) {
@@ -8100,6 +8539,20 @@ function updateEquipPrompt() {
         updateVaultPrompt(`Looking at ${label} (equipped)`);
       } else {
         updateVaultPrompt(`[F] Equip ${label}  ·  click to equip`);
+      }
+    } else if (pu.magId) {
+      const seated = currentMagId() === pu.magId;
+      if (seated) {
+        updateVaultPrompt(`Looking at ${label} (seated)`);
+      } else {
+        updateVaultPrompt(`[F] Seat ${label}  ·  click to seat`);
+      }
+    } else if (pu.suppressorWeaponId) {
+      const on = suppressorMounted(pu.suppressorWeaponId);
+      if (on) {
+        updateVaultPrompt(`[F] Unmount ${label}  ·  click to unmount`);
+      } else {
+        updateVaultPrompt(`[F] Mount ${label}  ·  click to mount`);
       }
     } else {
       const id = pu.opticId;
@@ -8168,7 +8621,7 @@ function updateHudHint() {
   } else if (state.panelOpen) {
     hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
   } else {
-    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>F</kbd> bench · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>B</kbd> fire mode · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>F</kbd> bench (gun/optic/mag/can) · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>B</kbd> fire mode · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
   }
 }
 
@@ -8187,6 +8640,14 @@ function tryEquipLooked() {
     equipWeapon(pu.weaponId);
     return;
   }
+  if (pu.magId) {
+    equipMag(pu.magId);
+    return;
+  }
+  if (pu.suppressorWeaponId) {
+    toggleSuppressor(pu.suppressorWeaponId);
+    return;
+  }
   const id = pu.opticId;
   if (!id) return;
   if (!weaponAllowsOptic(id)) {
@@ -8198,7 +8659,8 @@ function tryEquipLooked() {
 }
 
 function fireFlash() {
-  player.flashUntil = performance.now() + MUZZLE_FLASH_MS;
+  const ms = suppressorMounted() ? MUZZLE_FLASH_MS * 0.55 : MUZZLE_FLASH_MS;
+  player.flashUntil = performance.now() + ms;
 }
 
 function animate() {
@@ -8311,7 +8773,7 @@ function onKeyDown(e) {
       else input.holdBreath = false;
       e.preventDefault();
     }
-    // F = bench pickup (weapons + optics + reset); E is lean only; G remains gun dialog backup
+    // F = bench pickup (weapons + optics + mag + suppressor + reset); E is lean only; G remains gun dialog backup
     if ((k === "f" || k === "F") && !e.repeat) {
       if (state.lookPickup) tryEquipLooked();
       e.preventDefault();

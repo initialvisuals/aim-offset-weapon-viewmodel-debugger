@@ -660,6 +660,19 @@ function nudgeSelected(sign) {
 let renderer, camera, scene, holdRoot, gunRoot;
 let opticRoot, gripMesh, muzzleFlash, muzzleSocket, swayRig;
 let tracers = [];
+/** Short-lived bullet spark bursts (MeshBasic quads). */
+let impactSparks = [];
+/** World impact marks — FIFO capped. */
+let impactDecals = [];
+const IMPACT_DECAL_MAX = 50;
+const FLOOR_Y = -1.4;
+let _impactScorchTex = null;
+let _impactDecalGeo = null;
+let _impactSparkGeo = null;
+const _impactN = new THREE.Vector3();
+const _impactSeg = new THREE.Vector3();
+const _impactUp = new THREE.Vector3(0, 0, 1);
+const _sparkAxis = new THREE.Vector3(0, 1, 0);
 let playerRoot, leanPivot;
 /** Meshes lean probes may hit (walls, berm, crates, solid props) — never player/viewmodel. */
 let leanSolids = [];
@@ -1223,9 +1236,10 @@ function buildRoom() {
   });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 450), floorMat);
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -1.4;
+  floor.position.y = FLOOR_Y;
   floor.position.z = -200;
   floor.receiveShadow = true;
+  floor.userData.impactSurface = "floor";
   scene.add(floor);
 
   // Soft reference grid — quieter than before so texture can read
@@ -2262,6 +2276,205 @@ function fireWeapon() {
   tracers.push({ mesh, vel, gravity: bal.gravity, life: bal.life, hit: false, prev: mesh.position.clone() });
 }
 
+
+/* ---- Impact decals + bullet sparks (cheap, no external textures) ---- */
+function getImpactScorchTexture() {
+  if (_impactScorchTex) return _impactScorchTex;
+  _impactScorchTex = makeCanvasTexture((ctx, size) => {
+    const cx = size * 0.5;
+    const g = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
+    g.addColorStop(0, "rgba(18,14,10,0.9)");
+    g.addColorStop(0.35, "rgba(28,22,16,0.65)");
+    g.addColorStop(0.7, "rgba(20,16,12,0.25)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+  }, 64);
+  _impactScorchTex.wrapS = _impactScorchTex.wrapT = THREE.ClampToEdgeWrapping;
+  _impactScorchTex.repeat.set(1, 1);
+  return _impactScorchTex;
+}
+
+function getImpactDecalGeo() {
+  if (!_impactDecalGeo) _impactDecalGeo = new THREE.PlaneGeometry(1, 1);
+  return _impactDecalGeo;
+}
+
+function getImpactSparkGeo() {
+  if (!_impactSparkGeo) _impactSparkGeo = new THREE.PlaneGeometry(0.014, 0.065);
+  return _impactSparkGeo;
+}
+
+function orientFlatToNormal(mesh, normal) {
+  _impactN.copy(normal);
+  if (_impactN.lengthSq() < 1e-8) _impactN.set(0, 1, 0);
+  else _impactN.normalize();
+  // PlaneGeometry faces +Z; align to hit normal
+  mesh.quaternion.setFromUnitVectors(_impactUp, _impactN);
+}
+
+/** Spawn yellow/white streak sparks that fade in ~0.15–0.35s. */
+function spawnImpactSparks(pos, normal) {
+  if (!scene || !pos) return;
+  _impactN.copy(normal || _impactUp);
+  if (_impactN.lengthSq() < 1e-8) _impactN.set(0, 1, 0);
+  else _impactN.normalize();
+  const count = 5 + ((Math.random() * 4) | 0);
+  const geo = getImpactSparkGeo();
+  for (let i = 0; i < count; i++) {
+    const life = 0.15 + Math.random() * 0.2;
+    const mat = new THREE.MeshBasicMaterial({
+      color: Math.random() > 0.35 ? 0xffe08a : 0xffffff,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 6;
+    const dir = _impactN.clone().add(
+      new THREE.Vector3(
+        (Math.random() - 0.5) * 1.6,
+        (Math.random() - 0.5) * 1.6,
+        (Math.random() - 0.5) * 1.6
+      )
+    );
+    if (dir.lengthSq() < 1e-8) dir.copy(_impactN);
+    dir.normalize();
+    mesh.quaternion.setFromUnitVectors(_sparkAxis, dir);
+    mesh.position.copy(pos).addScaledVector(_impactN, 0.025);
+    const speed = 2.2 + Math.random() * 5.5;
+    scene.add(mesh);
+    impactSparks.push({
+      mesh,
+      vel: dir.multiplyScalar(speed),
+      life,
+      maxLife: life,
+    });
+  }
+}
+
+/**
+ * Dark scorch / punch mark as a small plane on the surface.
+ * kind: "punch" (targets) | "scuff" (floor / berm / walls).
+ * Caps at IMPACT_DECAL_MAX via FIFO recycle.
+ */
+function spawnImpactDecal(pos, normal, kind) {
+  if (!scene || !pos) return;
+  const isPunch = kind === "punch";
+  const size = isPunch
+    ? 0.07 + Math.random() * 0.05
+    : 0.11 + Math.random() * 0.12;
+  const tint = isPunch ? 0x1a1a1a : 0x14100c;
+  let mesh;
+  if (impactDecals.length >= IMPACT_DECAL_MAX) {
+    mesh = impactDecals.shift();
+    if (mesh.parent) mesh.parent.remove(mesh);
+    mesh.material.color.setHex(tint);
+    mesh.material.map = getImpactScorchTexture();
+    mesh.material.opacity = isPunch ? 0.72 : 0.55;
+    mesh.material.needsUpdate = true;
+  } else {
+    mesh = new THREE.Mesh(
+      getImpactDecalGeo(),
+      new THREE.MeshBasicMaterial({
+        map: getImpactScorchTexture(),
+        color: tint,
+        transparent: true,
+        opacity: isPunch ? 0.72 : 0.55,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        side: THREE.DoubleSide,
+      })
+    );
+    mesh.renderOrder = 3;
+  }
+  orientFlatToNormal(mesh, normal);
+  mesh.scale.set(size, size * (0.75 + Math.random() * 0.5), 1);
+  mesh.position.copy(pos).addScaledVector(_impactN, 0.012);
+  // Slight random spin in-plane
+  mesh.rotateZ((Math.random() - 0.5) * Math.PI);
+  scene.add(mesh);
+  impactDecals.push(mesh);
+}
+
+function spawnImpactFX(pos, normal, kind) {
+  spawnImpactSparks(pos, normal);
+  spawnImpactDecal(pos, normal, kind || "scuff");
+}
+
+/** Floor plane hit along tracer segment (y = FLOOR_Y). */
+function hitFloorSegment(prev, curr) {
+  const y0 = prev.y;
+  const y1 = curr.y;
+  if (y0 >= FLOOR_Y && y1 < FLOOR_Y) {
+    const dy = y1 - y0;
+    if (Math.abs(dy) < 1e-10) return null;
+    const u = (FLOOR_Y - y0) / dy;
+    if (u < 0 || u > 1) return null;
+    const hit = prev.clone().lerp(curr, u);
+    hit.y = FLOOR_Y;
+    return { hit, normal: new THREE.Vector3(0, 1, 0), u, surface: "floor" };
+  }
+  return null;
+}
+
+/** Walls / berm / crates via leanSolids raycast along segment. */
+function hitEnvSolidsSegment(prev, curr) {
+  if (!leanSolids.length) return null;
+  _impactSeg.copy(curr).sub(prev);
+  const dist = _impactSeg.length();
+  if (dist < 1e-5) return null;
+  _impactSeg.multiplyScalar(1 / dist);
+  _raycaster.near = 0;
+  _raycaster.far = dist;
+  _raycaster.set(prev, _impactSeg);
+  const hits = _raycaster.intersectObjects(leanSolids, false);
+  if (!hits.length) return null;
+  const h = hits[0];
+  let n;
+  if (h.normal && h.normal.lengthSq() > 1e-8) {
+    n = h.normal.clone().normalize();
+  } else if (h.face) {
+    n = h.face.normal.clone().transformDirection(h.object.matrixWorld).normalize();
+  } else {
+    n = new THREE.Vector3(0, 1, 0);
+  }
+  // Prefer outward toward shooter if normal points away from segment start
+  if (n.dot(_impactSeg) > 0) n.negate();
+  return { hit: h.point.clone(), normal: n, u: h.distance / dist, surface: "solid" };
+}
+
+function hitEnvironmentSegment(prev, curr) {
+  let best = null;
+  const floorHit = hitFloorSegment(prev, curr);
+  if (floorHit) best = floorHit;
+  const solidHit = hitEnvSolidsSegment(prev, curr);
+  if (solidHit && (!best || solidHit.u < best.u)) best = solidHit;
+  return best;
+}
+
+function updateImpactFX(dt) {
+  for (let i = impactSparks.length - 1; i >= 0; i--) {
+    const s = impactSparks[i];
+    s.life -= dt;
+    s.mesh.position.addScaledVector(s.vel, dt);
+    s.vel.multiplyScalar(Math.exp(-10 * dt));
+    const t = Math.max(0, s.life / s.maxLife);
+    s.mesh.material.opacity = 0.95 * t;
+    const sc = 0.55 + 0.7 * t;
+    s.mesh.scale.set(sc, sc, 1);
+    if (s.life <= 0) {
+      scene.remove(s.mesh);
+      s.mesh.material.dispose();
+      impactSparks.splice(i, 1);
+    }
+  }
+}
+
 function updateTracers(dt) {
   const now = performance.now();
   rangeTargets.forEach((t) => {
@@ -2287,13 +2500,13 @@ function updateTracers(dt) {
       );
     }
 
-    // First hit along segment: circular bullseyes + silhouette zones
+    // First hit along segment: circular bullseyes + silhouettes + env (floor/berm/walls)
     if (!tr.hit) {
       let best = null;
       for (const t of rangeTargets) {
         const info = hitTargetDiskInfo(prev, tr.mesh.position, t);
         if (info && (!best || info.u < best.u)) {
-          best = { kind: "circle", target: t, hit: info.hit, u: info.u };
+          best = { kind: "circle", target: t, hit: info.hit, normal: t.normal, u: info.u };
         }
       }
       for (const sil of silhouetteTargets) {
@@ -2301,22 +2514,43 @@ function updateTracers(dt) {
           if (!zoneActive(sil, zone.id)) continue;
           const info = hitTargetDiskInfo(prev, tr.mesh.position, zone);
           if (info && (!best || info.u < best.u)) {
-            best = { kind: "sil", sil, zone, hit: info.hit, u: info.u };
+            best = { kind: "sil", sil, zone, hit: info.hit, normal: zone.normal, u: info.u };
           }
         }
+      }
+      const env = hitEnvironmentSegment(prev, tr.mesh.position);
+      if (env && (!best || env.u < best.u)) {
+        best = { kind: "env", hit: env.hit, normal: env.normal, u: env.u, surface: env.surface };
       }
       if (best) {
         tr.hit = true;
         tr.life = Math.min(tr.life, 0.02);
-        if (best.kind === "circle") flashTarget(best.target, best.hit);
-        else flashSilhouetteZone(best.sil, best.zone, best.hit);
+        tr.mesh.position.copy(best.hit);
+        if (best.kind === "circle") {
+          flashTarget(best.target, best.hit);
+          spawnImpactFX(best.hit, best.normal, "punch");
+        } else if (best.kind === "sil") {
+          flashSilhouetteZone(best.sil, best.zone, best.hit);
+          spawnImpactFX(best.hit, best.normal, "punch");
+        } else {
+          sfx.play("miss");
+          spawnImpactFX(best.hit, best.normal, "scuff");
+        }
       }
     }
     if (tr.prev) tr.prev.copy(tr.mesh.position);
     else tr.prev = tr.mesh.position.clone();
 
     if (tr.life <= 0 || tr.mesh.position.y < -2.5) {
-      if (!tr.hit) sfx.play("miss");
+      if (!tr.hit) {
+        sfx.play("miss");
+        // y-floor kill / expired arc: spark + scuff on ground when below floor
+        if (tr.mesh.position.y < FLOOR_Y) {
+          const ground = tr.mesh.position.clone();
+          ground.y = FLOOR_Y;
+          spawnImpactFX(ground, new THREE.Vector3(0, 1, 0), "scuff");
+        }
+      }
       scene.remove(tr.mesh);
       tr.mesh.geometry.dispose();
       tr.mesh.material.dispose();
@@ -2446,6 +2680,7 @@ function updatePlayer(dt) {
   updateAimBoreRays();
   updateHobReadout();
   updateTracers(dt);
+  updateImpactFX(dt);
   updateSilhouettes(dt);
   updateScorePopups(dt);
 }

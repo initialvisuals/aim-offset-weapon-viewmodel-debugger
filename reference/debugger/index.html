@@ -56,7 +56,7 @@
     <div class="score-hud" id="scoreHud">Score 0</div>
     <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · <kbd>R</kbd> reset</div>
     <div id="floatLabels" class="float-labels" aria-hidden="true"></div>
-    <div class="hud-hint" id="hudHint">Press <kbd>C</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns</div>
+    <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>C</kbd> crouch</div>
 
     <aside id="debuggerPanel" class="debugger-panel closed" aria-hidden="true">
       <div class="shell-inner">
@@ -70,7 +70,7 @@
             <button type="button" id="btnAds" class="toggle" aria-pressed="false" title="Insert">ADS preview</button>
             <button type="button" id="btnSway" class="toggle" aria-pressed="true" title="Toggle viewmodel sway">Sway</button>
             <button type="button" id="btnCopy" title="Copy JSON">Copy JSON</button>
-            <button type="button" id="btnCloseDbg" title="C">Close</button>
+            <button type="button" id="btnCloseDbg" title="`">Close</button>
           </div>
         </header>
 
@@ -116,9 +116,10 @@
               <pre id="holdPreview"></pre>
               <h2>Hotkeys</h2>
               <ul class="keys">
-                <li><kbd>C</kbd> toggle debugger</li>
+                <li><kbd>`</kbd> toggle debugger</li>
                 <li><kbd>G</kbd> gun select</li>
-                <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint</li>
+                <li><kbd>C</kbd> crouch toggle · <kbd>Ctrl</kbd> crouch hold</li>
+                <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint (blocked while crouched)</li>
                 <li><kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS</li>
                 <li><kbd>Space</kbd> hold breath (damp sway)</li>
                 <li>LMB fire (tracers from muzzle, aim = camera)</li>

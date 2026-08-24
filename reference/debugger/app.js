@@ -106,6 +106,7 @@ const state = {
   score: 0,
   breathLeft: 3,
   breathMax: 3,
+  crouchToggled: false,
 };
 
 function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
@@ -571,6 +572,7 @@ const input = {
   forward: false, back: false, left: false, right: false,
   sprint: false, leanLeft: false, leanRight: false,
   ads: false, shoot: false, holdBreath: false,
+  crouchHold: false,
 };
 
 const player = {
@@ -581,6 +583,9 @@ const player = {
   leanTarget: 0,
   bobPhase: 0,
   eyeHeight: 0.2,
+  eyeCurrent: 0.2,
+  crouchEyeMul: 0.6,
+  crouchSpeedMul: 0.6,
   moveSpeed: 3.2,
   sprintMul: 1.65,
   lookSens: 0.0022,
@@ -1327,6 +1332,7 @@ function clearInputFlags() {
   input.sprint = input.leanLeft = input.leanRight = false;
   input.ads = input.shoot = false;
   input.holdBreath = false;
+  input.crouchHold = false;
   state.holdBreath = false;
   player.leanTarget = 0;
   state.adsTarget = state.adsPreview ? 1 : 0;
@@ -1621,6 +1627,14 @@ function updatePlayer(dt) {
   else player.leanTarget = 0;
   player.leanAngle = lerp(player.leanAngle, player.leanTarget, 1 - Math.exp(-player.leanSpring * dt));
 
+  // Crouch (Ctrl hold or C toggle) — sticky toggle survives unlock
+  const crouching = input.crouchHold || state.crouchToggled;
+  const eyeTarget = player.eyeHeight * (crouching ? player.crouchEyeMul : 1);
+  player.eyeCurrent = lerp(player.eyeCurrent, eyeTarget, 1 - Math.exp(-12 * dt));
+  if (Math.abs(player.eyeCurrent - eyeTarget) < 0.0005) player.eyeCurrent = eyeTarget;
+  // Keep pos.y as standing reference; root uses lerped eye before bob
+  player.pos.y = player.eyeHeight;
+
   // Movement on XZ
   let mx = 0, mz = 0;
   if (gameplayActive()) {
@@ -1630,10 +1644,13 @@ function updatePlayer(dt) {
     if (input.right) mx += 1;
   }
   const moving = Math.abs(mx) + Math.abs(mz) > 0;
+  const sprinting = input.sprint && !crouching;
   if (moving) {
     const len = Math.hypot(mx, mz) || 1;
     mx /= len; mz /= len;
-    const speed = player.moveSpeed * (input.sprint ? player.sprintMul : 1);
+    let speed = player.moveSpeed;
+    if (crouching) speed *= player.crouchSpeedMul;
+    else if (sprinting) speed *= player.sprintMul;
     const cy = Math.cos(player.yaw), sy = Math.sin(player.yaw);
     // yaw 0 looks down -Z
     player.pos.x += (mx * cy + mz * sy) * speed * dt;
@@ -1643,8 +1660,8 @@ function updatePlayer(dt) {
   }
 
   // View bob
-  const bobAmp = moving ? (input.sprint ? 0.025 : 0.014) : 0;
-  player.bobPhase += dt * (moving ? (input.sprint ? 12 : 8) : 0);
+  const bobAmp = moving ? (sprinting ? 0.025 : 0.014) : 0;
+  player.bobPhase += dt * (moving ? (sprinting ? 12 : 8) : 0);
   const bobY = Math.sin(player.bobPhase) * bobAmp;
   const bobX = Math.cos(player.bobPhase * 0.5) * bobAmp * 0.5;
 
@@ -1658,8 +1675,8 @@ function updatePlayer(dt) {
   }
   syncOpticHud();
 
-  // Apply yaw/pitch on playerRoot / camera
-  playerRoot.position.set(player.pos.x + bobX, player.pos.y + bobY, player.pos.z);
+  // Apply yaw/pitch on playerRoot / camera (eyeCurrent = standing/crouch base before bob)
+  playerRoot.position.set(player.pos.x + bobX, player.eyeCurrent + bobY, player.pos.z);
   playerRoot.rotation.order = "YXZ";
   playerRoot.rotation.y = player.yaw;
   playerRoot.rotation.x = 0;
@@ -1807,9 +1824,9 @@ function updateHudHint() {
   if (!hint) return;
   if (state.panelOpen) {
     hint.textContent = "";
-    hint.innerHTML = `Debugger open — <kbd>C</kbd> close · <kbd>G</kbd> guns`;
+    hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns`;
   } else {
-    hint.innerHTML = `<kbd>C</kbd> Debugger · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire (aim=camera)`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>C</kbd> crouch · Ctrl hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire`;
   }
 }
 
@@ -1865,8 +1882,8 @@ function onKeyDown(e) {
   const k = e.key;
   const code = e.code;
 
-  // Always allow C / G / Esc
-  if (k === "c" || k === "C") {
+  // Always allow Backquote / G / Esc
+  if (code === "Backquote" || k === "`") {
     togglePanel();
     e.preventDefault();
     return;
@@ -1883,13 +1900,21 @@ function onKeyDown(e) {
     return;
   }
 
-  // Gameplay movement / lean — only when panel closed
+  // Gameplay movement / lean / crouch — only when panel closed
   if (gameplayActive()) {
     if (code === "KeyW") input.forward = true;
     if (code === "KeyS") input.back = true;
     if (code === "KeyA") input.left = true;
     if (code === "KeyD") input.right = true;
     if (code === "ShiftLeft" || code === "ShiftRight") input.sprint = true;
+    if (code === "ControlLeft" || code === "ControlRight") {
+      input.crouchHold = true;
+      e.preventDefault();
+    }
+    if ((k === "c" || k === "C") && !e.repeat) {
+      state.crouchToggled = !state.crouchToggled;
+      e.preventDefault();
+    }
     if (code === "KeyQ") input.leanLeft = true;
     if (code === "KeyE") {
       input.leanRight = true;
@@ -1970,6 +1995,7 @@ function onKeyUp(e) {
   if (code === "KeyA") input.left = false;
   if (code === "KeyD") input.right = false;
   if (code === "ShiftLeft" || code === "ShiftRight") input.sprint = false;
+  if (code === "ControlLeft" || code === "ControlRight") input.crouchHold = false;
   if (code === "KeyQ") input.leanLeft = false;
   if (code === "KeyE") input.leanRight = false;
   if (code === "Space") input.holdBreath = false;
@@ -2032,6 +2058,7 @@ function bindPointerLock() {
       input.ads = false;
       input.leanLeft = input.leanRight = false;
       input.holdBreath = false;
+      input.crouchHold = false;
     }
   });
 }

@@ -595,64 +595,45 @@ const player = {
 };
 
 
-/** World-space range tag (CanvasTexture sprite). Shrinks with distance; sizeAttenuation on. */
-function makeWorldLabel(text) {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  const padX = 28;
-  const padY = 20;
-  const fontSize = 64;
-  const font = `700 ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
-  ctx.font = font;
-  const tw = Math.ceil(ctx.measureText(text).width) + padX * 2;
-  const th = fontSize + padY * 2;
-  canvas.width = Math.max(4, tw);
-  canvas.height = Math.max(4, th);
-  ctx.font = font;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const cx = canvas.width / 2;
-  const cy = canvas.height / 2;
-  ctx.lineJoin = "round";
-  ctx.miterLimit = 2;
-  ctx.lineWidth = 10;
-  ctx.strokeStyle = "rgba(0,0,0,0.9)";
-  ctx.strokeText(text, cx, cy);
-  ctx.fillStyle = "#c5cddc";
-  ctx.fillText(text, cx, cy);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const mat = new THREE.SpriteMaterial({
-    map: tex,
-    transparent: true,
-    depthTest: true,
-    depthWrite: false,
-    sizeAttenuation: true,
-  });
-  const sprite = new THREE.Sprite(mat);
-  // ~1.35m tall: readable near ≈50m at hip FOV; tiny at ≈400m without ADS zoom.
-  const worldH = 1.35;
-  const aspect = canvas.width / canvas.height;
-  sprite.scale.set(worldH * aspect, worldH, 1);
-  sprite.renderOrder = 2;
-  return sprite;
-}
+/** Subtle chalk/wood range marker lines on the floor (no floating text). */
+let groundRangeLines = [];
 
-function disposeWorldLabel(sprite) {
-  if (!sprite) return;
-  if (sprite.parent) sprite.parent.remove(sprite);
-  const mat = sprite.material;
-  if (mat) {
-    if (mat.map) mat.map.dispose();
-    mat.dispose();
+function clearGroundRangeLines() {
+  for (const mesh of groundRangeLines) {
+    if (mesh.parent) mesh.parent.remove(mesh);
+    if (mesh.geometry) mesh.geometry.dispose();
+    const mat = mesh.material;
+    if (mat) {
+      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+      else mat.dispose();
+    }
   }
+  groundRangeLines = [];
 }
 
-function clearStandingRangeLabels() {
-  for (const t of rangeTargets) disposeWorldLabel(t.labelSprite);
-  for (const sil of silhouetteTargets) disposeWorldLabel(sil.labelSprite);
-  const fl = el("floatLabels");
-  if (fl) fl.querySelectorAll(".float-label").forEach((n) => n.remove());
+function buildGroundRangeLines(zs) {
+  clearGroundRangeLines();
+  // Floor y = -1.4, strip = -1.385, grid = -1.39 — sit just above to avoid z-fight.
+  const y = -1.34;
+  const width = 10.8; // between side rails at ±5.5
+  const depth = 0.05;
+  for (const z of zs) {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshBasicMaterial({
+        color: 0xb8a88c,
+        transparent: true,
+        opacity: 0.34,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(0, y, z);
+    mesh.renderOrder = 1;
+    scene.add(mesh);
+    groundRangeLines.push(mesh);
+  }
 }
 
 function makeBox(w, h, d, color, x, y, z) {
@@ -927,14 +908,14 @@ function buildOpticsTable() {
 
 function buildShootingRange() {
   const baseLanes = [
-    { z: -25, pts: 5, label: "≈50m" },
-    { z: -55, pts: 8, label: "≈100m" },
-    { z: -100, pts: 12, label: "≈150m" },
-    { z: -160, pts: 16, label: "≈200m" },
-    { z: -250, pts: 22, label: "≈300m" },
-    { z: -380, pts: 30, label: "≈400m" },
+    { z: -25, pts: 5 },
+    { z: -55, pts: 8 },
+    { z: -100, pts: 12 },
+    { z: -160, pts: 16 },
+    { z: -250, pts: 22 },
+    { z: -380, pts: 30 },
   ];
-  clearStandingRangeLabels();
+  clearGroundRangeLines();
   rangeTargets = [];
   silhouetteTargets = [];
   scorePopups.forEach((p) => p.el && p.el.remove());
@@ -953,6 +934,9 @@ function buildShootingRange() {
   for (const side of [-5.5, 5.5]) {
     scene.add(makeBox(0.08, 0.12, 400, 0x2a3140, side, -1.3, -200));
   }
+
+  // Nominal circular-lane distances as thin floor markers (lines only, no text).
+  buildGroundRangeLines(baseLanes.map((lane) => lane.z));
 
   baseLanes.forEach((lane, i) => {
     const x = (Math.random() - 0.5) * 8.5;
@@ -1008,23 +992,16 @@ function buildShootingRange() {
     flash.position.set(x, y, z + 0.02);
 
     scene.add(woodDisc, board, woodBack, ring1, ring2, bull, flash);
-    const labelAnchor = new THREE.Vector3(x, y + 0.55 * scale, z);
-    const labelSprite = makeWorldLabel(lane.label);
-    labelSprite.position.copy(labelAnchor);
-    scene.add(labelSprite);
     rangeTargets.push({
       mesh: board,
       flash,
       center: new THREE.Vector3(x, y, z),
       normal: new THREE.Vector3(0, 0, 1),
-      labelAnchor,
       radius: 0.48 * scale,
       bullRadius: 0.06 * scale,
       midRadius: 0.18 * scale,
       outerRadius: 0.32 * scale,
       basePts: lane.pts,
-      label: lane.label,
-      labelSprite,
       hitUntil: 0,
     });
   });
@@ -1045,14 +1022,9 @@ function syncSilhouetteZones(sil) {
     // Face shooter (+Z in world for upright plates; still fine when flopped)
     z.normal.set(0, 0, 1);
   }
-  if (sil.headHinge) {
-    sil.headHinge.getWorldPosition(_wp);
-    sil.labelAnchor.set(_wp.x, _wp.y + 0.28 * sil.scale, _wp.z);
-    if (sil.labelSprite) sil.labelSprite.position.copy(sil.labelAnchor);
-  }
 }
 
-function createKnockdownSilhouette(x, z, scale, label) {
+function createKnockdownSilhouette(x, z, scale) {
   const group = new THREE.Group();
   group.position.set(x, -1.35, z);
 
@@ -1115,11 +1087,6 @@ function createKnockdownSilhouette(x, z, scale, label) {
   headFlash.position.set(0, 0.13 * scale, 0.12 * scale);
   headHinge.add(headFlash);
 
-  const labelAnchor = new THREE.Vector3(x, -1.35 + hipY + 0.85 * scale, z);
-  const labelSprite = makeWorldLabel(label);
-  labelSprite.position.copy(labelAnchor);
-  scene.add(labelSprite);
-
   const sil = {
     group,
     pelvisHinge,
@@ -1138,9 +1105,6 @@ function createKnockdownSilhouette(x, z, scale, label) {
     headAngle: 0,
     headTarget: 0,
     scale,
-    label,
-    labelSprite,
-    labelAnchor,
     hitUntil: { head: 0, chest: 0, pelvis: 0 },
     zones: [
       { id: "head", center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), radius: 0.13 * scale, pts: 25 },
@@ -1156,18 +1120,18 @@ function createKnockdownSilhouette(x, z, scale, label) {
 function buildSilhouetteLane() {
   silhouetteTargets = [];
   const lanes = [
-    { z: -42, label: "≈80m" },
-    { z: -88, label: "≈140m" },
-    { z: -145, label: "≈190m" },
-    { z: -230, label: "≈280m" },
-    { z: -340, label: "≈370m" },
+    { z: -42 },
+    { z: -88 },
+    { z: -145 },
+    { z: -230 },
+    { z: -340 },
   ];
   const laneX = 7.4;
   lanes.forEach((lane) => {
     const x = laneX + (Math.random() - 0.5) * 1.6;
     const z = lane.z + (Math.random() - 0.5) * 4;
     const scale = 0.92 + Math.random() * 0.22;
-    silhouetteTargets.push(createKnockdownSilhouette(x, z, scale, lane.label));
+    silhouetteTargets.push(createKnockdownSilhouette(x, z, scale));
   });
 }
 
@@ -1331,7 +1295,7 @@ function flashTarget(t, hitPos) {
 
 function updateScorePopups(dt) {
   const tmp = { x: 0, y: 0, visible: false };
-  // Hit markers (+pts) stay screen-fixed HTML; standing range tags are world sprites.
+  // Hit markers (+pts) stay screen-fixed HTML; range distance is shown by ground lines.
 
   for (let i = scorePopups.length - 1; i >= 0; i--) {
     const p = scorePopups[i];

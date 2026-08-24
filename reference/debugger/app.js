@@ -136,9 +136,9 @@ const state = {
   /** Active reload duration (sec). */
   reloadDuration: 1.2,
   /** Viewport CSS brightness (0.5–1.5). Default lifts crushed dark range. */
-  brightness: 1.15,
+  brightness: 1.30,
   /** Viewport CSS contrast / “gamma” feel (0.8–1.6). */
-  gamma: 1.1,
+  gamma: 1.18,
   /** Overlay Black/Low/Mid/High/White strip on viewport corner. */
   showPluge: false,
 };
@@ -635,7 +635,7 @@ function applyDisplayLook() {
 }
 
 function setBrightness(v, { toast = false } = {}) {
-  state.brightness = clamp(parseFloat(v) || 1.15, 0.5, 1.5);
+  state.brightness = clamp(parseFloat(v) || 1.30, 0.5, 1.5);
   applyDisplayLook();
   const slider = el("brightnessSlider");
   const val = el("brightnessVal");
@@ -645,7 +645,7 @@ function setBrightness(v, { toast = false } = {}) {
 }
 
 function setGamma(v, { toast = false } = {}) {
-  state.gamma = clamp(parseFloat(v) || 1.1, 0.8, 1.6);
+  state.gamma = clamp(parseFloat(v) || 1.18, 0.8, 1.6);
   applyDisplayLook();
   const slider = el("gammaSlider");
   const val = el("gammaVal");
@@ -913,12 +913,12 @@ function nudgeSelected(sign) {
 let renderer, camera, scene, holdRoot, gunRoot;
 /** Kept so Settings brightness/gamma can nudge intensities + fog. */
 let hemiLight, ambLight, keyLight, fillLight, rimLight;
-const SCENE_BG_BASE = 0x141820;
-const HEMI_INT_BASE = 0.62;
-const AMB_INT_BASE = 0.2;
-const KEY_INT_BASE = 1.05;
-const FILL_INT_BASE = 0.38;
-const RIM_INT_BASE = 0.18;
+const SCENE_BG_BASE = 0x1c2430;
+const HEMI_INT_BASE = 0.78;
+const AMB_INT_BASE = 0.32;
+const KEY_INT_BASE = 1.15;
+const FILL_INT_BASE = 0.50;
+const RIM_INT_BASE = 0.26;
 let opticRoot, gripMesh, muzzleFlash, muzzleSocket, swayRig, magMesh;
 let tracers = [];
 /** Short-lived bullet spark bursts (MeshBasic quads). */
@@ -1239,9 +1239,9 @@ function makeWoodTexture() {
 function makeBermTexture() {
   return makeCanvasTexture((ctx, size) => {
     const g = ctx.createLinearGradient(0, 0, 0, size);
-    g.addColorStop(0, "#3a3228");
-    g.addColorStop(0.5, "#2e2820");
-    g.addColorStop(1, "#241e18");
+    g.addColorStop(0, "#4a4234");
+    g.addColorStop(0.5, "#3c3428");
+    g.addColorStop(1, "#322a20");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, size, size);
     for (let i = 0; i < 2200; i++) {
@@ -1704,7 +1704,7 @@ function buildRoom() {
   const floorTex = makeDirtConcreteTexture(6, 50);
   const floorMat = new THREE.MeshStandardMaterial({
     map: floorTex,
-    color: 0xc8d0dc,
+    color: 0xd8e0ea,
     roughness: 0.92,
     metalness: 0.04,
   });
@@ -1727,7 +1727,7 @@ function buildRoom() {
   // Low side walls / bay dividers for scale (outside the ±5.5 rails)
   const wallMat = new THREE.MeshStandardMaterial({
     map: makeDirtConcreteTexture(2, 30),
-    color: 0x9aa6b4,
+    color: 0xaab6c4,
     roughness: 0.9,
     metalness: 0.05,
   });
@@ -1924,12 +1924,12 @@ function buildBackBerm() {
   const bermTex = makeBermTexture();
   const dirtMat = new THREE.MeshStandardMaterial({
     map: bermTex,
-    color: 0xb8a890,
+    color: 0xcac0a8,
     roughness: 0.95,
     metalness: 0.02,
   });
   const darkMat = new THREE.MeshStandardMaterial({
-    color: 0x2a241c,
+    color: 0x3c3428,
     roughness: 0.96,
     metalness: 0.02,
   });
@@ -2311,14 +2311,14 @@ function initThree() {
   const canvas = el("view3d");
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setClearColor(0x141820, 1);
+  renderer.setClearColor(SCENE_BG_BASE, 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x141820);
+  scene.background = new THREE.Color(SCENE_BG_BASE);
   // Subtle distance fog so ~400m berm reads as far without crushing mid-lane contrast
-  scene.fog = new THREE.Fog(0x141820, 90, 430);
+  scene.fog = new THREE.Fog(SCENE_BG_BASE, 90, 430);
   // near slightly above 0.01 improves distant depth precision; far clears ~410m berm.
   // logarithmicDepthBuffer on the renderer further reduces distant z-fighting.
   camera = new THREE.PerspectiveCamera(player.fovHip, 1, state.camNear, state.camFar);
@@ -2329,9 +2329,9 @@ function initThree() {
   leanPivot.add(camera);
   scene.add(playerRoot);
 
-  hemiLight = new THREE.HemisphereLight(0xc2d0e0, 0x3a3428, HEMI_INT_BASE);
+  hemiLight = new THREE.HemisphereLight(0xd0dceb, 0x4a4034, HEMI_INT_BASE);
   scene.add(hemiLight);
-  ambLight = new THREE.AmbientLight(0x6a7888, AMB_INT_BASE);
+  ambLight = new THREE.AmbientLight(0x7a8898, AMB_INT_BASE);
   scene.add(ambLight);
   keyLight = new THREE.DirectionalLight(0xfff1dd, KEY_INT_BASE);
   keyLight.position.set(10, 22, 8);

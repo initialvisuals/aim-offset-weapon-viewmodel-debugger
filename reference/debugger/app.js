@@ -761,16 +761,16 @@ function formatClock(h) {
 
 /** Keyframed scene lighting. 18:30 matches the previous dusk range (SCENE_BG_BASE / warm key). */
 const TOD_KEYS = [
-  { h: 0, sky: 0x070b12, hemiSky: 0x1c2838, hemiGnd: 0x12100c, amb: 0x1a222c, sun: 0x1a2430, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.16, ambI: 0.09, fillI: 0.08, rimI: 0.05, moonI: 0.15 },
-  { h: 5.2, sky: 0x14101e, hemiSky: 0x3a3050, hemiGnd: 0x1a1410, amb: 0x2a2438, sun: 0xff8860, fill: 0x7a90b8, rim: 0x3a3048, sunI: 0, hemiI: 0.22, ambI: 0.12, fillI: 0.12, rimI: 0.08, moonI: 0.10 },
+  { h: 0, sky: 0x000000, hemiSky: 0x1c2838, hemiGnd: 0x12100c, amb: 0x1a222c, sun: 0x1a2430, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.16, ambI: 0.09, fillI: 0.08, rimI: 0.05, moonI: 0.15 },
+  { h: 5.2, sky: 0x000000, hemiSky: 0x3a3050, hemiGnd: 0x1a1410, amb: 0x2a2438, sun: 0xff8860, fill: 0x7a90b8, rim: 0x3a3048, sunI: 0, hemiI: 0.22, ambI: 0.12, fillI: 0.12, rimI: 0.08, moonI: 0.10 },
   { h: 6.4, sky: 0x5a6a88, hemiSky: 0xffd0b0, hemiGnd: 0x5a4030, amb: 0xc09070, sun: 0xffb080, fill: 0x8aa0c8, rim: 0x6a5870, sunI: 0.42, hemiI: 0.48, ambI: 0.22, fillI: 0.28, rimI: 0.16, moonI: 0.02 },
   { h: 9.0, sky: 0x7a96b0, hemiSky: 0xe8f0f8, hemiGnd: 0x6a6050, amb: 0xc0c8d0, sun: 0xffeed8, fill: 0x90a8c8, rim: 0x6a7888, sunI: 0.88, hemiI: 0.82, ambI: 0.34, fillI: 0.42, rimI: 0.22, moonI: 0 },
   { h: 12.0, sky: 0x8aa6b8, hemiSky: 0xf2f6fa, hemiGnd: 0x7a7468, amb: 0xd0d6dc, sun: 0xf4f1e6, fill: 0x9ab0cc, rim: 0x788898, sunI: 1.02, hemiI: 0.90, ambI: 0.36, fillI: 0.46, rimI: 0.24, moonI: 0 },
   { h: 16.0, sky: 0x6a8498, hemiSky: 0xe4d8c8, hemiGnd: 0x6a5848, amb: 0xc8b8a8, sun: 0xffe2c0, fill: 0x88a0c0, rim: 0x667888, sunI: 0.92, hemiI: 0.80, ambI: 0.32, fillI: 0.44, rimI: 0.24, moonI: 0 },
   { h: 18.5, sky: 0x1c2430, hemiSky: 0xd0dceb, hemiGnd: 0x4a4034, amb: 0x7a8898, sun: 0xfff1dd, fill: 0x7a9ccc, rim: 0x556677, sunI: 1.15, hemiI: 0.78, ambI: 0.32, fillI: 0.50, rimI: 0.26, moonI: 0 },
-  { h: 20.0, sky: 0x121820, hemiSky: 0x4a5870, hemiGnd: 0x2a241c, amb: 0x3a4450, sun: 0xff7040, fill: 0x6a88b0, rim: 0x334050, sunI: 0.06, hemiI: 0.28, ambI: 0.14, fillI: 0.16, rimI: 0.10, moonI: 0.08 },
-  { h: 22.0, sky: 0x0a1018, hemiSky: 0x243040, hemiGnd: 0x14120e, amb: 0x1c2430, sun: 0x202830, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.18, ambI: 0.10, fillI: 0.10, rimI: 0.06, moonI: 0.14 },
-  { h: 24.0, sky: 0x070b12, hemiSky: 0x1c2838, hemiGnd: 0x12100c, amb: 0x1a222c, sun: 0x1a2430, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.16, ambI: 0.09, fillI: 0.08, rimI: 0.05, moonI: 0.15 },
+  { h: 20.0, sky: 0x010101, hemiSky: 0x4a5870, hemiGnd: 0x2a241c, amb: 0x3a4450, sun: 0xff7040, fill: 0x6a88b0, rim: 0x334050, sunI: 0.06, hemiI: 0.28, ambI: 0.14, fillI: 0.16, rimI: 0.10, moonI: 0.08 },
+  { h: 22.0, sky: 0x000000, hemiSky: 0x243040, hemiGnd: 0x14120e, amb: 0x1c2430, sun: 0x202830, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.18, ambI: 0.10, fillI: 0.10, rimI: 0.06, moonI: 0.14 },
+  { h: 24.0, sky: 0x000000, hemiSky: 0x1c2838, hemiGnd: 0x12100c, amb: 0x1a222c, sun: 0x1a2430, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.16, ambI: 0.09, fillI: 0.08, rimI: 0.05, moonI: 0.15 },
 ];
 
 function hexRgb(hex) {

@@ -15,7 +15,7 @@ Live-tune first-person **weapon hold poses** (hip, ADS, optics, attachments) so 
 | Hotkeys & panel contract | [Tuner UX](docs/03-tuner-ux.md) |
 | Unity / Unreal / custom checklist | [Engine glue](docs/05-engine-glue.md) |
 
-### Share blurb (copy/paste)
+### What are the common problems we face with first person weapon view models?
 
 > FPS games often lie quietly: the camera aims one way, the iron sights sit another, and the muzzle / tracer tells a third story. This repo is an engine-agnostic knowledge share for **aim-offset / viewmodel tuning** — the data model, math, tuner workflow, and a small two-tab reference UI — so sight picture and trajectory stay honest. Works as a blueprint for Unity, Unreal, or a personal engine.
 

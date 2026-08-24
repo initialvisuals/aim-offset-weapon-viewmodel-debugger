@@ -919,7 +919,7 @@ const AMB_INT_BASE = 0.32;
 const KEY_INT_BASE = 1.15;
 const FILL_INT_BASE = 0.50;
 const RIM_INT_BASE = 0.26;
-let opticRoot, gripMesh, muzzleFlash, muzzleSocket, swayRig, magMesh;
+let opticRoot, gripMesh, muzzleFlash, muzzleSocket, ejectionPort, swayRig, magMesh;
 let tracers = [];
 /** Short-lived bullet spark bursts (MeshBasic quads). */
 let impactSparks = [];
@@ -927,6 +927,13 @@ let impactSparks = [];
 let impactDecals = [];
 const IMPACT_DECAL_MAX = 50;
 const FLOOR_Y = -1.4;
+/** Ejected brass casings — FIFO-capped, sleep after one damped floor bounce. */
+let casings = [];
+const CASING_MAX = 28;
+const CASING_GRAVITY = 12;
+const MUZZLE_FLASH_MS = 34;
+let _casingGeo = null;
+let _casingMat = null;
 let _impactScorchTex = null;
 let _impactDecalGeo = null;
 let _impactSparkGeo = null;
@@ -1446,15 +1453,14 @@ function makeMuzzleFlashSprite(x, y, z, scale = 1) {
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
     });
-  const core = new THREE.Mesh(new THREE.SphereGeometry(0.01 * scale, 10, 10), mkMat(0xfff2c8, 0.95));
-  const long = new THREE.Mesh(new THREE.PlaneGeometry(0.072 * scale, 0.02 * scale), mkMat(0xffaa44, 0.85));
-  const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.072 * scale, 0.02 * scale), mkMat(0xffcc66, 0.8));
+  // Punchier: hotter core + 3 crossed planes, slightly larger, same pose offsets.
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.013 * scale, 10, 10), mkMat(0xfff8e8, 1));
+  const long = new THREE.Mesh(new THREE.PlaneGeometry(0.092 * scale, 0.026 * scale), mkMat(0xffc266, 0.98));
+  const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.084 * scale, 0.024 * scale), mkMat(0xffe8a8, 0.95));
   cross.rotation.z = Math.PI / 2;
-  const diag = new THREE.Mesh(new THREE.PlaneGeometry(0.048 * scale, 0.014 * scale), mkMat(0xff8800, 0.7));
-  diag.rotation.z = Math.PI / 4;
-  const diag2 = new THREE.Mesh(new THREE.PlaneGeometry(0.048 * scale, 0.014 * scale), mkMat(0xff8800, 0.7));
-  diag2.rotation.z = -Math.PI / 4;
-  g.add(core, long, cross, diag, diag2);
+  const diag = new THREE.Mesh(new THREE.PlaneGeometry(0.062 * scale, 0.018 * scale), mkMat(0xff9018, 0.88));
+  diag.rotation.z = Math.PI / 3;
+  g.add(core, long, cross, diag);
   g.visible = false;
   g.userData.flashScale = scale;
   return g;
@@ -1668,6 +1674,12 @@ function buildBlockGun(style) {
   muzzleSocket.name = "muzzleSocket";
   muzzleSocket.position.copy(muzzleFlash.position);
   gunRoot.add(muzzleSocket);
+  ejectionPort = new THREE.Object3D();
+  ejectionPort.name = "ejectionPort";
+  // Right side of receiver, slightly above mag (pose-independent world spawn).
+  if (isRifle) ejectionPort.position.set(0.04, -0.012, 0.015);
+  else ejectionPort.position.set(0.036, -0.014, 0.018);
+  gunRoot.add(ejectionPort);
   gunRoot.add(opticRoot);
   rebuildOpticMeshes();
   swayRig.add(gunRoot);
@@ -2726,6 +2738,97 @@ function fireLaunchDirection(muzzlePos, outDir) {
   solveBallisticLaunchDir(muzzlePos, _zeroPt, bal.speed, bal.gravity, outDir);
 }
 
+function getCasingGeo() {
+  if (!_casingGeo) _casingGeo = new THREE.CylinderGeometry(0.0042, 0.0048, 0.02, 7);
+  return _casingGeo;
+}
+
+function getCasingMat() {
+  if (!_casingMat) {
+    _casingMat = new THREE.MeshStandardMaterial({
+      color: 0xd4b05a,
+      roughness: 0.38,
+      metalness: 0.78,
+    });
+  }
+  return _casingMat;
+}
+
+function retireCasing(c) {
+  if (c && c.mesh && c.mesh.parent) c.mesh.parent.remove(c.mesh);
+}
+
+/** Spawn a cheap brass casing from the receiver ejection port (live shots only). */
+function spawnCasing() {
+  if (!scene || !ejectionPort || !camera) return;
+  ejectionPort.updateWorldMatrix(true, false);
+  camera.updateMatrixWorld();
+  _right.setFromMatrixColumn(camera.matrixWorld, 0);
+  if (_right.lengthSq() < 1e-8) _right.set(1, 0, 0);
+  else _right.normalize();
+
+  let rec;
+  if (casings.length >= CASING_MAX) {
+    rec = casings.shift();
+    retireCasing(rec);
+  } else {
+    rec = {
+      mesh: new THREE.Mesh(getCasingGeo(), getCasingMat()),
+      vel: new THREE.Vector3(),
+      angVel: new THREE.Vector3(),
+      bounced: false,
+      sleeping: false,
+    };
+    rec.mesh.castShadow = false;
+    rec.mesh.receiveShadow = true;
+  }
+  ejectionPort.getWorldPosition(rec.mesh.position);
+  rec.mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+  const speedR = 2.15 + Math.random() * 0.7;
+  rec.vel.copy(_right).multiplyScalar(speedR);
+  rec.vel.y += 2.05 + Math.random() * 0.95;
+  rec.vel.x += (Math.random() - 0.5) * 0.45;
+  rec.vel.y += (Math.random() - 0.5) * 0.35;
+  rec.vel.z += (Math.random() - 0.5) * 0.45;
+  rec.angVel.set(
+    (Math.random() - 0.5) * 26,
+    (Math.random() - 0.5) * 18,
+    (Math.random() - 0.5) * 26
+  );
+  rec.bounced = false;
+  rec.sleeping = false;
+  scene.add(rec.mesh);
+  casings.push(rec);
+}
+
+function updateCasings(dt) {
+  const floorY = FLOOR_Y + 0.007;
+  for (let i = 0; i < casings.length; i++) {
+    const c = casings[i];
+    if (c.sleeping) continue;
+    c.vel.y -= CASING_GRAVITY * dt;
+    c.mesh.position.addScaledVector(c.vel, dt);
+    c.mesh.rotation.x += c.angVel.x * dt;
+    c.mesh.rotation.y += c.angVel.y * dt;
+    c.mesh.rotation.z += c.angVel.z * dt;
+    if (c.mesh.position.y <= floorY) {
+      c.mesh.position.y = floorY;
+      if (!c.bounced) {
+        c.bounced = true;
+        c.vel.y = Math.abs(c.vel.y) * 0.32;
+        c.vel.x *= 0.48;
+        c.vel.z *= 0.48;
+        c.angVel.multiplyScalar(0.42);
+        if (c.vel.y < 0.55) c.vel.y = 0.55;
+      } else if (c.vel.y <= 0) {
+        c.vel.set(0, 0, 0);
+        c.angVel.set(0, 0, 0);
+        c.sleeping = true;
+      }
+    }
+  }
+}
+
 function fireWeapon() {
   if (!gameplayActive()) return;
   if (player.fireCooldown > 0) return;
@@ -2746,6 +2849,7 @@ function fireWeapon() {
   sfx.play("fire");
   player.fireCooldown = state.optic === "sniper_scope" ? 0.35 : 0.12;
   fireFlash();
+  spawnCasing();
   // Recoil punch on swayRig (not authored hold)
   const kick = state.optic === "sniper_scope" ? 1.6 : (state.weaponId === "example_rifle" ? 1.15 : 1);
   player.recoilPunch.z += 0.018 * kick;
@@ -3160,17 +3264,17 @@ function updatePlayer(dt) {
   // so offset should be local +X (right)
   leanPivot.position.set(-leanRatio * player.leanOffset, 0, 0);
 
-  // Muzzle flash — rotate + soft scale pulse
+  // Muzzle flash — rotate + short punchy scale pulse
   if (muzzleFlash) {
     const now = performance.now();
     const on = now < player.flashUntil;
     muzzleFlash.visible = on;
     if (on) {
-      muzzleFlash.rotation.z += dt * 28;
-      const remain = Math.max(0, player.flashUntil - now) / 60;
+      muzzleFlash.rotation.z += dt * 36;
+      const remain = Math.max(0, player.flashUntil - now) / MUZZLE_FLASH_MS;
       const base = muzzleFlash.userData.flashScale || 1;
-      const s = base * (0.75 + 0.55 * remain);
-      muzzleFlash.scale.setScalar(s);
+      const sc = base * (0.9 + 0.7 * remain);
+      muzzleFlash.scale.setScalar(sc);
     } else {
       muzzleFlash.scale.setScalar(muzzleFlash.userData.flashScale || 1);
     }
@@ -3187,6 +3291,7 @@ function updatePlayer(dt) {
   updateAimBoreRays();
   updateHobReadout();
   updateTracers(dt);
+  updateCasings(dt);
   updateImpactFX(dt);
   updateSilhouettes(dt);
   updateScorePopups(dt);
@@ -3308,7 +3413,7 @@ function tryEquipLooked() {
 }
 
 function fireFlash() {
-  player.flashUntil = performance.now() + 60;
+  player.flashUntil = performance.now() + MUZZLE_FLASH_MS;
 }
 
 function animate() {

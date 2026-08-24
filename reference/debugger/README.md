@@ -24,7 +24,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 6. **Shooting / ballistics** — tracers spawn at the muzzle with simple ballistic drop (`vel.y -= g·dt`). **Magazines:** SMG 30 / rifle 20 / sniper optic 5; HUD shows `mag/capacity · ∞` (infinite reserve for the range tool). Firing consumes a round; empty mag = dry-click SFX, no tracer. **V** reloads (~1.2s SMG/rifle, ~2s sniper) — blocks fire, dips the viewmodel, flashes mag visibility. **Game style** toggle: **Sim** (default) = height-over-bore (HoB) + ballistic zero — sight ray = camera/optic aim; launch solved so the gravity arc meets the sight ray at a chosen **zero distance** (25/50/100/200/300 m, default **100 m**). **Arcade** = reticle-faithful / idealized bore=aim (velocity = camera forward). Themes switch with the mode (cool tactical Sim vs neon Arcade) plus a top-right **SIM/ARCADE** HUD badge. Optional **Show aim/bore rays** draws cyan sight vs amber launch rays. Panel shows live HoB cm. SMG drops more / slower; rifle flatter; sniper scope fastest/flattest. Hits flash range targets; **+pts hit markers** stay screen-fixed HTML overlays. Range distance is marked by **subtle ground lines** across the lane floor at the circular-target distances (~50/100/150/200/300/400m) — no floating text on targets. Cheap Web Audio SFX (fire / dry / hit / bullseye / miss) unlock on first gesture. **Impact marks + sparks:** tracer hits on circular targets, silhouettes, berm/floor/walls (and ground on a y-floor miss) spawn a short yellow/white spark burst (~0.15–0.35s) plus a cheap dark scorch/punch decal (PlaneGeometry + optional CanvasTexture), FIFO-capped (~50).
 7. **Optics table** — iron / holo / acog / sniper_scope props match equipped style; look + click or E to equip.
 8. **Debugger panel (` / Backquote)** — view/attachment tabs, ads_factor slider (synced from RMB), six-axis editors, Copy JSON + toast. **G** = gun picker. **O** = Settings.
-9. **Settings (`O`)** — lightweight options overlay (pauses gameplay, frees the cursor): game style, hip reticle, aim/bore rays, zero distance, look sensitivity, ADS look mul, short controls cheat sheet.
+9. **Settings (`O`)** — lightweight options overlay (pauses gameplay, frees the cursor): game style, hip reticle, aim/bore rays, **brightness / gamma** (CSS filter + mild fog lift; defaults **1.15 / 1.10**), grey/PLUGE test strip, zero distance, look sensitivity, ADS look mul, short controls cheat sheet.
 
 ## Hotkeys
 
@@ -77,6 +77,8 @@ Real guns put the barrel below the optic, so the bore line and the sight line ar
 | Zero distance | Ballistics / Settings | **100 m** (presets 25 / 50 / 100 / 200 / 300) |
 | Show aim/bore rays | Ballistics / Settings | **OFF** — cyan sight, amber launch |
 | Show hip reticle | Settings | **ON** — 3px hip crosshair (ADS HUD unchanged) |
+| Brightness / Gamma | Settings | **1.15 / 1.10** — CSS `brightness()`/`contrast()` on `#view3d` + mild fog/bg lift |
+| Show PLUGE strip | Settings | **OFF** — Black/Low/Mid/High/White overlay (unfiltered) |
 | HoB readout | Live cm | Signed: + = muzzle below sight ray |
 
 **Method (Sim):** sight point `S = aimOrigin + aimDir · Z`. Solve launch unit `u` so `muzzle + u·v·t + (0, −½g t², 0) = S` (low arc). Gravity still runs on the tracer every frame, so impacts near `Z` sit on the reticle and drop past it.
@@ -86,7 +88,7 @@ Real guns put the barrel below the optic, so the bore line and the sight line ar
 - `blendHold(hip, ads_pose(optic), t)` → `holdRoot`; sway/recoil → child `swayRig`. Default `rotY` = 0.
 - Look sensitivity: `lookSens * (effectiveFov / fovHip) * adsLookMul * ADS_LOOK_MUL[optic]` (blended by `adsFactor`); hold-breath multiplies ~0.65 after. Hip feel unchanged; full sniper ADS ≈ 10/90 of hip angular rate.
 - Tracer policy: **Sim** = spawn at muzzle with **ballistic zero** launch at `zeroDist` (documents HoB). **Arcade** = direction = camera forward (reticle-faithful). Gravity per weapon/optic.
-- Settings (`O`) pauses gameplay like the debugger panel; hip reticle toggle only affects the 3px hip crosshair.
+- Settings (`O`) pauses gameplay like the debugger panel; hip reticle toggle only affects the 3px hip crosshair. If the dark range looks crushed, raise **Brightness/Gamma** or check the grey/PLUGE strip (Black should stay distinct from Low).
 - Bore axis on these block guns is muzzleSocket local **−Z**. Zero solve is analytic low-arc under constant `g` (falls back to geometric aim-at-zero-point if unreachable).
 - Port this state machine into your engine editor (Unity EditorWindow / Unreal EUW).
 

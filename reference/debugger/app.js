@@ -135,6 +135,12 @@ const state = {
   reloadElapsed: 0,
   /** Active reload duration (sec). */
   reloadDuration: 1.2,
+  /** Viewport CSS brightness (0.5–1.5). Default lifts crushed dark range. */
+  brightness: 1.15,
+  /** Viewport CSS contrast / “gamma” feel (0.8–1.6). */
+  gamma: 1.1,
+  /** Overlay Black/Low/Mid/High/White strip on viewport corner. */
+  showPluge: false,
 };
 
 const LOOK_SENS_BASE = 0.0022;
@@ -587,6 +593,75 @@ function setCamFar(v, { toast = false } = {}) {
 }
 
 
+
+/** Map Settings brightness/gamma → CSS filter on #view3d + mild fog/bg/light lift. */
+function applyDisplayLook() {
+  const b = clamp(Number(state.brightness) || 1, 0.5, 1.5);
+  const g = clamp(Number(state.gamma) || 1, 0.8, 1.6);
+  state.brightness = b;
+  state.gamma = g;
+
+  const canvas = el("view3d");
+  if (canvas) canvas.style.filter = `brightness(${b}) contrast(${g})`;
+
+  // Mild clear/fog/bg lift so far lane isn’t crushed before the CSS filter.
+  // Keep hue of SCENE_BG_BASE; scale lift with how far brightness/gamma sit above 1.
+  const lift = clamp((b - 1) * 0.45 + (g - 1) * 0.2, -0.2, 0.4);
+  const br = ((SCENE_BG_BASE >> 16) & 0xff) / 255;
+  const bg = ((SCENE_BG_BASE >> 8) & 0xff) / 255;
+  const bb = (SCENE_BG_BASE & 0xff) / 255;
+  const r = clamp(br + lift * 0.1, 0, 1);
+  const gv = clamp(bg + lift * 0.1, 0, 1);
+  const bv = clamp(bb + lift * 0.12, 0, 1);
+  if (renderer) renderer.setClearColor(new THREE.Color(r, gv, bv), 1);
+  if (scene) {
+    if (scene.background && scene.background.isColor) scene.background.setRGB(r, gv, bv);
+    else if (scene) scene.background = new THREE.Color(r, gv, bv);
+    if (scene.fog) scene.fog.color.setRGB(r, gv, bv);
+  }
+
+  const lightMul = 0.88 + 0.12 * b;
+  if (hemiLight) hemiLight.intensity = HEMI_INT_BASE * lightMul;
+  if (ambLight) ambLight.intensity = AMB_INT_BASE * lightMul;
+  if (keyLight) keyLight.intensity = KEY_INT_BASE * lightMul;
+  if (fillLight) fillLight.intensity = FILL_INT_BASE * lightMul;
+  if (rimLight) rimLight.intensity = RIM_INT_BASE * lightMul;
+
+  const overlay = el("plugeOverlay");
+  if (overlay) {
+    overlay.hidden = !state.showPluge;
+    overlay.setAttribute("aria-hidden", state.showPluge ? "false" : "true");
+  }
+}
+
+function setBrightness(v, { toast = false } = {}) {
+  state.brightness = clamp(parseFloat(v) || 1.15, 0.5, 1.5);
+  applyDisplayLook();
+  const slider = el("brightnessSlider");
+  const val = el("brightnessVal");
+  if (slider) slider.value = String(state.brightness);
+  if (val) val.textContent = state.brightness.toFixed(2);
+  if (toast) showToast(`Brightness ${state.brightness.toFixed(2)}`);
+}
+
+function setGamma(v, { toast = false } = {}) {
+  state.gamma = clamp(parseFloat(v) || 1.1, 0.8, 1.6);
+  applyDisplayLook();
+  const slider = el("gammaSlider");
+  const val = el("gammaVal");
+  if (slider) slider.value = String(state.gamma);
+  if (val) val.textContent = state.gamma.toFixed(2);
+  if (toast) showToast(`Gamma ${state.gamma.toFixed(2)}`);
+}
+
+function setPluge(on, { toast = false } = {}) {
+  state.showPluge = !!on;
+  applyDisplayLook();
+  const chk = el("chkPluge");
+  if (chk) chk.checked = state.showPluge;
+  if (toast) showToast(state.showPluge ? "PLUGE strip ON" : "PLUGE strip OFF");
+}
+
 function syncSettingsUI() {
   const btnSim = el("btnSettingsSim");
   const btnArcade = el("btnSettingsArcade");
@@ -628,6 +703,19 @@ function syncSettingsUI() {
   const adsVal = el("adsLookMulVal");
   if (adsSlider) adsSlider.value = String(clamp(adsPct, 50, 150));
   if (adsVal) adsVal.textContent = `${(player.adsLookMul).toFixed(2)}×`;
+
+  const brightSlider = el("brightnessSlider");
+  const brightVal = el("brightnessVal");
+  if (brightSlider) brightSlider.value = String(state.brightness);
+  if (brightVal) brightVal.textContent = Number(state.brightness).toFixed(2);
+
+  const gammaSlider = el("gammaSlider");
+  const gammaVal = el("gammaVal");
+  if (gammaSlider) gammaSlider.value = String(state.gamma);
+  if (gammaVal) gammaVal.textContent = Number(state.gamma).toFixed(2);
+
+  const chkPluge = el("chkPluge");
+  if (chkPluge) chkPluge.checked = !!state.showPluge;
 }
 
 function renderGunList() {
@@ -823,6 +911,14 @@ function nudgeSelected(sign) {
 
 /* ---- Three.js scene + player ---- */
 let renderer, camera, scene, holdRoot, gunRoot;
+/** Kept so Settings brightness/gamma can nudge intensities + fog. */
+let hemiLight, ambLight, keyLight, fillLight, rimLight;
+const SCENE_BG_BASE = 0x141820;
+const HEMI_INT_BASE = 0.62;
+const AMB_INT_BASE = 0.2;
+const KEY_INT_BASE = 1.05;
+const FILL_INT_BASE = 0.38;
+const RIM_INT_BASE = 0.18;
 let opticRoot, gripMesh, muzzleFlash, muzzleSocket, swayRig, magMesh;
 let tracers = [];
 /** Short-lived bullet spark bursts (MeshBasic quads). */
@@ -2233,30 +2329,30 @@ function initThree() {
   leanPivot.add(camera);
   scene.add(playerRoot);
 
-  const hemi = new THREE.HemisphereLight(0xc2d0e0, 0x3a3428, 0.62);
-  scene.add(hemi);
-  const amb = new THREE.AmbientLight(0x6a7888, 0.2);
-  scene.add(amb);
-  const key = new THREE.DirectionalLight(0xfff1dd, 1.05);
-  key.position.set(10, 22, 8);
-  key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
-  key.shadow.camera.near = 2;
-  key.shadow.camera.far = 90;
-  key.shadow.camera.left = -24;
-  key.shadow.camera.right = 24;
-  key.shadow.camera.top = 24;
-  key.shadow.camera.bottom = -24;
-  key.shadow.bias = -0.0004;
-  key.shadow.normalBias = 0.02;
-  key.shadow.radius = 3.5;
-  scene.add(key);
-  const fill = new THREE.DirectionalLight(0x7a9ccc, 0.38);
-  fill.position.set(-8, 10, -2);
-  scene.add(fill);
-  const rim = new THREE.DirectionalLight(0x556677, 0.18);
-  rim.position.set(0, 8, -30);
-  scene.add(rim);
+  hemiLight = new THREE.HemisphereLight(0xc2d0e0, 0x3a3428, HEMI_INT_BASE);
+  scene.add(hemiLight);
+  ambLight = new THREE.AmbientLight(0x6a7888, AMB_INT_BASE);
+  scene.add(ambLight);
+  keyLight = new THREE.DirectionalLight(0xfff1dd, KEY_INT_BASE);
+  keyLight.position.set(10, 22, 8);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.set(1024, 1024);
+  keyLight.shadow.camera.near = 2;
+  keyLight.shadow.camera.far = 90;
+  keyLight.shadow.camera.left = -24;
+  keyLight.shadow.camera.right = 24;
+  keyLight.shadow.camera.top = 24;
+  keyLight.shadow.camera.bottom = -24;
+  keyLight.shadow.bias = -0.0004;
+  keyLight.shadow.normalBias = 0.02;
+  keyLight.shadow.radius = 3.5;
+  scene.add(keyLight);
+  fillLight = new THREE.DirectionalLight(0x7a9ccc, FILL_INT_BASE);
+  fillLight.position.set(-8, 10, -2);
+  scene.add(fillLight);
+  rimLight = new THREE.DirectionalLight(0x556677, RIM_INT_BASE);
+  rimLight.position.set(0, 8, -30);
+  scene.add(rimLight);
 
   holdRoot = new THREE.Group();
   camera.add(holdRoot);
@@ -2265,6 +2361,7 @@ function initThree() {
   buildRoom();
   buildBlockGun(state.weaponId);
   resize();
+  applyDisplayLook();
   const ro = new ResizeObserver(() => resize());
   ro.observe(canvas.parentElement || canvas);
   clock.start();
@@ -3609,6 +3706,20 @@ function bind() {
   }
   if (camFarInput) {
     camFarInput.onchange = (e) => setCamFar(e.target.value, { toast: true });
+  }
+
+  const brightnessSlider = el("brightnessSlider");
+  if (brightnessSlider) {
+    brightnessSlider.oninput = (e) => setBrightness(e.target.value);
+  }
+  const gammaSlider = el("gammaSlider");
+  if (gammaSlider) {
+    gammaSlider.oninput = (e) => setGamma(e.target.value);
+  }
+  const chkPluge = el("chkPluge");
+  if (chkPluge) {
+    chkPluge.checked = state.showPluge;
+    chkPluge.onchange = (e) => setPluge(e.target.checked, { toast: true });
   }
 
   window.addEventListener("keydown", onKeyDown);

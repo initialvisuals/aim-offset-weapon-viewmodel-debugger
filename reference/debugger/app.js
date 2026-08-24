@@ -1198,9 +1198,9 @@ function updatePlayer(dt) {
   const leanZ = lerp(leanPivot.rotation.z, player.leanAngle, player.leanLerp);
   leanPivot.rotation.z = leanZ;
   // light strafe tilt
-  // Strafe tilt only — tiny roll from lateral move (<< Q/E lean). Cap ~3% of leanMax.
+  // Strafe tilt only — tiny roll from lateral move (<< Q/E lean). Cap ~0.4% of leanMax — barely noticeable.
   const lateral = gameplayActive() ? (Number(input.left) - Number(input.right)) : 0;
-  const strafeTarget = lateral * player.leanMax * 0.025;
+  const strafeTarget = lateral * player.leanMax * 0.004;
   player.strafeTilt = lerp(player.strafeTilt || 0, strafeTarget, 1 - Math.exp(-10 * dt));
   leanPivot.rotation.z = leanZ + player.strafeTilt;
 

@@ -17,7 +17,9 @@
   <div class="viewport-wrap">
     <canvas id="view3d"></canvas>
     <div class="crosshair" aria-hidden="true"></div>
-    <div class="hud-hint">Press <kbd>C</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns</div>
+    <div class="equip-prompt" id="equipPrompt" hidden></div>
+    <div class="breath-bar" id="breathBar" hidden><div class="breath-fill" id="breathFill"></div></div>
+    <div class="hud-hint" id="hudHint">Press <kbd>C</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns</div>
 
     <aside id="debuggerPanel" class="debugger-panel closed" aria-hidden="true">
       <div class="shell-inner">
@@ -29,6 +31,7 @@
           <div class="meta">
             <button type="button" id="btnGuns" title="G">Guns…</button>
             <button type="button" id="btnAds" class="toggle" aria-pressed="false" title="Insert">ADS preview</button>
+            <button type="button" id="btnSway" class="toggle" aria-pressed="true" title="Toggle viewmodel sway">Sway</button>
             <button type="button" id="btnCopy" title="Copy JSON">Copy JSON</button>
             <button type="button" id="btnCloseDbg" title="C">Close</button>
           </div>
@@ -78,13 +81,18 @@
               <ul class="keys">
                 <li><kbd>C</kbd> toggle debugger</li>
                 <li><kbd>G</kbd> gun select</li>
-                <li><kbd>Insert</kbd> ADS preview</li>
+                <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint</li>
+                <li><kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS</li>
+                <li><kbd>Alt</kbd> hold breath (damp sway)</li>
+                <li>LMB fire (tracers from muzzle, aim = camera)</li>
+                <li>Click canvas = mouse look</li>
+                <li>Table pickups = equip optic</li>
+                <li><kbd>Insert</kbd> ADS preview · Sway toggle in header</li>
                 <li><kbd>End</kbd> cycle pose</li>
-                <li><kbd>↑</kbd><kbd>↓</kbd> select axis</li>
-                <li><kbd>←</kbd><kbd>→</kbd> nudge</li>
+                <li><kbd>↑</kbd><kbd>↓</kbd> select axis · <kbd>←</kbd><kbd>→</kbd> nudge</li>
                 <li><kbd>PgUp</kbd><kbd>PgDn</kbd> step size</li>
               </ul>
-              <p class="note">Cyan ray = aim along camera −Z. Composition: camera → authored hold → attachments.</p>
+              <p class="note">Cyan ray = aim along camera −Z. Composition: camera → authored hold → sway/recoil → attachments. Demo poses are meant to be tuned with this on-screen tuner.</p>
             </aside>
           </div>
         </section>

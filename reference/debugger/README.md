@@ -25,7 +25,3 @@ Treat `app.js` as the **state machine** and `index.html` as the **panel layout**
 | Copy JSON | Clipboard → content files |
 
 Unity sketch: `EditorWindow` or play-mode IMGUI with `GUILayout.Toolbar` for the two tabs, `EditorGUILayout.FloatField` per axis, and `Event.current` for the hotkeys. Unreal: Editor Utility Widget + the same state fields.
-
-## Screenshots
-
-Optional: add real in-engine tuner screenshots under `reference/debugger/screenshots/` later. Keep captions generic (“view tab”, “attachment tab”) so the module stays a knowledge share.

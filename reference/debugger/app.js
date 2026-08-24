@@ -626,6 +626,10 @@ function applyDisplayLook() {
   if (keyLight) keyLight.intensity = KEY_INT_BASE * lightMul;
   if (fillLight) fillLight.intensity = FILL_INT_BASE * lightMul;
   if (rimLight) rimLight.intensity = RIM_INT_BASE * lightMul;
+  for (const L of floodLights) {
+    const base = (L.userData && L.userData.floodIntBase) || 120;
+    L.intensity = base * lightMul;
+  }
 
   const overlay = el("plugeOverlay");
   if (overlay) {
@@ -913,6 +917,8 @@ function nudgeSelected(sign) {
 let renderer, camera, scene, holdRoot, gunRoot;
 /** Kept so Settings brightness/gamma can nudge intensities + fog. */
 let hemiLight, ambLight, keyLight, fillLight, rimLight;
+/** Side-bay SpotLights (no shadows) so the long lane reads at night. */
+let floodLights = [];
 const SCENE_BG_BASE = 0x1c2430;
 const HEMI_INT_BASE = 0.78;
 const AMB_INT_BASE = 0.32;
@@ -1753,6 +1759,7 @@ function buildRoom() {
 
   buildOpticsTable();
   buildRangeProps();
+  buildRangeFloodlights();
   buildShootingRange();
 }
 
@@ -2004,6 +2011,85 @@ function buildRangeProps() {
     () => addLeanSolid(makeBarrel(0.23, 0.75, 7.4, -1.02, -320, 0x384438)),
   ];
   for (const place of placements) place();
+}
+
+/**
+ * Cheap range floodlight: steel post + arm + fixture head, plus a warm SpotLight
+ * aimed at the lane floor / targets. Shadows off to stay cheap.
+ */
+function makeFloodlight(x, z, opts = {}) {
+  const inward = x >= 0 ? -1 : 1;
+  const postH = 5.5;
+  const armLen = 1.2;
+  const group = new THREE.Group();
+  group.position.set(x, FLOOR_Y, z);
+
+  const steel = new THREE.MeshStandardMaterial({ color: 0x3c4652, roughness: 0.5, metalness: 0.5 });
+  const steelDark = new THREE.MeshStandardMaterial({ color: 0x2a3138, roughness: 0.48, metalness: 0.62 });
+
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.12, 8), steelDark);
+  base.position.y = 0.06;
+  base.castShadow = true;
+  base.receiveShadow = true;
+
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.085, postH, 8), steel);
+  post.position.y = postH * 0.5;
+  post.castShadow = true;
+  post.receiveShadow = true;
+
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(armLen, 0.07, 0.07), steel);
+  arm.position.set(inward * (armLen * 0.5), postH - 0.1, 0);
+  arm.castShadow = true;
+  arm.receiveShadow = true;
+
+  const headX = inward * armLen;
+  const headY = postH - 0.22;
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.28), steelDark);
+  head.position.set(headX, headY, -0.04);
+  head.rotation.z = inward * 0.48;
+  head.rotation.x = -0.32;
+  head.castShadow = true;
+  head.receiveShadow = true;
+
+  // Unlit warm glass so the fixture reads as on even at distance.
+  const lamp = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.045, 0.2),
+    new THREE.MeshBasicMaterial({ color: 0xffe2b0 })
+  );
+  lamp.position.set(headX + inward * 0.02, headY - 0.1, -0.02);
+  lamp.rotation.z = inward * 0.48;
+  lamp.rotation.x = -0.32;
+
+  group.add(base, post, arm, head, lamp);
+
+  const intensity = opts.intensity != null ? opts.intensity : 120;
+  const distance = opts.distance != null ? opts.distance : 90;
+  const light = new THREE.SpotLight(0xffe0b8, intensity, distance, 0.72, 0.55, 2);
+  light.castShadow = false;
+  light.position.set(headX, headY - 0.06, -0.04);
+  const aimZ = opts.aimZ != null ? opts.aimZ - z : -22;
+  // Toward lane center, slightly above the floor, downrange of the post.
+  light.target.position.set(inward * 8.2, 1.25, aimZ);
+  group.add(light);
+  group.add(light.target);
+  light.userData.floodIntBase = intensity;
+  return { group, light };
+}
+
+/** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m — 4 extra lights, no shadows. */
+function buildRangeFloodlights() {
+  floodLights = [];
+  const posts = [
+    { x: -9.2, z: -25, aimZ: -52, intensity: 110, distance: 72 },
+    { x: 9.4, z: -80, aimZ: -115, intensity: 130, distance: 90 },
+    { x: -9.2, z: -160, aimZ: -215, intensity: 150, distance: 105 },
+    { x: 9.4, z: -280, aimZ: -365, intensity: 175, distance: 130 },
+  ];
+  for (const p of posts) {
+    const { group, light } = makeFloodlight(p.x, p.z, p);
+    addLeanSolid(group);
+    floodLights.push(light);
+  }
 }
 
 

@@ -16,8 +16,8 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 
 ## What you get
 
-1. **3D viewport** — walkable room, optics table, procedural shooting range (circular bullseye lanes + side knockdown silhouette lane), first-person block guns, cyan aim ray (camera −Z), crosshair.
-2. **Player controls** (panel closed) — WASD, Shift sprint, C crouch toggle / Z crouch hold (slower move, no sprint, ducked eye height), mouse look, Q/E lean (full roll + lateral offset; **collision-clamped** so the camera cannot lean through walls / bay walls / berm / crates — common FPS lean-through-walls anti-cheese), tiny A/D strafe tilt only (~2.5% of lean max), RMB ADS, Space hold-breath, LMB fire, **V reload**.
+1. **3D viewport** — walkable room, optics table, procedural shooting range (circular bullseye lanes + side knockdown silhouette lane), side-bay floodlights for night-lane readability, first-person block guns, cyan aim ray (camera −Z), crosshair.
+2. **Player controls** (panel closed) — WASD, Shift sprint, C crouch toggle / Z crouch hold (slower move, no sprint, ducked eye height), mouse look, Q/E lean (full roll + lateral offset; **collision-clamped** so the camera cannot lean through walls / bay walls / berm / crates / floodlight posts — common FPS lean-through-walls anti-cheese), tiny A/D strafe tilt only (~2.5% of lean max), RMB ADS, Space hold-breath, LMB fire, **V reload**.
 3. **ADS presentation** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), screen-space HUD reticle (holo dot / ACOG chevron / sniper mil-cross), peripheral tube frame + vignette for magnified optics. Iron uses 3D front-post / rear-notch geometry. Attachment offsets still move the optic mesh on the gun for hip/inspection. **Look sens scales with optic FOV** (and `adsFactor`) so sniper ~10° is ~9× slower angular than hip; optional `ADS_LOOK_MUL` / `player.adsLookMul` fine-tune on top.
 4. **Sway + recoil** — procedural on a `swayRig` *after* the authored hold pose (never baked into hip/ADS JSON). Header **Sway** toggle (default ON); turn OFF for clean aim-offset tuning.
 5. **Hold breath (Space)** — damps sway for up to ~3s (HUD stamina bar); release/exhaust recovers with a brief overshoot.
@@ -88,7 +88,7 @@ Real guns put the barrel below the optic, so the bore line and the sight line ar
 - `blendHold(hip, ads_pose(optic), t)` → `holdRoot`; sway/recoil → child `swayRig`. Default `rotY` = 0.
 - Look sensitivity: `lookSens * (effectiveFov / fovHip) * adsLookMul * ADS_LOOK_MUL[optic]` (blended by `adsFactor`); hold-breath multiplies ~0.65 after. Hip feel unchanged; full sniper ADS ≈ 10/90 of hip angular rate.
 - Tracer policy: **Sim** = spawn at muzzle with **ballistic zero** launch at `zeroDist` (documents HoB). **Arcade** = direction = camera forward (reticle-faithful). Gravity per weapon/optic.
-- Settings (`O`) pauses gameplay like the debugger panel; hip reticle toggle only affects the 3px hip crosshair. If the dark range looks crushed, raise **Brightness/Gamma** or check the grey/PLUGE strip (Black should stay distinct from Low).
+- Settings (`O`) pauses gameplay like the debugger panel; hip reticle toggle only affects the 3px hip crosshair. If the dark range looks crushed, raise **Brightness/Gamma** or check the grey/PLUGE strip (Black should stay distinct from Low). Side-bay floodlights (posts at ~25/80/160/280 m) also light the long lane at night, so it does not rely on CSS brightness alone.
 - Bore axis on these block guns is muzzleSocket local **−Z**. Zero solve is analytic low-arc under constant `g` (falls back to geometric aim-at-zero-point if unreachable).
 - Port this state machine into your engine editor (Unity EditorWindow / Unreal EUW).
 

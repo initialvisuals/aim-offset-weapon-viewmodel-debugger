@@ -20,11 +20,11 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 
 1. **3D viewport** — walkable room, optics table + weapons bench, first-person block guns, cyan aim ray (camera −Z), hip crosshair.
 2. **Range** — circular bullseyes + knockdown silhouette lane; **berm-peak popup figures** (~410 m, random, head/shoulders only); **firing-line sandbags** + stall benches at spawn; **waist-high side-bay benches** (~15–25 m) with breakable beer bottles (glass shards, table reset restores); side-bay **floodlights with visible floor pools** (~25/80/160/280 m from spawn — shoot the **lamp head** to kill that light until reset); **floor chalk lines** + **wall stencil distances** at circular-target ranges (50/100/150/200/300/400 m from the spawn firing line). Wall numbers are meters from spawn, not raw world `|z|`. No floating text on targets.
-3. **Player** (panel closed) — WASD, Shift sprint, **C** crouch toggle / **Z** crouch hold / **mouse wheel** analog crouch height (0 stand → 1 sit; sprint+crouch = short slide), mouse look, **Q/E lean (wall-clamped)**, tiny A/D strafe tilt, RMB ADS, LMB fire, **R reload**. **Hold Space** vaults a tagged lip when prompted (tap Space is reserved; no jump yet). ADS + Space = hold-breath only.
+3. **Player** (panel closed) — WASD, Shift sprint, **C** crouch toggle / **Z** crouch hold / **mouse wheel** analog crouch height (0 stand → 1 sit; sprint+crouch = short slide), mouse look, **Q/E lean (wall-clamped)**, tiny A/D strafe tilt, RMB ADS, LMB fire, **B fire mode**, **R reload**. **Hold Space** vaults a tagged lip when prompted (tap Space is reserved; no jump yet). ADS + Space = hold-breath only.
 4. **ADS** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), HUD reticles + mag-optic tube/vignette, 3D iron sights. Look sens scales with optic FOV.
 5. **Sway / breath** — procedural `swayRig` after authored hold (header **Sway** toggle). **ADS + hold Space** hold-breath damps sway ~3s (HUD bar). Hip-fire Space does not hold breath.
-6. **Shooting kit** — **long tracer streaks** + ballistic drop; mags SMG 30 / DMR 20 / bolt sniper 5 (`mag/capacity · ∞`) — capacity follows the **weapon**, not the optic (a scope on the DMR keeps 20). Empty = dry-click. **R** reload (~1.2s SMG / ~1.4s DMR / ~2s sniper) with viewmodel dip. Bolt sniper cycles ~0.65s between shots (handle flick). Live shots eject **shell casings** (FIFO ~28) and a short **muzzle flash**. Hits spawn **small ragged impact holes + sparks** (env/sil FIFO ~50). **Paper-target holes persist** until the bench **RESET TARGETS** button. Screen-fixed +pts markers. Cheap Web Audio SFX.
-7. **Sim / Arcade + HoB** — **B** cycles **Sim** (default: height-over-bore + ballistic zero so the gravity arc meets the sight ray at **zero distance**) vs **Arcade** (reticle-faithful, vel = camera forward). **`-`/`=`** cycle optic zero (25/50/100/200/300 m, default 100). **Iron sights always zero at 100 m.** Live HoB cm readout; optional aim/bore rays.
+6. **Shooting kit** — **long tracer streaks** + ballistic drop; mags SMG 30 / DMR 20 / bolt sniper 5 (`mag/capacity · ∞`) — capacity follows the **weapon**, not the optic (a scope on the DMR keeps 20). Empty = dry-click. **SMG auto, in-line recoil:** **B** toggles **SEMI / AUTO** (SMG only; rifle/sniper stay semi). AUTO hold-LMB ~1200 rpm; SEMI is one shot per click. HUD shows fire mode next to ammo. **R** reload (~1.2s SMG / ~1.4s DMR / ~2s sniper) with viewmodel dip. Bolt sniper cycles ~0.65s between shots (handle flick). Live shots eject **shell casings** (FIFO ~28) and a short **muzzle flash**. Hits spawn **small ragged impact holes + sparks** (env/sil FIFO ~50). **Paper-target holes persist** until the bench **RESET TARGETS** button. Screen-fixed +pts markers. Cheap Web Audio SFX.
+7. **Sim / Arcade + HoB** — **Sim** (default: height-over-bore + ballistic zero so the gravity arc meets the sight ray at **zero distance**) vs **Arcade** (reticle-faithful, vel = camera forward). Switch from **Settings (`O`)** or the debugger Ballistics bar (not a hotkey). **`-`/`=`** cycle optic zero (25/50/100/200/300 m, default 100). **Iron sights always zero at 100 m.** Live HoB cm readout; optional aim/bore rays.
 8. **Optics table** — iron / holo / acog / sniper_scope; look + **F** / click to attach. **Host limits:** SMG may use iron/holo/acog; rifle (1913 DMR) may use all four; sniper may use iron/sniper_scope. Illegal pickups dim and toast on equip; switching guns falls back to a legal default (sniper defaults to sniper_scope).
 9. **Weapons bench** — Example SMG / Example Rifle / Example Sniper world props near spawn; look + **F** / click to equip (refreshes optic host rules). Red **RESET TARGETS** push-button on the same table: look + **F** / click clears paper holes, stands silhouettes, drops berm popups (reshuffles timers), restores shot-out floods and bottles, and clears glass shards (score unchanged). **G** gun dialog remains an optional backup.
 10. **Movement extras** — analog crouch (wheel / C / Z; Settings crouch-height slider). Sprint into crouch **slides**. **Hold Space** (~0.22s) mantles sandbags, stall benches, tables, and low crates (not bay walls / berm). Sprint into a close lip can auto-start the same vault.
@@ -38,7 +38,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 | ` (Backquote) | Toggle debugger panel |
 | O | Settings (options) |
 | G | Gun select |
-| B | Cycle Arcade / Sim game style |
+| B | Fire mode (semi / auto). AUTO only on Example SMG; rifle/sniper toast "Semi only" once |
 | C | Crouch toggle (on = last wheel depth or full sit) |
 | Z | Crouch hold (release stands unless C is latched) |
 | Mouse wheel | Analog crouch height 0–100% (pointer locked; down = lower). No Ctrl bind. |
@@ -48,7 +48,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 | Hold Space | Vault when `[Hold Space] Vault` is shown (needs forward intent). Tap reserved (no jump yet). |
 | ADS + Space | Hold breath (damp sway). No vault while ADS. Hip-fire Space does nothing if no lip. |
 | `-` / `=` | Cycle optic zero (presets 25–300 m; clamp at ends; mainly Sim). Irons stay 100 m. |
-| LMB | Fire (tracers; empty = dry click); LMB on pickup equips / resets |
+| LMB | Fire (semi = click; SMG AUTO = hold ~1200 rpm); empty = dry click; LMB on pickup equips / resets |
 | F | Bench pickup — weapon / optic / **reset-targets button** (click also works) |
 | R | Reload magazine |
 | Click canvas | Pointer lock |
@@ -80,7 +80,7 @@ Teaching toggle for ballistic policy + visual theme. Drives `state.hobZero` and 
 | **Sim** (default) | HoB + ballistic zero — gravity arc meets the sight ray at the zero distance | Cool blue/teal tactical terminal |
 | **Arcade** | Reticle-faithful aim — muzzle spawn, velocity = camera forward (idealized bore=aim) | Magenta/orange neon cabinet |
 
-Switch via the **Game style** segmented control (debugger Ballistics bar), **Settings (`O`)**, or hotkey **`B`**. Toast on switch; HUD pill shows `SIM` / `ARCADE`. Zero distance mainly applies in Sim (controls dim in Arcade).
+Switch via the **Game style** segmented control (debugger Ballistics bar) or **Settings (`O`)**. Toast on switch; HUD pill shows `SIM` / `ARCADE`. Zero distance mainly applies in Sim (controls dim in Arcade).
 
 ## Height-over-bore & zeroing
 
@@ -88,7 +88,7 @@ Real guns put the barrel below the optic, so the bore line and the sight line ar
 
 | Control | Where | Default |
 |---------|--------|---------|
-| Game style (Sim / Arcade) | Ballistics bar, Settings, **B** | **Sim** (`hobZero` on) |
+| Game style (Sim / Arcade) | Ballistics bar, Settings | **Sim** (`hobZero` on) |
 | Zero distance | Ballistics / Settings | **100 m** (presets 25 / 50 / 100 / 200 / 300). Optics use this; **irons always 100 m**. |
 | Show aim/bore rays | Ballistics / Settings | **OFF** — cyan sight, amber launch |
 | Show hip reticle | Settings | **ON** — 3px hip crosshair (ADS HUD unchanged) |

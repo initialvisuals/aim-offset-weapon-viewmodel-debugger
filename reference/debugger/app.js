@@ -95,7 +95,7 @@ const attachments = {
 };
 
 const WEAPON_META = {
-  example_smg: { label: "Example SMG", blurb: "Compact PDW — hosts iron / holo / acog only" },
+  example_smg: { label: "Example SMG", blurb: "SMG auto, in-line recoil — iron / holo / acog" },
   example_rifle: { label: "Example Rifle", blurb: "7.62 DMR — iron / holo / acog / sniper" },
   example_sniper: { label: "Example Sniper", blurb: "Bolt 7.62 — iron / sniper_scope only" },
 };
@@ -122,6 +122,10 @@ const MAG_SPEC = {
 
 /** Bolt-action cycle (example_sniper only). Semi DMR does not use this. */
 const BOLT_CYCLE_SEC = 0.65;
+/** SMG AUTO interval — ~1200 rpm (50 ms). Semi is still one shot per click. */
+const SMG_AUTO_SEC = 0.05;
+/** Recoil pattern index resets after this gap of not firing. */
+const RECOIL_RESET_MS = 200;
 
 const state = {
   mode: "weapon",
@@ -190,6 +194,12 @@ const state = {
   boltElapsed: 0,
   boltDuration: 0.65,
   boltEjected: false,
+  /** Fire selector: "semi" | "auto". AUTO only does anything on example_smg. */
+  fireMode: "auto",
+  recoilPatternIndex: 0,
+  lastShotMs: 0,
+  /** Toast "Semi only" once per semi-only weapon until you switch guns. */
+  semiOnlyToasted: false,
   /** Viewport CSS brightness (0.5–1.5). Identity 1.00 = ungraded sRGB. */
   brightness: 1.00,
   /** Viewport CSS contrast / “gamma” feel (0.8–1.6). Identity 1.00 = ungraded sRGB. */
@@ -272,6 +282,36 @@ function isBoltGun(weaponId = state.weaponId) {
   return weaponId === "example_sniper";
 }
 
+function weaponSupportsAuto(weaponId = state.weaponId) {
+  return weaponId === "example_smg";
+}
+
+function isAutoFire() {
+  return state.fireMode === "auto" && weaponSupportsAuto();
+}
+
+function updateFireModeHud() {
+  const node = el("fireModeHud");
+  if (!node) return;
+  const auto = isAutoFire();
+  node.textContent = auto ? "AUTO" : "SEMI";
+  node.classList.toggle("auto", auto);
+}
+
+function toggleFireMode() {
+  if (!weaponSupportsAuto()) {
+    if (!state.semiOnlyToasted) {
+      state.semiOnlyToasted = true;
+      showToast("Semi only");
+    }
+    updateFireModeHud();
+    return;
+  }
+  state.fireMode = state.fireMode === "auto" ? "semi" : "auto";
+  updateFireModeHud();
+  showToast(state.fireMode === "auto" ? "AUTO" : "SEMI");
+}
+
 function cancelBoltCycle() {
   state.boltCycling = false;
   state.boltElapsed = 0;
@@ -331,6 +371,7 @@ function syncAmmoForLoadout({ refill = false } = {}) {
   cancelBoltCycle();
   resetMagVisual();
   updateAmmoHud();
+  updateFireModeHud();
 }
 
 function resetMagVisual() {
@@ -1311,6 +1352,12 @@ function equipWeapon(id) {
   syncAmmoForLoadout({ refill: true });
   refreshOpticsTableAvailability();
   refresh();
+  state.semiOnlyToasted = false;
+  state.recoilPatternIndex = 0;
+  state.lastShotMs = 0;
+  player.camRecoilP = 0;
+  player.camRecoilY = 0;
+  updateFireModeHud();
   showToast("Equipped " + ((WEAPON_META[id] && WEAPON_META[id].label) || id));
   if (opticFellBack) {
     const ol = OPTIC_LABELS[state.optic] || state.optic;
@@ -1651,6 +1698,9 @@ const player = {
   recoilPunch: new THREE.Vector3(),
   recoilRot: new THREE.Vector3(),
   fireCooldown: 0,
+  /** Camera pitch/yaw overlay (in-line SMG walk); decays when you pause. */
+  camRecoilP: 0,
+  camRecoilY: 0,
 };
 
 
@@ -4371,6 +4421,10 @@ function applySwayAndRecoil(dt, moving) {
   // Recoil decay (procedural, never baked into pose JSON)
   player.recoilPunch.multiplyScalar(Math.exp(-10 * dt));
   player.recoilRot.multiplyScalar(Math.exp(-9 * dt));
+  // Camera walk recovers if you pause; slower while the trigger is held.
+  const camLambda = (input.shoot && isAutoFire()) ? 1.6 : 9;
+  player.camRecoilP *= Math.exp(-camLambda * dt);
+  player.camRecoilY *= Math.exp(-camLambda * dt);
 
   // Reload dip: lower + pitch on swayRig, eased in/out over reload duration
   let reloadDipY = 0, reloadDipRx = 0;
@@ -4444,6 +4498,7 @@ function ballisticForWeapon() {
 function fireCooldownForLoadout() {
   if (isBoltGun()) return BOLT_CYCLE_SEC;
   if (state.weaponId === "example_rifle") return 0.14;
+  if (isAutoFire()) return SMG_AUTO_SEC;
   return 0.12;
 }
 
@@ -4765,11 +4820,52 @@ function updateCasings(dt) {
   }
 }
 
-function fireWeapon() {
+/** Mild horizontal walk (SMG AUTO). Pattern index resets after RECOIL_RESET_MS idle. */
+const SMG_YAW_WALK = [
+  0.18, 0.42, -0.16, 0.58, -0.38, 0.72, -0.22, 0.48,
+  -0.52, 0.32, 0.64, -0.44, 0.22, -0.58, 0.38,
+];
+
+function applyShotRecoil() {
+  const now = performance.now();
+  if (now - (state.lastShotMs || 0) > RECOIL_RESET_MS) {
+    state.recoilPatternIndex = 0;
+  }
+  state.lastShotMs = now;
+
+  if (state.weaponId !== "example_smg") {
+    const kick = recoilKickForLoadout();
+    player.recoilPunch.z += 0.018 * kick;
+    player.recoilPunch.y += 0.006 * kick;
+    player.recoilRot.x -= 0.035 * kick;
+    player.recoilRot.y += (Math.random() - 0.5) * 0.02 * kick;
+    return;
+  }
+
+  const adsT = state.adsPreview ? 1 : state.adsFactor;
+  const adsMod = lerp(1, 0.6, adsT);
+  const idx = state.recoilPatternIndex;
+  const h = SMG_YAW_WALK[idx % SMG_YAW_WALK.length];
+  // High ROF, little muzzle flip (in-line push); mild yaw walk.
+  const pitch = 0.012 * (0.85 + 0.03 * Math.min(idx, 6));
+  const yaw = 0.008 * h;
+  state.recoilPatternIndex = idx + 1;
+
+  player.camRecoilP += pitch * adsMod;
+  player.camRecoilY += yaw * adsMod;
+
+  player.recoilPunch.z += 0.010 * adsMod;
+  player.recoilPunch.y += 0.002 * adsMod;
+  player.recoilRot.x -= pitch * 1.35 * adsMod;
+  player.recoilRot.y += yaw * 1.5 * adsMod;
+}
+
+function fireWeapon({ fromHold = false } = {}) {
   if (!gameplayActive()) return;
   if (state.vaulting) return;
   if (player.fireCooldown > 0 || state.boltCycling) return;
   if (state.lookPickup) {
+    if (fromHold) return;
     tryEquipLooked();
     return;
   }
@@ -4788,12 +4884,7 @@ function fireWeapon() {
   fireFlash();
   if (isBoltGun()) beginBoltCycle();
   else spawnCasing();
-  // Recoil punch on swayRig (not authored hold)
-  const kick = recoilKickForLoadout();
-  player.recoilPunch.z += 0.018 * kick;
-  player.recoilPunch.y += 0.006 * kick;
-  player.recoilRot.x -= 0.035 * kick;
-  player.recoilRot.y += (Math.random() - 0.5) * 0.02 * kick;
+  applyShotRecoil();
 
   // Sim (hobZero): spawn at muzzle, launch so arc meets sight at Z.
   // Arcade: spawn at muzzle, initial dir = camera aim (reticle-faithful).
@@ -5786,11 +5877,11 @@ function updatePlayer(dt) {
   // Apply yaw/pitch on playerRoot / camera (eyeCurrent = standing/crouch base before bob)
   playerRoot.position.set(player.pos.x + bobX, player.eyeCurrent + bobY, player.pos.z);
   playerRoot.rotation.order = "YXZ";
-  playerRoot.rotation.y = player.yaw;
+  playerRoot.rotation.y = player.yaw + (player.camRecoilY || 0);
   playerRoot.rotation.x = 0;
   playerRoot.rotation.z = 0;
   camera.rotation.order = "YXZ";
-  camera.rotation.x = player.pitch;
+  camera.rotation.x = clamp(player.pitch + (player.camRecoilP || 0), -1.2, 1.2);
   camera.rotation.y = 0;
 
   // Lean: lerp roll + lateral offset along flat right
@@ -5831,6 +5922,9 @@ function updatePlayer(dt) {
   }
 
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
+  if (isAutoFire() && input.shoot && !state.reloading && state.ammoInMag > 0) {
+    fireWeapon({ fromHold: true });
+  }
 
   updateReload(dt);
   updateBoltCycle(dt);
@@ -5982,11 +6076,11 @@ function updateHudHint() {
   const hint = el("hudHint");
   if (!hint) return;
   if (state.settingsOpen) {
-    hint.innerHTML = `Settings open — <kbd>O</kbd> / Esc close · <kbd>B</kbd> Arcade/Sim`;
+    hint.innerHTML = `Settings open — <kbd>O</kbd> / Esc close`;
   } else if (state.panelOpen) {
     hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
   } else {
-    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>F</kbd> bench · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>F</kbd> bench · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>B</kbd> fire mode · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
   }
 }
 
@@ -6069,10 +6163,6 @@ function onKeyDown(e) {
       setSettingsOpen(false);
       e.preventDefault();
     }
-    if ((k === "b" || k === "B") && !e.repeat) {
-      toggleGameStyle();
-      e.preventDefault();
-    }
     return;
   }
 
@@ -6150,7 +6240,7 @@ function onKeyDown(e) {
       e.preventDefault();
     }
     if ((k === "b" || k === "B") && !e.repeat) {
-      toggleGameStyle();
+      toggleFireMode();
       e.preventDefault();
     }
   }
@@ -6250,6 +6340,11 @@ function onMouseDown(e) {
       canvas.requestPointerLock();
       return;
     }
+    if (state.lookPickup) {
+      tryEquipLooked();
+      return;
+    }
+    input.shoot = true;
     fireWeapon();
   }
 }
@@ -6259,6 +6354,7 @@ function onMouseUp(e) {
     input.ads = false;
     e.preventDefault();
   }
+  if (e.button === 0) input.shoot = false;
 }
 
 function onMouseMove(e) {
@@ -6288,6 +6384,7 @@ function bindPointerLock() {
   document.addEventListener("pointerlockchange", () => {
     if (!document.pointerLockElement) {
       input.ads = false;
+      input.shoot = false;
       input.leanLeft = input.leanRight = false;
       input.holdBreath = false;
       input.crouchHold = false;
@@ -6515,6 +6612,7 @@ function bind() {
   setTab("weapon");
   setPanelOpen(false);
   syncAmmoForLoadout({ refill: true });
+  updateFireModeHud();
   updateHudHint();
   initThree();
   refresh();

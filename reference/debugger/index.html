@@ -61,7 +61,10 @@
     <div class="equip-prompt" id="equipPrompt" hidden></div>
     <div class="breath-bar" id="breathBar" hidden><div class="breath-fill" id="breathFill"></div></div>
     <div class="score-hud" id="scoreHud">Score 0</div>
-    <div class="ammo-hud" id="ammoHud" aria-live="polite">30/30 · ∞</div>
+    <div class="ammo-cluster" id="ammoCluster">
+      <div class="fire-mode-hud" id="fireModeHud">AUTO</div>
+      <div class="ammo-hud" id="ammoHud" aria-live="polite">30/30 · ∞</div>
+    </div>
     <div class="game-style-badge" id="gameStyleBadge" aria-live="polite">SIM</div>
     <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · berm popups · table resets</div>
     <div id="floatLabels" class="float-labels" aria-hidden="true"></div>
@@ -126,8 +129,8 @@
               <div class="game-style-control" role="group" aria-label="Game style">
                 <span class="gs-label">Game style</span>
                 <div class="segmented" id="gameStyleSeg">
-                  <button type="button" id="btnGameSim" class="seg" aria-pressed="true" title="Sim: HoB + ballistic zero (B)">Sim</button>
-                  <button type="button" id="btnGameArcade" class="seg" aria-pressed="false" title="Arcade: reticle-faithful aim (B)">Arcade</button>
+                  <button type="button" id="btnGameSim" class="seg" aria-pressed="true" title="Sim: HoB + ballistic zero">Sim</button>
+                  <button type="button" id="btnGameArcade" class="seg" aria-pressed="false" title="Arcade: reticle-faithful aim">Arcade</button>
                 </div>
               </div>
               <label id="zeroDistLabel">Zero distance
@@ -160,9 +163,9 @@
                 <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · RMB ADS</li>
                 <li>Hold <kbd>Space</kbd> vault (when prompted) · ADS + Space = hold breath · tap Space reserved</li>
                 <li><kbd>O</kbd> Settings (options)</li>
-                <li><kbd>B</kbd> cycle Arcade / Sim (game style)</li>
+                <li><kbd>B</kbd> fire mode (semi / auto — SMG only)</li>
                 <li><kbd>-</kbd>/<kbd>=</kbd> cycle optic zero (Sim) · irons locked 100 m</li>
-                <li>LMB fire (tracers from muzzle; Sim = HoB+zero by default)</li>
+                <li>LMB fire (semi = click; SMG AUTO = hold; tracers from muzzle; Sim = HoB+zero by default)</li>
                 <li><kbd>R</kbd> reload mag · <kbd>F</kbd> bench pickup / table reset button</li>
                 <li>Click canvas = mouse look</li>
                 <li>Optics table = <kbd>F</kbd>/click attach (SMG: holo/acog · Rifle: all rail optics · Sniper: iron/sniper · illegal = toast)</li>
@@ -345,7 +348,7 @@
           <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint</li>
           <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold · mouse wheel crouch height</li>
           <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · RMB ADS · LMB fire</li>
-          <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> Arcade/Sim</li>
+          <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / reset-targets button (weapons + optics; <kbd>G</kbd> backup)</li>
           <li>Settings: hip reticle · Brightness/Gamma · Time of day · Fog near/far · PLUGE strip</li>
@@ -356,6 +359,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v10"></script>
+    <script type="module" src="app.js?v=20260824v11"></script>
 </body>
 </html>

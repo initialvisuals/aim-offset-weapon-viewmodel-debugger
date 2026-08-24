@@ -146,6 +146,9 @@ const BLOOM_KNEE = 0.22;
 const BLOOM_MIPS = 3;
 /** Settings default cloud cover (0 = clear). */
 const CLOUDS_DEFAULT = 0.55;
+/** Dust / edge wear on bay concrete (0 = clean pour). Shared GPU uniform. */
+const CONCRETE_WEAR_DEFAULT = 0.4;
+const uConcreteWear = { value: CONCRETE_WEAR_DEFAULT };
 /** Warm HDR lamp glass — pops under threshold without lifting the bay. */
 const FLOOD_LAMP_HDR = [3.15, 2.65, 1.78];
 
@@ -244,9 +247,11 @@ const state = {
   /** Multiplier on ToD ACES exposure (1.00 = authored clock). */
   exposureMul: 1,
   /** Env/scuff + non-paper punch hole FIFO cap. Paper holes use PAPER_DECAL_MAX. */
-  holeCap: 120,
+  holeCap: 30000,
   /** Brass casing FIFO cap. */
-  casingCap: 80,
+  casingCap: 30000,
+  /** Dust / edge wear on bay floor, walls, berm (0–1). */
+  concreteWear: CONCRETE_WEAR_DEFAULT,
   /** Seconds after spawn before env/scuff holes despawn. 0 = FIFO only. */
   holeFade: 18,
   /** Seconds after a casing sleeps before despawn. 0 = stay until cap recycles. */
@@ -1616,6 +1621,22 @@ function setClouds(v, { toast = false } = {}) {
   if (toast) showToast(`Clouds ${state.clouds.toFixed(2)}`);
 }
 
+function syncConcreteWearUI() {
+  const n = state.concreteWear ?? CONCRETE_WEAR_DEFAULT;
+  const slider = el("concreteWearSlider");
+  const val = el("concreteWearVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2);
+}
+
+function setConcreteWear(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, 1);
+  state.concreteWear = Number.isFinite(n) ? n : CONCRETE_WEAR_DEFAULT;
+  uConcreteWear.value = state.concreteWear;
+  syncConcreteWearUI();
+  if (toast) showToast(`Concrete wear ${state.concreteWear.toFixed(2)}`);
+}
+
 function setLightMul(key, v, { toast = false } = {}) {
   const n = clamp(parseFloat(v), 0, 2.5);
   state[key] = Number.isFinite(n) ? n : 1;
@@ -1729,6 +1750,7 @@ function syncSettingsUI() {
   syncGodRaysUI();
   syncBloomUI();
   syncCloudsUI();
+  syncConcreteWearUI();
   syncFxSettingsUI();
 }
 
@@ -2021,15 +2043,15 @@ let impactSparks = [];
 let bulbSparks = [];
 /** World impact marks — FIFO capped (walls / berm / silhouettes). Live cap in Settings. */
 let impactDecals = [];
-const IMPACT_DECAL_MAX = 120;
+const IMPACT_DECAL_MAX = 30000;
 const IMPACT_DECAL_CAP_MIN = 20;
-const IMPACT_DECAL_CAP_MAX = 400;
+const IMPACT_DECAL_CAP_MAX = 30000;
 /** Seconds after spawn; 0 = FIFO only. Paper holes never use this TTL. */
 const HOLE_FADE_SEC = 18;
 const HOLE_FADE_MAX = 60;
 /** Paper-target holes — persist until table reset (not in the FIFO TTL pool). */
 let paperDecals = [];
-const PAPER_DECAL_MAX = 400;
+const PAPER_DECAL_MAX = 30000;
 const _decalParentQ = new THREE.Quaternion();
 const _decalWorldQ = new THREE.Quaternion();
 const _decalLocal = new THREE.Vector3();
@@ -2044,9 +2066,9 @@ const VAULT_REACH = 1.45;
 const FLOOR_Y = -1.4;
 /** Ejected brass casings — FIFO-capped, sleep after bounce, then optional TTL. */
 let casings = [];
-const CASING_MAX = 80;
+const CASING_MAX = 30000;
 const CASING_CAP_MIN = 10;
-const CASING_CAP_MAX = 250;
+const CASING_CAP_MAX = 30000;
 const CASING_FADE_SEC = 12;
 const CASING_FADE_MAX = 60;
 const CASING_GRAVITY = 12;
@@ -2316,71 +2338,313 @@ function makeCanvasTexture(draw, size = 256, opts = {}) {
   return tex;
 }
 
-function makeDirtConcreteTexture(repeatX = 8, repeatZ = 40) {
-  return makeCanvasTexture((ctx, size) => {
-    const g = ctx.createLinearGradient(0, 0, size, size);
-    g.addColorStop(0, "#1c222c");
-    g.addColorStop(0.45, "#232a36");
-    g.addColorStop(1, "#1a1f28");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, size);
-    // Speckle / wear
-    for (let i = 0; i < 1800; i++) {
-      const x = Math.random() * size;
-      const y = Math.random() * size;
-      const a = 0.04 + Math.random() * 0.12;
-      const v = 40 + Math.floor(Math.random() * 90);
-      ctx.fillStyle = `rgba(${v},${v + 4},${v + 10},${a})`;
-      ctx.fillRect(x, y, 1 + Math.random() * 2.5, 1 + Math.random() * 2.5);
-    }
-    // Faint cracks / scrape lines
-    ctx.strokeStyle = "rgba(70,78,92,0.18)";
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 18; i++) {
-      ctx.beginPath();
-      ctx.moveTo(Math.random() * size, Math.random() * size);
-      ctx.lineTo(Math.random() * size, Math.random() * size);
-      ctx.stroke();
-    }
-    // Soft grid suggestion
-    ctx.strokeStyle = "rgba(55,64,80,0.22)";
-    ctx.lineWidth = 1;
-    const step = size / 8;
-    for (let i = 0; i <= 8; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * step, 0);
-      ctx.lineTo(i * step, size);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, i * step);
-      ctx.lineTo(size, i * step);
-      ctx.stroke();
-    }
-  }, 256, { repeat: [repeatX, repeatZ] });
+
+/** World-space procedural concrete — MeshStandard so lights / shadows / fog / log-depth stay. */
+const CONCRETE_KINDS = {
+  floor: {
+    scale: 0.90, variation: 0.55, wear: 0.32, grime: 0.48, moisture: 0.16, rust: 0.08,
+    ground: 0.55, groundH: 0.45, grout: 0.38, tile: 1.0, warmth: 0.42, roughness: 0.86, color: 0x8a8680,
+  },
+  lane: {
+    scale: 0.95, variation: 0.50, wear: 0.30, grime: 0.50, moisture: 0.14, rust: 0.06,
+    ground: 0.58, groundH: 0.40, grout: 0.84, tile: 1.0, warmth: 0.50, roughness: 0.88, color: 0x7c7872,
+  },
+  wall: {
+    scale: 1.25, variation: 0.62, wear: 0.48, grime: 0.38, moisture: 0.20, rust: 0.16,
+    ground: 0.72, groundH: 0.85, grout: 0.0, tile: 1.0, warmth: 0.40, roughness: 0.80, color: 0x908c86,
+  },
+  berm: {
+    scale: 1.65, variation: 0.64, wear: 0.42, grime: 0.52, moisture: 0.18, rust: 0.12,
+    ground: 0.78, groundH: 1.15, grout: 0.0, tile: 1.0, warmth: 0.55, roughness: 0.90, color: 0x7a7468,
+  },
+  bermDark: {
+    scale: 1.10, variation: 0.58, wear: 0.50, grime: 0.55, moisture: 0.12, rust: 0.18,
+    ground: 0.62, groundH: 0.90, grout: 0.0, tile: 1.0, warmth: 0.48, roughness: 0.88, color: 0x5c584e,
+  },
+};
+
+const CONCRETE_GLSL_FNS = /* glsl */`
+uniform float uConcreteWear;
+uniform float uConScale;
+uniform float uConVar;
+uniform float uConWear;
+uniform float uConGrime;
+uniform float uConMoisture;
+uniform float uConRust;
+uniform float uConGround;
+uniform float uConGroundH;
+uniform float uConGrout;
+uniform float uConTile;
+uniform float uConWarmth;
+uniform float uConRough;
+uniform float uConFloorY;
+
+varying vec3 vConWP;
+varying vec3 vConWN;
+
+vec3 rangeConDetailN;
+float rangeConLod;
+
+float conHash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
 }
 
-function makeLaneStripTexture() {
-  return makeCanvasTexture((ctx, size) => {
-    ctx.fillStyle = "#171b24";
-    ctx.fillRect(0, 0, size, size);
-    for (let i = 0; i < 1400; i++) {
-      const x = Math.random() * size;
-      const y = Math.random() * size;
-      const v = 28 + Math.floor(Math.random() * 50);
-      ctx.fillStyle = `rgba(${v},${v + 2},${v + 8},${0.05 + Math.random() * 0.1})`;
-      ctx.fillRect(x, y, 1 + Math.random() * 2, 1 + Math.random() * 2);
-    }
-    // Worn tire / footpath streaks along length (Y in UV)
-    ctx.strokeStyle = "rgba(90,98,112,0.08)";
-    ctx.lineWidth = 3;
-    for (let i = 0; i < 6; i++) {
-      const x = 30 + i * 36 + Math.random() * 8;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x + (Math.random() - 0.5) * 10, size);
-      ctx.stroke();
-    }
-  }, 256, { repeat: [3, 50] });
+float conNoise2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float a = conHash12(i);
+  float b = conHash12(i + vec2(1.0, 0.0));
+  float c = conHash12(i + vec2(0.0, 1.0));
+  float d = conHash12(i + vec2(1.0, 1.0));
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float conFbm2(vec2 p) {
+  float value = 0.0;
+  float amp = 0.5;
+  float freq = 1.0;
+  for (int i = 0; i < 4; i++) {
+    value += amp * conNoise2(p * freq);
+    freq *= 2.05;
+    amp *= 0.52;
+  }
+  return value;
+}
+
+vec3 conTriW(vec3 n) {
+  vec3 w = pow(abs(n), vec3(4.0));
+  return w / max(dot(w, vec3(1.0)), 0.0001);
+}
+
+float conTriplanar(vec3 wp, vec3 n, float scale) {
+  vec3 p = wp / max(scale, 0.05);
+  vec3 w = conTriW(n);
+  float sx = conFbm2(p.yz * 1.15 + vec2(0.17, 0.43));
+  float sy = conFbm2(p.xz * 1.15 + vec2(1.07, 0.29));
+  float sz = conFbm2(p.xy * 1.15 + vec2(2.11, 0.61));
+  return sx * w.x + sy * w.y + sz * w.z;
+}
+
+float conMacro(vec3 wp, float scale) {
+  vec3 p = wp / max(scale * 3.5, 0.2);
+  return conFbm2(p.xz * 0.35 + vec2(4.2, 1.8));
+}
+
+float conBay(vec3 wp) {
+  return conFbm2(vec2(wp.x * 0.018, wp.z * 0.007) + vec2(2.1, 9.4));
+}
+
+float conPitting(vec3 wp, float scale) {
+  vec3 p = wp / max(scale * 0.22, 0.06);
+  return conFbm2(p.xz * 3.6 + vec2(1.9, 4.7));
+}
+
+float conMoisture(vec3 wp, vec3 n, float strength) {
+  if (strength < 0.01) return 0.0;
+  float streak;
+  if (n.y > 0.55) {
+    vec2 uv = wp.xz * 0.08;
+    streak = conFbm2(vec2(uv.x * 0.35 + uv.y * 2.4, uv.y * 6.0));
+    return smoothstep(0.55, 0.82, streak) * strength * 0.40;
+  }
+  float u = abs(n.x) > abs(n.z) ? wp.z : wp.x;
+  streak = conFbm2(vec2(u * 0.028 + wp.y * 1.85, wp.y * 4.2));
+  return smoothstep(0.55, 0.82, streak) * strength;
+}
+
+float conRust(vec3 wp, vec3 n, float strength) {
+  if (strength < 0.01) return 0.0;
+  vec2 cell = floor(wp.xz * 0.14);
+  float seed = conHash12(cell + vec2(3.7, 11.2));
+  float u = abs(n.x) > abs(n.z) ? wp.z : wp.x;
+  float streak = conFbm2(vec2(u * 0.11 + seed * 4.0 + wp.y * 2.1, wp.y * 6.4));
+  float vert = smoothstep(0.50, 0.80, streak);
+  float wallBias = 1.0 - step(0.62, n.y);
+  float h = max(wp.y - uConFloorY, 0.0);
+  float heightBias = smoothstep(2.8, 0.15, h);
+  return vert * strength * mix(0.28, 1.0, wallBias) * heightBias;
+}
+
+float conEdgeWear(vec3 n, float wear) {
+  vec3 an = abs(normalize(n));
+  float corner = 1.0 - min(min(an.x, an.y), an.z);
+  float edge = clamp(length(fwidth(n)) * 8.0, 0.0, 1.0);
+  return clamp((corner * 0.65 + edge * 0.35) * wear, 0.0, 1.0);
+}
+
+float conCavity(vec3 n, float grime) {
+  vec3 an = abs(normalize(n));
+  float concavity = 1.0 - max(max(an.x, an.y), an.z);
+  return concavity * grime;
+}
+
+float conGround(vec3 wp, vec3 n, float strength, float falloffH) {
+  if (strength < 0.01) return 0.0;
+  float falloff = max(falloffH, 0.08);
+  float height = max(wp.y - uConFloorY, 0.0);
+  float floorMask = smoothstep(falloff, 0.0, height) * step(0.35, n.y);
+  float wallMask = smoothstep(falloff, 0.0, height) * (1.0 - step(0.35, n.y));
+  return clamp((floorMask + wallMask * 0.88) * strength, 0.0, 1.0);
+}
+
+vec2 conGrout(vec3 wp, vec3 n, float tileSize, float groutStr) {
+  if (groutStr < 0.01 || n.y < 0.45) return vec2(0.0);
+  float ts = max(tileSize, 0.25);
+  vec2 grid = wp.xz / ts;
+  vec2 cell = floor(grid);
+  vec2 f = fract(grid);
+  float edge = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
+  float grout = (1.0 - smoothstep(0.0, 0.035, edge)) * groutStr;
+  float grit = grout * conHash12(cell + vec2(17.3, 9.1)) * 0.55 * groutStr;
+  return vec2(grout, grit);
+}
+
+float conPourSeam(vec3 wp, vec3 n, float wearK) {
+  if (n.y > 0.45 || wearK < 0.02) return 0.0;
+  float lift = fract((wp.y - uConFloorY) / 1.25);
+  float seam = 1.0 - smoothstep(0.0, 0.032, min(lift, 1.0 - lift));
+  float wobble = conFbm2(wp.xz * 0.22 + vec2(8.1, 3.4));
+  return seam * mix(0.35, 1.0, wobble) * wearK;
+}
+
+void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFactor) {
+  vec3 n = normalize(vConWN);
+  vec3 wp = vConWP;
+  float dist = length(cameraPosition - wp);
+  rangeConLod = smoothstep(22.0, 150.0, dist);
+
+  float wCtrl = clamp(uConcreteWear, 0.0, 1.0);
+  float k = wCtrl / 0.4;
+  float variation = clamp(uConVar, 0.0, 1.0);
+  float wearStr = clamp(uConWear * k, 0.0, 1.0);
+  float grime = clamp(uConGrime * k, 0.0, 1.0);
+  float moisture = clamp(uConMoisture * k, 0.0, 1.0);
+  float rustStr = clamp(uConRust * k, 0.0, 1.0);
+  float groundStr = clamp(uConGround * k, 0.0, 1.0);
+  float groutStr = clamp(uConGrout * mix(0.35, 1.0, wCtrl), 0.0, 1.0);
+
+  float micro = conTriplanar(wp, n, uConScale);
+  float mac = conMacro(wp, uConScale);
+  float patch = mix(micro, mac, mix(0.40, 0.78, rangeConLod));
+  float pit = mix(conPitting(wp, uConScale), 0.5, rangeConLod);
+  float bay = conBay(wp);
+
+  vec3 albedo = diffuseColor.rgb;
+  albedo *= mix(0.90, 1.08, patch);
+  albedo *= mix(1.0, 0.80, variation * (1.0 - patch) * mix(1.0, 0.35, rangeConLod));
+  albedo *= mix(0.93, 1.05, bay);
+
+  float ao = conCavity(n, grime);
+  albedo *= 1.0 - ao * 0.55;
+
+  float wear = conEdgeWear(n, wearStr);
+  albedo = mix(albedo, albedo * 1.10 + vec3(0.03), wear * (1.0 - rangeConLod * 0.4));
+
+  float wet = conMoisture(wp, n, moisture);
+  albedo *= 1.0 - wet * 0.22;
+
+  float rust = conRust(wp, n, rustStr);
+  albedo = mix(albedo, albedo * vec3(1.10, 0.86, 0.70), rust * 0.48);
+
+  float contact = conGround(wp, n, groundStr, uConGroundH);
+  albedo = mix(albedo, albedo * vec3(0.74, 0.72, 0.68), contact * 0.70);
+  albedo = mix(albedo, albedo * vec3(1.05, 0.95, 0.84), contact * uConWarmth);
+
+  vec2 tileFx = conGrout(wp, n, uConTile, groutStr);
+  albedo *= 1.0 - tileFx.x * 0.40;
+  albedo *= 1.0 - tileFx.y * 0.24;
+
+  float seam = conPourSeam(wp, n, clamp(k * 0.55, 0.0, 1.0));
+  albedo *= 1.0 - seam * 0.14;
+
+  float agg = smoothstep(0.64, 0.80, micro) * variation * (1.0 - rangeConLod);
+  albedo *= mix(1.0, 0.91, agg);
+
+  float rough = uConRough;
+  rough = mix(rough, rough * 0.78, wear);
+  rough = mix(rough, min(rough + 0.06, 1.0), wet);
+  rough = mix(rough, rough * 0.92, rust);
+  rough = mix(rough, rough * 1.05, patch * variation);
+  rough = mix(rough, min(rough + 0.12, 1.0), contact);
+  rough = mix(rough, min(rough + 0.10, 1.0), tileFx.x);
+  rough = mix(rough, rough * (0.94 + pit * 0.10), variation);
+  roughnessFactor = clamp(rough, 0.08, 1.0);
+
+  float eps = max(uConScale * 0.04, 0.02);
+  float dx = conTriplanar(wp + vec3(eps, 0.0, 0.0), n, uConScale)
+    - conTriplanar(wp - vec3(eps, 0.0, 0.0), n, uConScale);
+  float dz = conTriplanar(wp + vec3(0.0, 0.0, eps), n, uConScale)
+    - conTriplanar(wp - vec3(0.0, 0.0, eps), n, uConScale);
+  float nAmt = 0.28 * variation * (1.0 - rangeConLod);
+  vec3 pitN = vec3(pit - 0.5, 0.0, pit - 0.5) * (0.16 * variation * (1.0 - rangeConLod));
+  rangeConDetailN = normalize(n + vec3(-dx, 0.0, -dz) * nAmt + pitN);
+
+  diffuseColor.rgb = albedo;
+}
+
+void applyRangeConcreteNormal(inout vec3 normal) {
+  vec3 dnView = normalize((viewMatrix * vec4(rangeConDetailN, 0.0)).xyz);
+  float amt = 0.55 * (1.0 - rangeConLod);
+  normal = normalize(mix(normal, dnView, amt));
+}
+`;
+
+function compileRangeConcrete(shader, cfg) {
+  shader.uniforms.uConcreteWear = uConcreteWear;
+  shader.uniforms.uConScale = { value: cfg.scale };
+  shader.uniforms.uConVar = { value: cfg.variation };
+  shader.uniforms.uConWear = { value: cfg.wear };
+  shader.uniforms.uConGrime = { value: cfg.grime };
+  shader.uniforms.uConMoisture = { value: cfg.moisture };
+  shader.uniforms.uConRust = { value: cfg.rust };
+  shader.uniforms.uConGround = { value: cfg.ground };
+  shader.uniforms.uConGroundH = { value: cfg.groundH };
+  shader.uniforms.uConGrout = { value: cfg.grout };
+  shader.uniforms.uConTile = { value: cfg.tile };
+  shader.uniforms.uConWarmth = { value: cfg.warmth };
+  shader.uniforms.uConRough = { value: cfg.roughness };
+  shader.uniforms.uConFloorY = { value: FLOOR_Y };
+
+  shader.vertexShader = "varying vec3 vConWP;\nvarying vec3 vConWN;\n" + shader.vertexShader;
+  shader.vertexShader = shader.vertexShader.replace(
+    "#include <worldpos_vertex>",
+    `#include <worldpos_vertex>
+    vConWP = (modelMatrix * vec4(transformed, 1.0)).xyz;
+    vConWN = inverseTransformDirection(transformedNormal, viewMatrix);
+    `
+  );
+
+  shader.fragmentShader = CONCRETE_GLSL_FNS + shader.fragmentShader;
+  shader.fragmentShader = shader.fragmentShader.replace(
+    "#include <roughnessmap_fragment>",
+    `#include <roughnessmap_fragment>
+    applyRangeConcreteAlbedo(diffuseColor, roughnessFactor);
+    `
+  );
+  shader.fragmentShader = shader.fragmentShader.replace(
+    "#include <normal_fragment_begin>",
+    `#include <normal_fragment_begin>
+    applyRangeConcreteNormal(normal);
+    `
+  );
+}
+
+function makeConcreteMaterial(kind) {
+  const cfg = CONCRETE_KINDS[kind] || CONCRETE_KINDS.floor;
+  const mat = new THREE.MeshStandardMaterial({
+    name: "RangeConcrete_" + kind,
+    color: cfg.color,
+    roughness: cfg.roughness,
+    metalness: 0.02,
+    dithering: false,
+  });
+  mat.userData.concreteKind = kind;
+  mat.onBeforeCompile = (shader) => compileRangeConcrete(shader, cfg);
+  mat.customProgramCacheKey = () => "rangeConcrete";
+  return mat;
 }
 
 function makeWoodTexture() {
@@ -2400,28 +2664,6 @@ function makeWoodTexture() {
       ctx.stroke();
     }
   }, 128, { repeat: [2, 1] });
-}
-
-function makeBermTexture() {
-  return makeCanvasTexture((ctx, size) => {
-    const g = ctx.createLinearGradient(0, 0, 0, size);
-    g.addColorStop(0, "#4a4234");
-    g.addColorStop(0.5, "#3c3428");
-    g.addColorStop(1, "#322a20");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, size);
-    for (let i = 0; i < 2200; i++) {
-      const x = Math.random() * size;
-      const y = Math.random() * size;
-      const r = 55 + Math.floor(Math.random() * 45);
-      const grn = r - 12 - Math.floor(Math.random() * 10);
-      const b = r - 28;
-      ctx.fillStyle = `rgba(${r},${grn},${b},${0.08 + Math.random() * 0.18})`;
-      ctx.beginPath();
-      ctx.arc(x, y, 0.6 + Math.random() * 2.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }, 256, { repeat: [4, 1] });
 }
 
 /** Register world solids for lean anti-clip probes (excludes player / gun / targets). */
@@ -3350,13 +3592,7 @@ function refreshOpticsTableAvailability() {
 
 function buildRoom() {
   leanSolids = [];
-  const floorTex = makeDirtConcreteTexture(6, 50);
-  const floorMat = new THREE.MeshStandardMaterial({
-    map: floorTex,
-    color: 0xe6eef6,
-    roughness: 0.96,
-    metalness: 0.02,
-  });
+  const floorMat = makeConcreteMaterial("floor");
   // Bay geometry centered on the 200 m mark so spawn→berm (~410 m) stays covered.
   const rangeCenterZ = rangeZ(200);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 460), floorMat);
@@ -3367,23 +3603,18 @@ function buildRoom() {
   floor.userData.impactSurface = "floor";
   scene.add(floor);
 
-  // Soft reference grid — quieter than before so texture can read
+  // Soft reference grid — quiet so world-space concrete can read
   const grid = new THREE.GridHelper(40, 80, 0x2e3848, 0x1c222c);
   grid.position.y = -1.39;
   grid.position.z = rangeCenterZ;
   grid.material.transparent = true;
-  grid.material.opacity = 0.35;
+  grid.material.opacity = 0.16;
   scene.add(grid);
 
   // Low side walls / bay dividers for scale (outside the ±5.5 rails)
-  const wallMat = new THREE.MeshStandardMaterial({
-    map: makeDirtConcreteTexture(2, 30),
-    color: 0xaab6c4,
-    roughness: 0.93,
-    metalness: 0.04,
-  });
+  const wallMat = makeConcreteMaterial("wall");
   for (const side of [-12, 12]) {
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 430), wallMat.clone());
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 430), wallMat);
     wall.position.set(side, -0.2, rangeCenterZ);
     wall.castShadow = false;
     wall.receiveShadow = true;
@@ -3665,16 +3896,10 @@ function buildShootingRange() {
   const fl = el("floatLabels");
   if (fl) fl.innerHTML = "";
 
-  const stripTex = makeLaneStripTexture();
   const rangeCenterZ = rangeZ(200);
   const strip = new THREE.Mesh(
     new THREE.PlaneGeometry(18, 430),
-    new THREE.MeshStandardMaterial({
-      map: stripTex,
-      color: 0xa8b0bc,
-      roughness: 0.94,
-      metalness: 0.03,
-    })
+    makeConcreteMaterial("lane")
   );
   strip.rotation.x = -Math.PI / 2;
   strip.position.set(0, -1.385, rangeCenterZ);
@@ -4043,20 +4268,10 @@ function updateBermPopups(dt) {
   }
 }
 
-/** Earthen backstop berm ~410 m from spawn — layered dirt/rock silhouette for distance read. */
+/** Range backstop berm ~410 m from spawn — procedural concrete mound for distance read. */
 function buildBackBerm() {
-  const bermTex = makeBermTexture();
-  const dirtMat = new THREE.MeshStandardMaterial({
-    map: bermTex,
-    color: 0xcac0a8,
-    roughness: 0.95,
-    metalness: 0.02,
-  });
-  const darkMat = new THREE.MeshStandardMaterial({
-    color: 0x3c3428,
-    roughness: 0.96,
-    metalness: 0.02,
-  });
+  const dirtMat = makeConcreteMaterial("berm");
+  const darkMat = makeConcreteMaterial("bermDark");
   // Just past the 400 m mark so the end-wall reads as the range backstop.
   const bermZ = rangeZ(410);
   // Main mound
@@ -8119,6 +8334,13 @@ function bind() {
     cloudsSlider.oninput = (e) => setClouds(e.target.value);
   }
   syncCloudsUI();
+
+  const concreteWearSlider = el("concreteWearSlider");
+  if (concreteWearSlider) {
+    concreteWearSlider.value = String(state.concreteWear);
+    concreteWearSlider.oninput = (e) => setConcreteWear(e.target.value);
+  }
+  syncConcreteWearUI();
 
   Object.keys(LIGHT_MUL_UI).forEach((key) => {
     const meta = LIGHT_MUL_UI[key];

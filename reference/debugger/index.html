@@ -272,12 +272,12 @@
       <div class="settings-section">
         <h3>FX</h3>
         <label class="slider-row">Hole cap
-          <input type="range" id="holeCapSlider" min="20" max="400" step="1" value="120" />
-          <code id="holeCapVal">120</code>
+          <input type="range" id="holeCapSlider" min="20" max="30000" step="100" value="30000" />
+          <code id="holeCapVal">30000</code>
         </label>
         <label class="slider-row">Casing cap
-          <input type="range" id="casingCapSlider" min="10" max="250" step="1" value="80" />
-          <code id="casingCapVal">80</code>
+          <input type="range" id="casingCapSlider" min="10" max="30000" step="100" value="30000" />
+          <code id="casingCapVal">30000</code>
         </label>
         <label class="slider-row">Hole fade (s)
           <input type="range" id="holeFadeSlider" min="0" max="60" step="1" value="18" />
@@ -339,6 +339,15 @@
           <code id="bloomVal">0.45</code>
         </label>
         <p class="note">HDR glow on floods, muzzle, sun, and tracers. Walls and floor stay put. Independent of god rays. 0 = skip the pass.</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>Materials</h3>
+        <label class="slider-row">Concrete wear
+          <input type="range" id="concreteWearSlider" min="0" max="1" step="0.01" value="0.40" />
+          <code id="concreteWearVal">0.40</code>
+        </label>
+        <p class="note">Dust, edge wear, and base grime on bay walls, floor, and berm. 0 = clean pour. Default dusty indoor. Benches stay wood.</p>
       </div>
 
       <div class="settings-section">
@@ -414,7 +423,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / reset-targets button (weapons + optics; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + god rays + bloom) · Fog near/far · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + god rays + bloom) · Materials (concrete wear) · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -422,6 +431,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v17"></script>
+    <script type="module" src="app.js?v=20260824v18"></script>
 </body>
 </html>

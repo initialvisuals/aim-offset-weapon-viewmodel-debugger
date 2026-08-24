@@ -235,3 +235,20 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
   background: rgba(20, 24, 32, 0.75);
   color: #e2e8f0;
 }
+
+.ballistics-bar {
+  margin-bottom: 0.75rem; padding: 0.65rem 0.75rem; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg);
+}
+.ballistics-bar h2 {
+  margin: 0 0 0.45rem; font-size: 0.75rem; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--muted);
+}
+.ballistics-row {
+  display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: flex-end; margin-bottom: 0.4rem;
+}
+.ballistics-row code {
+  font-family: var(--mono); font-size: 0.8rem; color: var(--ok);
+  padding: 0.35rem 0.45rem; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+}
+.ballistics-bar .note { margin: 0.15rem 0 0; }

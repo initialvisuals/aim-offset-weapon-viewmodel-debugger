@@ -195,6 +195,21 @@ sightError = length(cross(sightPos - aimOrigin, aimDir))
 
 Tune until both are small at ADS — that is the measurable iron-sight accuracy promise.
 
+
+### Height-over-bore & zero distance
+
+Optics sit above the bore, so the **sight ray** (camera / reticle) and **bore ray** (muzzle forward) diverge. A **zero** pitches the bore so the projectile path meets the sight ray at range `Z`.
+
+In the reference debugger (default):
+
+```text
+S = aimOrigin + aimDir * Z
+# solve low-arc u under constant g:
+# muzzle + u * v * t + (0, -0.5 * g * t^2, 0) = S
+```
+
+Toggle **Idealized bore=aim** to restore Policy A (`dir = aimDir`) for A/B comparison. See [reference/debugger/README.md](../reference/debugger/README.md).
+
 ---
 
 ## 9. Tuner nudge

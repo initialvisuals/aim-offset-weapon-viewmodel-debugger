@@ -56,7 +56,7 @@
     <div class="score-hud" id="scoreHud">Score 0</div>
     <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · <kbd>R</kbd> reset</div>
     <div id="floatLabels" class="float-labels" aria-hidden="true"></div>
-    <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>C</kbd> crouch</div>
+    <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>C</kbd>/<kbd>Z</kbd> crouch</div>
 
     <aside id="debuggerPanel" class="debugger-panel closed" aria-hidden="true">
       <div class="shell-inner">
@@ -109,6 +109,26 @@
               <code id="adsFactorVal">0.00</code>
             </div>
           </div>
+
+          <div class="ballistics-bar" id="ballisticsBar">
+            <h2>Ballistics</h2>
+            <div class="ballistics-row">
+              <label>Zero distance
+                <select id="zeroDistSelect">
+                  <option value="25">25 m</option>
+                  <option value="50">50 m</option>
+                  <option value="100" selected>100 m</option>
+                  <option value="200">200 m</option>
+                  <option value="300">300 m</option>
+                </select>
+              </label>
+              <button type="button" id="btnHobZero" class="toggle" aria-pressed="true" title="Toggle HoB + zero vs idealized bore=aim">HoB + zero</button>
+              <button type="button" id="btnAimRays" class="toggle" aria-pressed="false" title="Draw sight ray vs bore/launch ray">Show aim/bore rays</button>
+              <code id="hobReadout">HoB — cm</code>
+            </div>
+            <p class="note">Sight ray = camera/optic aim. Bore launches from the muzzle along a <strong>ballistic zero</strong>: pitch/lead so the gravity arc meets the sight ray at the zero distance (default 100&nbsp;m). Toggle off for old Policy&nbsp;A (spawn at muzzle, velocity = camera forward).</p>
+          </div>
+
           <div class="split">
             <div class="axes" id="viewAxes"></div>
             <aside class="preview">
@@ -118,11 +138,11 @@
               <ul class="keys">
                 <li><kbd>`</kbd> toggle debugger</li>
                 <li><kbd>G</kbd> gun select</li>
-                <li><kbd>C</kbd> crouch toggle · <kbd>Ctrl</kbd> crouch hold</li>
+                <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold</li>
                 <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint (blocked while crouched)</li>
                 <li><kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS</li>
                 <li><kbd>Space</kbd> hold breath (damp sway)</li>
-                <li>LMB fire (tracers from muzzle, aim = camera)</li>
+                <li>LMB fire (tracers from muzzle; HoB + zero by default)</li>
                 <li>Click canvas = mouse look</li>
                 <li>Table pickups = equip optic</li>
                 <li><kbd>Insert</kbd> ADS preview · Sway toggle in header</li>

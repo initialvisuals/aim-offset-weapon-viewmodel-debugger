@@ -107,6 +107,12 @@ const state = {
   breathLeft: 3,
   breathMax: 3,
   crouchToggled: false,
+  /** HoB + ballistic zero (default). false = Policy A idealized bore=aim. */
+  hobZero: true,
+  /** Zero distance in demo meters. */
+  zeroDist: 100,
+  /** Draw sight vs bore/launch debug rays. */
+  showAimRays: false,
 };
 
 function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
@@ -1509,6 +1515,181 @@ function ballisticForWeapon() {
   return base;
 }
 
+/* ---- Height-over-bore + zeroing (teaching model) ----
+ * Sight ray = camera / optic aim.
+ * Natural bore = muzzleSocket local −Z (barrel extends toward −Z on these block guns).
+ * Zero: choose launch dir so the constant-g arc meets the sight point at zeroDist.
+ * Policy A toggle: velocity = camera forward (hides HoB).
+ */
+const _sightO = new THREE.Vector3();
+const _sightD = new THREE.Vector3();
+const _muzzleO = new THREE.Vector3();
+const _boreD = new THREE.Vector3();
+const _launchD = new THREE.Vector3();
+const _zeroPt = new THREE.Vector3();
+const _tmpHob = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+const _camFwd = new THREE.Vector3();
+const _yUp = new THREE.Vector3(0, 1, 0);
+
+let aimRayLine = null;
+let boreRayLine = null;
+
+function getSightRay(outO, outD) {
+  camera.getWorldPosition(outO);
+  camera.getWorldDirection(outD);
+  outD.normalize();
+}
+
+/** Barrel forward in world space (gun content −Z). */
+function getBoreForward(outD) {
+  outD.set(0, 0, -1).transformDirection(muzzleSocket.matrixWorld).normalize();
+}
+
+/**
+ * Analytic low-arc launch direction under constant gravity (vel.y -= g each frame).
+ * pos(t) = muzzle + u*v*t + (0, -0.5*g*t^2, 0). Solves ||D + (0, 0.5*g*t^2, 0)|| = v*t.
+ * Falls back to geometric aim-at-target if no real positive root.
+ */
+function solveBallisticLaunchDir(muzzle, target, speed, gravity, outDir) {
+  const Dx = target.x - muzzle.x;
+  const Dy = target.y - muzzle.y;
+  const Dz = target.z - muzzle.z;
+  const R2 = Dx * Dx + Dy * Dy + Dz * Dz;
+  const g = gravity;
+  const v = speed;
+  const v2 = v * v;
+  const a = 0.25 * g * g;
+  const b = Dy * g - v2;
+  const c = R2;
+  if (a < 1e-14 || !(R2 > 1e-10) || !(v > 1e-6)) {
+    outDir.set(Dx, Dy, Dz).normalize();
+    return false;
+  }
+  const disc = b * b - 4 * a * c;
+  if (disc < 0) {
+    outDir.set(Dx, Dy, Dz).normalize();
+    return false;
+  }
+  const sqrtDisc = Math.sqrt(disc);
+  const inv2a = 0.5 / a;
+  const w1 = (-b - sqrtDisc) * inv2a;
+  const w2 = (-b + sqrtDisc) * inv2a;
+  let w = Infinity;
+  if (w1 > 1e-8) w = Math.min(w, w1);
+  if (w2 > 1e-8) w = Math.min(w, w2);
+  if (!Number.isFinite(w)) {
+    outDir.set(Dx, Dy, Dz).normalize();
+    return false;
+  }
+  const t = Math.sqrt(w);
+  outDir.set(Dx, Dy + 0.5 * g * t * t, Dz).multiplyScalar(1 / (v * t));
+  const len = outDir.length();
+  if (len < 1e-8) {
+    outDir.set(Dx, Dy, Dz).normalize();
+    return false;
+  }
+  outDir.multiplyScalar(1 / len);
+  return true;
+}
+
+/** Signed HoB in meters: + = muzzle below the sight ray (classic). */
+function computeHobMeters() {
+  if (!muzzleSocket || !camera) return 0;
+  muzzleSocket.updateWorldMatrix(true, false);
+  muzzleSocket.getWorldPosition(_muzzleO);
+  getSightRay(_sightO, _sightD);
+  camera.matrixWorld.extractBasis(_camRight, _camUp, _camFwd);
+  _tmpHob.copy(_muzzleO).sub(_sightO);
+  const along = _tmpHob.dot(_sightD);
+  _tmpHob.addScaledVector(_sightD, -along); // vector from ray to muzzle (perp)
+  // Positive when muzzle is below sight (opposite camera-up)
+  return -_tmpHob.dot(_camUp);
+}
+
+function ensureAimBoreRays() {
+  if (aimRayLine && boreRayLine) return;
+  const mk = (color) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(),
+      new THREE.Vector3(0, 0, -1),
+    ]);
+    const mat = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.85,
+      depthTest: true,
+    });
+    const line = new THREE.Line(geo, mat);
+    line.frustumCulled = false;
+    line.visible = false;
+    scene.add(line);
+    return line;
+  };
+  aimRayLine = mk(0x5ec8ff);   // cyan-ish sight
+  boreRayLine = mk(0xff9a4a); // amber bore / launch
+}
+
+function setRayEndpoints(line, a, b) {
+  const pos = line.geometry.attributes.position;
+  pos.setXYZ(0, a.x, a.y, a.z);
+  pos.setXYZ(1, b.x, b.y, b.z);
+  pos.needsUpdate = true;
+  line.geometry.computeBoundingSphere();
+}
+
+function updateAimBoreRays() {
+  if (!state.showAimRays || !muzzleSocket || !camera || !scene) {
+    if (aimRayLine) aimRayLine.visible = false;
+    if (boreRayLine) boreRayLine.visible = false;
+    return;
+  }
+  ensureAimBoreRays();
+  muzzleSocket.updateWorldMatrix(true, false);
+  muzzleSocket.getWorldPosition(_muzzleO);
+  getSightRay(_sightO, _sightD);
+  getBoreForward(_boreD);
+
+  const Z = Math.max(5, state.zeroDist || 100);
+  // Sight: camera → zero point
+  _zeroPt.copy(_sightO).addScaledVector(_sightD, Z);
+  setRayEndpoints(aimRayLine, _sightO, _zeroPt);
+  aimRayLine.visible = true;
+
+  // Bore/launch: muzzle → along fire dir for length Z (or natural bore if Policy A)
+  if (state.hobZero) {
+    const bal = ballisticForWeapon();
+    solveBallisticLaunchDir(_muzzleO, _zeroPt, bal.speed, bal.gravity, _launchD);
+  } else {
+    _launchD.copy(_sightD);
+  }
+  _tmpHob.copy(_muzzleO).addScaledVector(_launchD, Z);
+  setRayEndpoints(boreRayLine, _muzzleO, _tmpHob);
+  boreRayLine.visible = true;
+}
+
+function updateHobReadout() {
+  const node = el("hobReadout");
+  if (!node) return;
+  const hobM = computeHobMeters();
+  const cm = hobM * 100;
+  const mode = state.hobZero ? "HoB+zero" : "Policy A";
+  node.textContent = `HoB ${cm >= 0 ? "+" : ""}${cm.toFixed(1)} cm · ${mode} · Z=${state.zeroDist} m`;
+}
+
+function fireLaunchDirection(muzzlePos, outDir) {
+  if (!state.hobZero) {
+    camera.getWorldDirection(outDir);
+    outDir.normalize();
+    return;
+  }
+  getSightRay(_sightO, _sightD);
+  _zeroPt.copy(_sightO).addScaledVector(_sightD, Math.max(1, state.zeroDist || 100));
+  const bal = ballisticForWeapon();
+  solveBallisticLaunchDir(muzzlePos, _zeroPt, bal.speed, bal.gravity, outDir);
+}
+
 function fireWeapon() {
   if (!gameplayActive()) return;
   if (player.fireCooldown > 0) return;
@@ -1527,14 +1708,14 @@ function fireWeapon() {
   player.recoilRot.x -= 0.035 * kick;
   player.recoilRot.y += (Math.random() - 0.5) * 0.02 * kick;
 
-  // Policy A: spawn at muzzle, initial dir = camera aim; gravity integrates per frame
+  // HoB + ballistic zero (default): spawn at muzzle, launch so arc meets sight at Z.
+  // Policy A toggle: spawn at muzzle, initial dir = camera aim (hides HoB).
   if (!muzzleSocket || !camera) return;
   muzzleSocket.updateWorldMatrix(true, false);
   const origin = new THREE.Vector3();
   muzzleSocket.getWorldPosition(origin);
   const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  dir.normalize();
+  fireLaunchDirection(origin, dir);
   const bal = ballisticForWeapon();
   const vel = dir.clone().multiplyScalar(bal.speed);
 
@@ -1627,7 +1808,7 @@ function updatePlayer(dt) {
   else player.leanTarget = 0;
   player.leanAngle = lerp(player.leanAngle, player.leanTarget, 1 - Math.exp(-player.leanSpring * dt));
 
-  // Crouch (Ctrl hold or C toggle) — sticky toggle survives unlock
+  // Crouch (Z hold or C toggle) — sticky toggle survives unlock; no Ctrl (browser steals it)
   const crouching = input.crouchHold || state.crouchToggled;
   const eyeTarget = player.eyeHeight * (crouching ? player.crouchEyeMul : 1);
   player.eyeCurrent = lerp(player.eyeCurrent, eyeTarget, 1 - Math.exp(-12 * dt));
@@ -1719,6 +1900,8 @@ function updatePlayer(dt) {
   syncAdsSlider();
   applyHoldToScene();
   applySwayAndRecoil(dt, moving);
+  updateAimBoreRays();
+  updateHobReadout();
   updateTracers(dt);
   updateSilhouettes(dt);
   updateScorePopups(dt);
@@ -1826,7 +2009,7 @@ function updateHudHint() {
     hint.textContent = "";
     hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns`;
   } else {
-    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>C</kbd> crouch · Ctrl hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>C</kbd> crouch · <kbd>Z</kbd> hold crouch · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · RMB ADS · <kbd>Space</kbd> breath · LMB fire`;
   }
 }
 
@@ -1907,7 +2090,7 @@ function onKeyDown(e) {
     if (code === "KeyA") input.left = true;
     if (code === "KeyD") input.right = true;
     if (code === "ShiftLeft" || code === "ShiftRight") input.sprint = true;
-    if (code === "ControlLeft" || code === "ControlRight") {
+    if (code === "KeyZ") {
       input.crouchHold = true;
       e.preventDefault();
     }
@@ -1995,7 +2178,7 @@ function onKeyUp(e) {
   if (code === "KeyA") input.left = false;
   if (code === "KeyD") input.right = false;
   if (code === "ShiftLeft" || code === "ShiftRight") input.sprint = false;
-  if (code === "ControlLeft" || code === "ControlRight") input.crouchHold = false;
+  if (code === "KeyZ") input.crouchHold = false;
   if (code === "KeyQ") input.leanLeft = false;
   if (code === "KeyE") input.leanRight = false;
   if (code === "Space") input.holdBreath = false;
@@ -2103,6 +2286,37 @@ function bind() {
       state.swayEnabled = !state.swayEnabled;
       swayBtn.setAttribute("aria-pressed", state.swayEnabled ? "true" : "false");
       showToast(state.swayEnabled ? "Sway ON" : "Sway OFF (clean tuning)");
+    };
+  }
+  const zeroSel = el("zeroDistSelect");
+  if (zeroSel) {
+    zeroSel.value = String(state.zeroDist);
+    zeroSel.onchange = (e) => {
+      state.zeroDist = parseFloat(e.target.value) || 100;
+      updateHobReadout();
+      updateAimBoreRays();
+    };
+  }
+  const hobBtn = el("btnHobZero");
+  if (hobBtn) {
+    hobBtn.setAttribute("aria-pressed", state.hobZero ? "true" : "false");
+    hobBtn.onclick = () => {
+      state.hobZero = !state.hobZero;
+      hobBtn.setAttribute("aria-pressed", state.hobZero ? "true" : "false");
+      hobBtn.textContent = state.hobZero ? "HoB + zero" : "Idealized bore=aim";
+      showToast(state.hobZero ? "HoB + ballistic zero ON" : "Policy A: bore = camera aim");
+      updateHobReadout();
+      updateAimBoreRays();
+    };
+  }
+  const raysBtn = el("btnAimRays");
+  if (raysBtn) {
+    raysBtn.setAttribute("aria-pressed", state.showAimRays ? "true" : "false");
+    raysBtn.onclick = () => {
+      state.showAimRays = !state.showAimRays;
+      raysBtn.setAttribute("aria-pressed", state.showAimRays ? "true" : "false");
+      showToast(state.showAimRays ? "Aim/bore rays ON" : "Aim/bore rays OFF");
+      updateAimBoreRays();
     };
   }
   el("btnCopy").onclick = () => copyWeaponJson();

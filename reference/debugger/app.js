@@ -144,6 +144,8 @@ const BLOOM_THRESHOLD = 1.0;
 const BLOOM_KNEE = 0.22;
 /** Dual-filter pyramid depth (half / quarter / eighth). */
 const BLOOM_MIPS = 3;
+/** Settings default cloud cover (0 = clear). */
+const CLOUDS_DEFAULT = 0.55;
 /** Warm HDR lamp glass — pops under threshold without lifting the bay. */
 const FLOOD_LAMP_HDR = [3.15, 2.65, 1.78];
 
@@ -253,6 +255,8 @@ const state = {
   godRays: GOD_RAYS_DEFAULT,
   /** HDR bloom (0 = off, 2 = strong). Independent of god rays. */
   bloom: BLOOM_DEFAULT,
+  /** Procedural cloud cover (0 = clear). Stars follow the clock. */
+  clouds: CLOUDS_DEFAULT,
 };
 
 const LOOK_SENS_BASE = 0.0022;
@@ -1126,7 +1130,257 @@ function ensureSkyDiscs() {
     moonDisc.raycast = () => {};
     scene.add(moonDisc);
   }
+  ensureSkyDome();
 }
+
+/** Inverted sky sphere: ToD gradient, sun/moon halo, hashed stars, FBM clouds. */
+function ensureSkyDome() {
+  if (!scene || skyDome) return;
+  skyMat = new THREE.ShaderMaterial({
+    name: "ProceduralSky",
+    uniforms: {
+      sunDir: { value: new THREE.Vector3(0.35, 0.78, 0.4) },
+      moonDir: { value: new THREE.Vector3(-0.35, 0.78, -0.4) },
+      zenithColor: { value: new THREE.Color(0x101820) },
+      horizonColor: { value: new THREE.Color(SCENE_BG_BASE) },
+      twilightColor: { value: new THREE.Color(0xff9966) },
+      fogColor: { value: new THREE.Color(SCENE_BG_BASE) },
+      sunColor: { value: new THREE.Color(0xfff1dd) },
+      moonColor: { value: new THREE.Color(0xb8c8dc) },
+      cloudColor: { value: new THREE.Color(0xd8c8b4) },
+      sunHalo: { value: 1 },
+      moonHalo: { value: 0 },
+      starAmt: { value: 0 },
+      cloudAmt: { value: CLOUDS_DEFAULT },
+      twilightAmt: { value: 0.5 },
+      hazeAmt: { value: 0.7 },
+      skyTime: { value: 0 },
+    },
+    vertexShader: /* glsl */`
+      varying vec3 vWorldDir;
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+      void main() {
+        vec4 world = modelMatrix * vec4(position, 1.0);
+        vWorldDir = world.xyz - cameraPosition;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform vec3 sunDir;
+      uniform vec3 moonDir;
+      uniform vec3 zenithColor;
+      uniform vec3 horizonColor;
+      uniform vec3 twilightColor;
+      uniform vec3 fogColor;
+      uniform vec3 sunColor;
+      uniform vec3 moonColor;
+      uniform vec3 cloudColor;
+      uniform float sunHalo;
+      uniform float moonHalo;
+      uniform float starAmt;
+      uniform float cloudAmt;
+      uniform float twilightAmt;
+      uniform float hazeAmt;
+      uniform float skyTime;
+      varying vec3 vWorldDir;
+
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+
+      float hash13(vec3 p) {
+        p = fract(p * 0.1031);
+        p += dot(p, p.zyx + 33.33);
+        return fract((p.x + p.y) * p.z);
+      }
+
+      float vnoise(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        vec3 u = f * f * (3.0 - 2.0 * f);
+        float n000 = hash13(i);
+        float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
+        float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
+        float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
+        float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
+        float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
+        float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
+        float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
+        float nx00 = mix(n000, n100, u.x);
+        float nx10 = mix(n010, n110, u.x);
+        float nx01 = mix(n001, n101, u.x);
+        float nx11 = mix(n011, n111, u.x);
+        return mix(mix(nx00, nx10, u.y), mix(nx01, nx11, u.y), u.z);
+      }
+
+      float fbm(vec3 p) {
+        float v = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 6; i++) {
+          v += a * vnoise(p);
+          p = p * 2.07 + vec3(11.2, 4.7, 19.1);
+          a *= 0.5;
+        }
+        return v;
+      }
+
+      float starLayer(vec3 dir, float scale, float thresh, float time, float twSpeed) {
+        vec3 p = dir * scale;
+        vec3 i = floor(p);
+        vec3 f = fract(p) - 0.5;
+        float n = hash13(i);
+        if (n < thresh) return 0.0;
+        vec3 j = vec3(
+          hash13(i + vec3(1.7, 0.2, 4.1)),
+          hash13(i + vec3(3.1, 2.4, 0.8)),
+          hash13(i + vec3(0.3, 5.2, 1.9))
+        ) - 0.5;
+        float dist = length(f - j * 0.42);
+        float tw = 0.72 + 0.28 * sin(time * twSpeed + n * 41.0);
+        float mag = (n - thresh) / max(1e-4, 1.0 - thresh);
+        return smoothstep(0.038, 0.0, dist) * mag * tw;
+      }
+
+      void main() {
+        vec3 dir = normalize(vWorldDir);
+        float elev = dir.y;
+        float zenMix = smoothstep(-0.06, 0.72, elev);
+        zenMix = pow(clamp(zenMix, 0.0, 1.0), 0.82);
+        vec3 col = mix(horizonColor, zenithColor, zenMix);
+
+        float hBand = exp(-pow(elev / 0.13, 2.0));
+        vec3 sunAz = normalize(vec3(sunDir.x, 0.0, sunDir.z) + vec3(1e-5, 0.0, 0.0));
+        vec3 dirAz = normalize(vec3(dir.x, 0.0, dir.z) + vec3(1e-5, 0.0, 0.0));
+        float towardSun = clamp(dot(dirAz, sunAz) * 0.5 + 0.5, 0.0, 1.0);
+        float tw = hBand * twilightAmt * (0.28 + 0.72 * towardSun);
+        col = mix(col, twilightColor, tw);
+
+        float haze = exp(-pow(max(elev, 0.0) / 0.20, 2.0));
+        float below = smoothstep(0.04, -0.12, elev);
+        col = mix(col, fogColor, haze * hazeAmt);
+        col = mix(col, fogColor * 0.45, below * 0.85);
+
+        float mu = clamp(dot(dir, normalize(sunDir)), 0.0, 1.0);
+        float glow = pow(mu, 26.0);
+        float scatter = pow(mu, 5.5);
+        float limb = pow(mu, 8.0) * hBand;
+        col += sunColor * sunHalo * (glow * 2.2 + scatter * 0.38 + limb * 0.55);
+
+        float muM = clamp(dot(dir, normalize(moonDir)), 0.0, 1.0);
+        col += moonColor * moonHalo * (pow(muM, 48.0) * 0.85 + pow(muM, 10.0) * 0.16);
+
+        if (starAmt > 0.008 && elev > 0.018) {
+          float skyFade = smoothstep(0.018, 0.14, elev);
+          float s = starLayer(dir, 148.0, 0.9964, skyTime, 1.55);
+          s += starLayer(dir, 76.0, 0.9938, skyTime, 0.85) * 0.42;
+          s += starLayer(dir, 210.0, 0.9978, skyTime, 2.15) * 0.7;
+          col += vec3(0.82, 0.88, 1.0) * s * starAmt * skyFade;
+        }
+
+        if (cloudAmt > 0.004 && elev > -0.06) {
+          vec3 d1 = vec3(skyTime * 0.011, 0.0, skyTime * 0.0065);
+          vec3 d2 = vec3(-skyTime * 0.0058, skyTime * 0.0016, skyTime * 0.0038);
+          float n1 = fbm(dir * vec3(2.55, 0.92, 2.55) + d1);
+          float n2 = fbm(dir * vec3(4.35, 1.45, 4.35) + vec3(17.0, 9.0, 4.0) + d2);
+          float cloud = n1 * 0.64 + n2 * 0.36;
+          cloud = smoothstep(0.40, 0.74, cloud);
+          float band = smoothstep(-0.03, 0.13, elev) * smoothstep(0.94, 0.40, elev);
+          cloud *= cloudAmt * band;
+          vec3 ccol = cloudColor;
+          ccol = mix(ccol, twilightColor, twilightAmt * 0.5 * (0.4 + 0.6 * towardSun));
+          float shade = 0.72 + 0.28 * n2;
+          col = mix(col, ccol * shade, cloud * 0.78);
+        }
+
+        gl_FragColor = vec4(col, 1.0);
+        #include <logdepthbuf_fragment>
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+    side: THREE.BackSide,
+    depthTest: false,
+    depthWrite: false,
+    fog: false,
+    lights: false,
+    toneMapped: true,
+  });
+  skyDome = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 32), skyMat);
+  skyDome.scale.setScalar(90);
+  skyDome.renderOrder = -20;
+  skyDome.frustumCulled = false;
+  skyDome.castShadow = false;
+  skyDome.receiveShadow = false;
+  skyDome.raycast = () => {};
+  scene.add(skyDome);
+}
+
+function syncSkyUniforms(pal, path) {
+  if (!skyMat) return;
+  const u = skyMat.uniforms;
+  const elDeg = path.elevDeg;
+  const night = clamp((0.10 - (pal.sunI || 0)) / 0.10, 0, 1);
+  const day = 1 - night;
+  const twilight = smooth01(clamp((22 - Math.abs(elDeg)) / 18, 0, 1)) * (elDeg > -8 ? 1 : clamp((elDeg + 14) / 6, 0, 1));
+
+  const zen = pal.sky.clone().lerp(pal.hemiSky, lerp(0.20, 0.035, night));
+  if (night > 0.5) zen.multiplyScalar(lerp(1, 0.12, (night - 0.5) * 2));
+  u.zenithColor.value.copy(zen);
+  u.horizonColor.value.copy(pal.sky);
+  const twc = pal.sun.clone().lerp(new THREE.Color(0xff7a4a), 0.45);
+  twc.lerp(new THREE.Color(0xffc8a0), 0.25);
+  u.twilightColor.value.copy(twc);
+  if (scene.fog && scene.fog.color) u.fogColor.value.copy(scene.fog.color);
+  else u.fogColor.value.copy(pal.sky);
+  u.sunColor.value.copy(pal.sun);
+  u.moonColor.value.setHex(0xb8c8dc);
+
+  const cloudDay = new THREE.Color(0xe8e4dc);
+  const cloudDusk = new THREE.Color(0xf0b080);
+  const cloudNight = new THREE.Color(0x0a0c10);
+  const cc = cloudDay.clone().lerp(cloudDusk, twilight * 0.85).lerp(cloudNight, night * 0.92);
+  u.cloudColor.value.copy(cc);
+
+  u.sunDir.value.copy(_keySunDir);
+  _moonDir.copy(_keySunDir).multiplyScalar(-1);
+  if (_moonDir.y < 0.18) {
+    _moonDir.y = 0.18;
+    _moonDir.normalize();
+  }
+  u.moonDir.value.copy(_moonDir);
+
+  u.sunHalo.value = clamp((elDeg + 5.5) / 11, 0, 1);
+  u.moonHalo.value = (pal.moonI > 0.04 && elDeg < 8) ? clamp(pal.moonI * 3.2, 0.2, 1) : 0;
+  u.starAmt.value = night * clamp((-elDeg + 2) / 10, 0, 1);
+  u.cloudAmt.value = state.clouds ?? CLOUDS_DEFAULT;
+  u.twilightAmt.value = twilight * day + twilight * 0.25;
+  u.hazeAmt.value = state.fogEnabled ? 0.74 : 0.22;
+}
+
+function skyFollowRadius() {
+  const far = (camera && camera.far) || 520;
+  return Math.max(28, Math.min(220, far * 0.42));
+}
+
+function updateSkyDome(dt) {
+  if (!skyDome || !camera) return;
+  camera.getWorldPosition(_skyCamPos);
+  skyDome.position.copy(_skyCamPos);
+  const R = skyFollowRadius();
+  skyDome.scale.setScalar(Math.max(20, R * 0.55));
+  if (skyMat) skyMat.uniforms.skyTime.value += dt;
+  const discScale = R / SKY_DISC_R;
+  if (sunDisc && sunDisc.visible) {
+    sunDisc.position.copy(_skyCamPos).addScaledVector(_keySunDir, R);
+    sunDisc.scale.setScalar(discScale);
+  }
+  if (moonDisc && moonDisc.visible) {
+    moonDisc.position.copy(_skyCamPos).addScaledVector(_moonDir, R);
+    moonDisc.scale.setScalar(discScale);
+  }
+}
+
 
 /** Place the sun shadow ortho camera on the player XZ (floor Y). Direction from ToD sun path. */
 function updateKeyLightShadow() {
@@ -1196,13 +1450,10 @@ function applyTimeOfDay() {
     moonLight.userData.todBase = pal.moonI;
   }
   ensureSkyDiscs();
-  const skyR = 210;
   if (sunDisc) {
     const up = path.elevDeg > -1.5;
     sunDisc.visible = up;
     if (up) {
-      const s = Math.max(0.15, Math.cos(elRad));
-      sunDisc.position.set(Math.sin(azRad) * cosE * skyR, Math.sin(elRad) * skyR, Math.cos(azRad) * cosE * skyR);
       sunDisc.material.color.copy(pal.sun);
       sunDisc.material.color.multiplyScalar(4.2);
     }
@@ -1211,7 +1462,6 @@ function applyTimeOfDay() {
     const show = pal.moonI > 0.04 && path.elevDeg < 8;
     moonDisc.visible = show;
     if (show) {
-      moonDisc.position.set(-Math.sin(azRad) * cosE * skyR, 48, -Math.cos(azRad) * cosE * skyR);
       moonDisc.material.opacity = clamp(pal.moonI * 2.8, 0.16, 0.5);
     }
   }
@@ -1261,6 +1511,8 @@ function applyDisplayLook() {
     else scene.background = sky.clone();
   }
   applyFog();
+  syncSkyUniforms(pal, sunPath(state.timeOfDay));
+  updateSkyDome(0);
 
   if (renderer) {
     const exp = pal && pal.exp != null ? pal.exp : 1;
@@ -1346,6 +1598,22 @@ function setBloom(v, { toast = false } = {}) {
   state.bloom = Number.isFinite(n) ? n : BLOOM_DEFAULT;
   syncBloomUI();
   if (toast) showToast(`Bloom ${state.bloom.toFixed(2)}`);
+}
+
+function syncCloudsUI() {
+  const n = state.clouds ?? CLOUDS_DEFAULT;
+  const slider = el("cloudsSlider");
+  const val = el("cloudsVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2);
+}
+
+function setClouds(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, 1);
+  state.clouds = Number.isFinite(n) ? n : CLOUDS_DEFAULT;
+  if (skyMat) skyMat.uniforms.cloudAmt.value = state.clouds;
+  syncCloudsUI();
+  if (toast) showToast(`Clouds ${state.clouds.toFixed(2)}`);
 }
 
 function setLightMul(key, v, { toast = false } = {}) {
@@ -1460,6 +1728,7 @@ function syncSettingsUI() {
 
   syncGodRaysUI();
   syncBloomUI();
+  syncCloudsUI();
   syncFxSettingsUI();
 }
 
@@ -1722,6 +1991,12 @@ let hdrBloom = null;
 let hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight;
 let sunDisc = null;
 let moonDisc = null;
+/** Fullscreen-ish sky dome (gradient, halo, stars, FBM clouds). Follows the camera. */
+let skyDome = null;
+let skyMat = null;
+const _skyCamPos = new THREE.Vector3();
+const _moonDir = new THREE.Vector3(0, 1, 0);
+const SKY_DISC_R = 180;
 /** Side-bay flood SpotLights (+ fake floor pools) so the long lane reads at night. */
 let floodLights = [];
 /** Fixture records: lamp/head hit, pool meshes, shot-out flag. */
@@ -7347,6 +7622,7 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   updatePlayer(dt);
   updateKeyLightShadow();
+  updateSkyDome(dt);
   renderScene();
 }
 
@@ -7836,6 +8112,13 @@ function bind() {
     bloomSlider.oninput = (e) => setBloom(e.target.value);
   }
   syncBloomUI();
+
+  const cloudsSlider = el("cloudsSlider");
+  if (cloudsSlider) {
+    cloudsSlider.value = String(state.clouds);
+    cloudsSlider.oninput = (e) => setClouds(e.target.value);
+  }
+  syncCloudsUI();
 
   Object.keys(LIGHT_MUL_UI).forEach((key) => {
     const meta = LIGHT_MUL_UI[key];

@@ -296,7 +296,11 @@
           <input type="range" id="todSlider" min="0" max="24" step="0.05" value="18.5" />
           <code id="todVal">18:30</code>
         </label>
-        <p class="note">Scene sun, sky, and fog. Display brightness/gamma stay as grade. Default evening keeps the dusk range; night makes the floods matter. Intensity sliders multiply the current clock (1.00 = authored ToD).</p>
+        <label class="slider-row">Clouds
+          <input type="range" id="cloudsSlider" min="0" max="1" step="0.01" value="0.55" />
+          <code id="cloudsVal">0.55</code>
+        </label>
+        <p class="note">Scene sun, sky, and fog. Display brightness/gamma stay as grade. Default evening keeps the dusk range; night stays dark (stars, not a washed navy). Clouds 0 = clear. Stars follow the clock. Intensity sliders multiply the current clock (1.00 = authored ToD).</p>
         <label class="slider-row">Ambient intensity
           <input type="range" id="lightAmbSlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="lightAmbVal">1.00×</code>
@@ -410,7 +414,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / reset-targets button (weapons + optics; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + intensities + god rays + bloom) · Fog near/far · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + god rays + bloom) · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -418,6 +422,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v16"></script>
+    <script type="module" src="app.js?v=20260824v17"></script>
 </body>
 </html>

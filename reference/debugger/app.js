@@ -732,16 +732,17 @@ function clearGroundRangeLines() {
 function buildGroundRangeLines(zs) {
   clearGroundRangeLines();
   // Floor y = -1.4, strip = -1.385, grid = -1.39 — sit just above to avoid z-fight.
-  const y = -1.34;
+  const y = -1.335;
   const width = 10.8; // between side rails at ±5.5
-  const depth = 0.05;
+  const depth = 0.07;
   for (const z of zs) {
+    // Soft chalk body
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(width, depth),
       new THREE.MeshBasicMaterial({
-        color: 0xb8a88c,
+        color: 0xd4c4a4,
         transparent: true,
-        opacity: 0.34,
+        opacity: 0.48,
         depthWrite: false,
         side: THREE.DoubleSide,
       })
@@ -751,7 +752,185 @@ function buildGroundRangeLines(zs) {
     mesh.renderOrder = 1;
     scene.add(mesh);
     groundRangeLines.push(mesh);
+    // Thin brighter core so distance marks read at a glance without shouting
+    const core = new THREE.Mesh(
+      new THREE.PlaneGeometry(width * 0.92, depth * 0.28),
+      new THREE.MeshBasicMaterial({
+        color: 0xe8dcc4,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+    );
+    core.rotation.x = -Math.PI / 2;
+    core.position.set(0, y + 0.001, z);
+    core.renderOrder = 2;
+    scene.add(core);
+    groundRangeLines.push(core);
   }
+}
+
+
+/** Procedural CanvasTexture — no external downloads. */
+function makeCanvasTexture(draw, size = 256, opts = {}) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  draw(ctx, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  if (opts.repeat) tex.repeat.set(opts.repeat[0], opts.repeat[1]);
+  return tex;
+}
+
+function makeDirtConcreteTexture(repeatX = 8, repeatZ = 40) {
+  return makeCanvasTexture((ctx, size) => {
+    const g = ctx.createLinearGradient(0, 0, size, size);
+    g.addColorStop(0, "#1c222c");
+    g.addColorStop(0.45, "#232a36");
+    g.addColorStop(1, "#1a1f28");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+    // Speckle / wear
+    for (let i = 0; i < 1800; i++) {
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      const a = 0.04 + Math.random() * 0.12;
+      const v = 40 + Math.floor(Math.random() * 90);
+      ctx.fillStyle = `rgba(${v},${v + 4},${v + 10},${a})`;
+      ctx.fillRect(x, y, 1 + Math.random() * 2.5, 1 + Math.random() * 2.5);
+    }
+    // Faint cracks / scrape lines
+    ctx.strokeStyle = "rgba(70,78,92,0.18)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 18; i++) {
+      ctx.beginPath();
+      ctx.moveTo(Math.random() * size, Math.random() * size);
+      ctx.lineTo(Math.random() * size, Math.random() * size);
+      ctx.stroke();
+    }
+    // Soft grid suggestion
+    ctx.strokeStyle = "rgba(55,64,80,0.22)";
+    ctx.lineWidth = 1;
+    const step = size / 8;
+    for (let i = 0; i <= 8; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * step, 0);
+      ctx.lineTo(i * step, size);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * step);
+      ctx.lineTo(size, i * step);
+      ctx.stroke();
+    }
+  }, 256, { repeat: [repeatX, repeatZ] });
+}
+
+function makeLaneStripTexture() {
+  return makeCanvasTexture((ctx, size) => {
+    ctx.fillStyle = "#171b24";
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 1400; i++) {
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      const v = 28 + Math.floor(Math.random() * 50);
+      ctx.fillStyle = `rgba(${v},${v + 2},${v + 8},${0.05 + Math.random() * 0.1})`;
+      ctx.fillRect(x, y, 1 + Math.random() * 2, 1 + Math.random() * 2);
+    }
+    // Worn tire / footpath streaks along length (Y in UV)
+    ctx.strokeStyle = "rgba(90,98,112,0.08)";
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 6; i++) {
+      const x = 30 + i * 36 + Math.random() * 8;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + (Math.random() - 0.5) * 10, size);
+      ctx.stroke();
+    }
+  }, 256, { repeat: [3, 50] });
+}
+
+function makeWoodTexture() {
+  return makeCanvasTexture((ctx, size) => {
+    ctx.fillStyle = "#5a4634";
+    ctx.fillRect(0, 0, size, size);
+    for (let y = 0; y < size; y += 3) {
+      const shade = 70 + ((y * 17) % 40);
+      ctx.fillStyle = `rgba(${shade},${shade - 18},${shade - 36},0.35)`;
+      ctx.fillRect(0, y, size, 2);
+    }
+    for (let i = 0; i < 40; i++) {
+      ctx.strokeStyle = `rgba(40,28,18,${0.08 + Math.random() * 0.12})`;
+      ctx.beginPath();
+      ctx.moveTo(0, Math.random() * size);
+      ctx.bezierCurveTo(size * 0.3, Math.random() * size, size * 0.7, Math.random() * size, size, Math.random() * size);
+      ctx.stroke();
+    }
+  }, 128, { repeat: [2, 1] });
+}
+
+function makeBermTexture() {
+  return makeCanvasTexture((ctx, size) => {
+    const g = ctx.createLinearGradient(0, 0, 0, size);
+    g.addColorStop(0, "#3a3228");
+    g.addColorStop(0.5, "#2e2820");
+    g.addColorStop(1, "#241e18");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 2200; i++) {
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      const r = 55 + Math.floor(Math.random() * 45);
+      const grn = r - 12 - Math.floor(Math.random() * 10);
+      const b = r - 28;
+      ctx.fillStyle = `rgba(${r},${grn},${b},${0.08 + Math.random() * 0.18})`;
+      ctx.beginPath();
+      ctx.arc(x, y, 0.6 + Math.random() * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, 256, { repeat: [4, 1] });
+}
+
+function makeCrate(w, h, d, x, y, z, rotY = 0) {
+  const woodTex = makeWoodTexture();
+  const mat = new THREE.MeshStandardMaterial({
+    map: woodTex,
+    color: 0xbca890,
+    roughness: 0.85,
+    metalness: 0.05,
+  });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  mesh.position.set(x, y, z);
+  mesh.rotation.y = rotY;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  // Band straps
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0x3a342c, roughness: 0.7, metalness: 0.25 });
+  const band1 = new THREE.Mesh(new THREE.BoxGeometry(w * 1.02, h * 0.08, d * 1.02), bandMat);
+  band1.position.y = h * 0.15;
+  const band2 = band1.clone();
+  band2.position.y = -h * 0.18;
+  mesh.add(band1, band2);
+  return mesh;
+}
+
+function makeBarrel(r, h, x, y, z, color = 0x3d4a3a) {
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.35 });
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.02, h, 16), mat);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(r * 0.92, 0.025, 8, 20),
+    new THREE.MeshStandardMaterial({ color: 0x2a3038, roughness: 0.5, metalness: 0.5 })
+  );
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = h * 0.42;
+  mesh.add(rim);
+  return mesh;
 }
 
 function makeBox(w, h, d, color, x, y, z) {
@@ -969,7 +1148,13 @@ function updateOpticVisibility() {
 }
 
 function buildRoom() {
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1e28, roughness: 0.9 });
+  const floorTex = makeDirtConcreteTexture(6, 50);
+  const floorMat = new THREE.MeshStandardMaterial({
+    map: floorTex,
+    color: 0xc8d0dc,
+    roughness: 0.92,
+    metalness: 0.04,
+  });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 450), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -1.4;
@@ -977,26 +1162,59 @@ function buildRoom() {
   floor.receiveShadow = true;
   scene.add(floor);
 
-  const grid = new THREE.GridHelper(40, 80, 0x3a4560, 0x252b38);
+  // Soft reference grid — quieter than before so texture can read
+  const grid = new THREE.GridHelper(40, 80, 0x2e3848, 0x1c222c);
   grid.position.y = -1.39;
   grid.position.z = -200;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.35;
   scene.add(grid);
 
-
+  // Low side walls / bay dividers for scale (outside the ±5.5 rails)
+  const wallMat = new THREE.MeshStandardMaterial({
+    map: makeDirtConcreteTexture(2, 30),
+    color: 0x9aa6b4,
+    roughness: 0.9,
+    metalness: 0.05,
+  });
+  for (const side of [-12, 12]) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 420), wallMat.clone());
+    wall.position.set(side, -0.2, -200);
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    scene.add(wall);
+  }
 
   buildOpticsTable();
+  buildRangeProps();
   buildShootingRange();
 }
 
 function buildOpticsTable() {
   const tableY = -0.85;
   const tableZ = -1.6;
-  const top = makeBox(1.6, 0.06, 0.55, 0x5a4634, 0, tableY, tableZ);
-  const legL = makeBox(0.06, 0.55, 0.06, 0x3a2e22, -0.7, tableY - 0.3, tableZ - 0.2);
-  const legR = makeBox(0.06, 0.55, 0.06, 0x3a2e22, 0.7, tableY - 0.3, tableZ - 0.2);
-  const legL2 = makeBox(0.06, 0.55, 0.06, 0x3a2e22, -0.7, tableY - 0.3, tableZ + 0.2);
-  const legR2 = makeBox(0.06, 0.55, 0.06, 0x3a2e22, 0.7, tableY - 0.3, tableZ + 0.2);
-  scene.add(top, legL, legR, legL2, legR2);
+  const woodTex = makeWoodTexture();
+  const topMat = new THREE.MeshStandardMaterial({
+    map: woodTex,
+    color: 0xc4a882,
+    roughness: 0.72,
+    metalness: 0.04,
+  });
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.055, 0.58), topMat);
+  top.position.set(0, tableY, tableZ);
+  top.castShadow = true;
+  top.receiveShadow = true;
+  // Subtle edge lip / apron
+  const apron = makeBox(1.68, 0.05, 0.04, 0x3a2e22, 0, tableY - 0.04, tableZ + 0.27);
+  const apronB = makeBox(1.68, 0.05, 0.04, 0x3a2e22, 0, tableY - 0.04, tableZ - 0.27);
+  const legMat = 0x2e241c;
+  const legL = makeBox(0.07, 0.55, 0.07, legMat, -0.72, tableY - 0.3, tableZ - 0.22);
+  const legR = makeBox(0.07, 0.55, 0.07, legMat, 0.72, tableY - 0.3, tableZ - 0.22);
+  const legL2 = makeBox(0.07, 0.55, 0.07, legMat, -0.72, tableY - 0.3, tableZ + 0.22);
+  const legR2 = makeBox(0.07, 0.55, 0.07, legMat, 0.72, tableY - 0.3, tableZ + 0.22);
+  // Small shelf under top for depth
+  const shelf = makeBox(1.4, 0.03, 0.4, 0x4a3a2c, 0, tableY - 0.28, tableZ);
+  scene.add(top, apron, apronB, legL, legR, legL2, legR2, shelf);
 
   const defs = [
     { id: "iron", label: "Iron", x: -0.55 },
@@ -1041,16 +1259,26 @@ function buildShootingRange() {
   const fl = el("floatLabels");
   if (fl) fl.innerHTML = "";
 
+  const stripTex = makeLaneStripTexture();
   const strip = new THREE.Mesh(
     new THREE.PlaneGeometry(18, 420),
-    new THREE.MeshStandardMaterial({ color: 0x161a22, roughness: 0.95 })
+    new THREE.MeshStandardMaterial({
+      map: stripTex,
+      color: 0xa8b0bc,
+      roughness: 0.94,
+      metalness: 0.03,
+    })
   );
   strip.rotation.x = -Math.PI / 2;
   strip.position.set(0, -1.385, -200);
+  strip.receiveShadow = true;
   scene.add(strip);
 
   for (const side of [-5.5, 5.5]) {
-    scene.add(makeBox(0.08, 0.12, 400, 0x2a3140, side, -1.3, -200));
+    const rail = makeBox(0.1, 0.14, 400, 0x343c4c, side, -1.3, -200);
+    rail.material.roughness = 0.8;
+    rail.material.metalness = 0.2;
+    scene.add(rail);
   }
 
   // Nominal circular-lane distances as thin floor markers (lines only, no text).
@@ -1125,8 +1353,82 @@ function buildShootingRange() {
   });
 
   buildSilhouetteLane();
+  buildBackBerm();
+}
 
-  scene.add(makeBox(20, 4.5, 0.6, 0x2a2030, 0, 0.5, -410));
+/** Earthen backstop berm ~400m — layered dirt/rock silhouette for distance read. */
+function buildBackBerm() {
+  const bermTex = makeBermTexture();
+  const dirtMat = new THREE.MeshStandardMaterial({
+    map: bermTex,
+    color: 0xb8a890,
+    roughness: 0.95,
+    metalness: 0.02,
+  });
+  const darkMat = new THREE.MeshStandardMaterial({
+    color: 0x2a241c,
+    roughness: 0.96,
+    metalness: 0.02,
+  });
+  // Main mound
+  const main = new THREE.Mesh(new THREE.BoxGeometry(28, 5.2, 3.2), dirtMat);
+  main.position.set(0, 0.7, -410);
+  main.castShadow = true;
+  main.receiveShadow = true;
+  scene.add(main);
+  // Front slope / face toward shooter
+  const face = new THREE.Mesh(new THREE.BoxGeometry(26, 3.6, 2.4), dirtMat.clone());
+  face.position.set(0, -0.15, -407.2);
+  face.rotation.x = -0.35;
+  face.castShadow = true;
+  face.receiveShadow = true;
+  scene.add(face);
+  // Crest / uneven top chunks
+  for (const [x, y, z, w, h, d] of [
+    [-8, 3.2, -410.5, 6, 1.4, 2.2],
+    [-2, 3.5, -409.8, 5, 1.8, 2.5],
+    [5, 3.1, -410.2, 7, 1.3, 2.0],
+    [10, 2.9, -411, 5, 1.1, 1.8],
+  ]) {
+    const chunk = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), darkMat.clone());
+    chunk.position.set(x, y, z);
+    chunk.rotation.y = (x % 3) * 0.05;
+    chunk.castShadow = true;
+    chunk.receiveShadow = true;
+    scene.add(chunk);
+  }
+  // Flanking dirt piles
+  for (const side of [-14, 14]) {
+    const pile = new THREE.Mesh(new THREE.BoxGeometry(6, 3.2, 4), dirtMat.clone());
+    pile.position.set(side, 0.1, -408);
+    pile.castShadow = true;
+    pile.receiveShadow = true;
+    scene.add(pile);
+  }
+}
+
+/** Side-bay crates / barrels for depth — kept clear of the firing lane. */
+function buildRangeProps() {
+  const placements = [
+    // near bay / optics area
+    () => scene.add(makeCrate(0.55, 0.45, 0.5, -7.2, -1.15, -4.5, 0.2)),
+    () => scene.add(makeCrate(0.4, 0.35, 0.4, -7.5, -1.2, -3.8, -0.4)),
+    () => scene.add(makeBarrel(0.22, 0.7, -6.6, -1.05, -5.8, 0x3a4a3c)),
+    () => scene.add(makeCrate(0.5, 0.4, 0.48, 7.4, -1.18, -3.5, -0.25)),
+    () => scene.add(makeBarrel(0.2, 0.65, 6.8, -1.07, -4.8, 0x4a3a2e)),
+    () => scene.add(makeBarrel(0.22, 0.72, 7.6, -1.04, -5.2, 0x3d4550)),
+    // mid-range side silhouettes
+    () => scene.add(makeCrate(0.6, 0.5, 0.55, -7.8, -1.12, -48, 0.15)),
+    () => scene.add(makeBarrel(0.24, 0.8, -7.1, -1.0, -52, 0x454e3a)),
+    () => scene.add(makeCrate(0.45, 0.38, 0.42, 7.5, -1.18, -70, -0.3)),
+    () => scene.add(makeBarrel(0.22, 0.7, 8.0, -1.05, -95, 0x3a4048)),
+    () => scene.add(makeCrate(0.7, 0.55, 0.6, -8.0, -1.1, -140, 0.4)),
+    () => scene.add(makeBarrel(0.25, 0.85, 7.8, -0.98, -180, 0x4a4034)),
+    () => scene.add(makeCrate(0.5, 0.42, 0.48, 7.2, -1.16, -220, -0.2)),
+    () => scene.add(makeCrate(0.55, 0.48, 0.5, -7.6, -1.14, -280, 0.1)),
+    () => scene.add(makeBarrel(0.23, 0.75, 7.4, -1.02, -320, 0x384438)),
+  ];
+  for (const place of placements) place();
 }
 
 
@@ -1446,10 +1748,14 @@ function initThree() {
   const canvas = el("view3d");
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setClearColor(0x0a0c10, 1);
+  renderer.setClearColor(0x141820, 1);
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x141820);
+  // Subtle distance fog so ~400m berm reads as far without crushing mid-lane contrast
+  scene.fog = new THREE.Fog(0x141820, 90, 430);
   camera = new THREE.PerspectiveCamera(player.fovHip, 1, 0.01, 500);
 
   playerRoot = new THREE.Group();
@@ -1458,15 +1764,30 @@ function initThree() {
   leanPivot.add(camera);
   scene.add(playerRoot);
 
-  const amb = new THREE.AmbientLight(0x8899aa, 0.55);
+  const hemi = new THREE.HemisphereLight(0xc2d0e0, 0x3a3428, 0.62);
+  scene.add(hemi);
+  const amb = new THREE.AmbientLight(0x6a7888, 0.2);
   scene.add(amb);
-  const key = new THREE.DirectionalLight(0xffffff, 0.85);
-  key.position.set(2, 4, 1);
+  const key = new THREE.DirectionalLight(0xfff1dd, 1.05);
+  key.position.set(10, 22, 8);
   key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024);
+  key.shadow.camera.near = 2;
+  key.shadow.camera.far = 90;
+  key.shadow.camera.left = -24;
+  key.shadow.camera.right = 24;
+  key.shadow.camera.top = 24;
+  key.shadow.camera.bottom = -24;
+  key.shadow.bias = -0.0004;
+  key.shadow.normalBias = 0.02;
+  key.shadow.radius = 3.5;
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0x6688cc, 0.25);
-  fill.position.set(-2, 1, 2);
+  const fill = new THREE.DirectionalLight(0x7a9ccc, 0.38);
+  fill.position.set(-8, 10, -2);
   scene.add(fill);
+  const rim = new THREE.DirectionalLight(0x556677, 0.18);
+  rim.position.set(0, 8, -30);
+  scene.add(rim);
 
   holdRoot = new THREE.Group();
   camera.add(holdRoot);

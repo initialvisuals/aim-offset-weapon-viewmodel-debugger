@@ -63,7 +63,7 @@
     <div class="score-hud" id="scoreHud">Score 0</div>
     <div class="ammo-hud" id="ammoHud" aria-live="polite">30/30 · ∞</div>
     <div class="game-style-badge" id="gameStyleBadge" aria-live="polite">SIM</div>
-    <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · table button resets</div>
+    <div class="sil-legend" id="silLegend">Silhouette: head / chest×3 / pelvis · berm popups · table resets</div>
     <div id="floatLabels" class="float-labels" aria-hidden="true"></div>
     <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>F</kbd> bench pickup · <kbd>R</kbd> reload · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height</div>
 
@@ -166,7 +166,7 @@
                 <li><kbd>R</kbd> reload mag · <kbd>F</kbd> bench pickup / table reset button</li>
                 <li>Click canvas = mouse look</li>
                 <li>Optics table = <kbd>F</kbd>/click attach (SMG: holo/acog · Rifle: sniper · illegal = toast)</li>
-                <li>Weapons bench = <kbd>F</kbd>/click equip Example SMG / Rifle · red <strong>RESET TARGETS</strong> button clears paper holes + stands silhouettes</li>
+                <li>Weapons bench = <kbd>F</kbd>/click equip Example SMG / Rifle · red <strong>RESET TARGETS</strong> button clears paper holes, stands silhouettes, drops berm popups, restores floods</li>
                 <li><kbd>Insert</kbd> ADS preview · Sway toggle in header</li>
                 <li><kbd>End</kbd> cycle pose</li>
                 <li><kbd>↑</kbd><kbd>↓</kbd> select axis · <kbd>←</kbd><kbd>→</kbd> nudge</li>
@@ -267,6 +267,15 @@
       </div>
 
       <div class="settings-section">
+        <h3>Time of day</h3>
+        <label class="slider-row">Clock
+          <input type="range" id="todSlider" min="0" max="24" step="0.05" value="18.5" />
+          <code id="todVal">18:30</code>
+        </label>
+        <p class="note">Scene sun, sky, and fog. Display brightness/gamma stay as grade. Default evening keeps the dusk range; night makes the floods matter.</p>
+      </div>
+
+      <div class="settings-section">
         <h3>Fog</h3>
         <label class="check-row"><input type="checkbox" id="chkFog" checked /> Fog enabled</label>
         <label class="slider-row">Near
@@ -339,7 +348,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> Arcade/Sim</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / reset-targets button (weapons + optics; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · Fog near/far · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · Time of day · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -347,6 +356,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v1"></script>
+    <script type="module" src="app.js?v=20260824v2"></script>
 </body>
 </html>

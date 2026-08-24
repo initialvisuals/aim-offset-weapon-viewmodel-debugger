@@ -170,6 +170,8 @@ const state = {
   fogFar: 520,
   /** Overlay Black/Low/Mid/High/White strip on viewport corner. */
   showPluge: false,
+  /** Hours 0–24. Default evening matches the dusk range look. */
+  timeOfDay: 18.5,
 };
 
 const LOOK_SENS_BASE = 0.0022;
@@ -478,6 +480,40 @@ const sfx = {
       cg.connect(c.destination);
       click.start(now);
       click.stop(now + 0.03);
+      return;
+    }
+
+    if (kind === "glass") {
+      // Cheap bulb pop — high noise + two tinkle tones.
+      out.gain.setValueAtTime(0.0001, now);
+      out.gain.exponentialRampToValueAtTime(0.28, now + 0.003);
+      out.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+      const noise = c.createBufferSource();
+      noise.buffer = this.noiseBuffer(0.08);
+      const bp = c.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 4200;
+      bp.Q.value = 0.9;
+      noise.connect(bp);
+      bp.connect(out);
+      noise.start(now);
+      noise.stop(now + 0.08);
+      const tinkle = (freq, delay, dur) => {
+        const osc = c.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + delay);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.55, now + delay + dur);
+        const g = c.createGain();
+        g.gain.setValueAtTime(0.0001, now + delay);
+        g.gain.exponentialRampToValueAtTime(0.16, now + delay + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + delay + dur);
+        osc.connect(g);
+        g.connect(c.destination);
+        osc.start(now + delay);
+        osc.stop(now + delay + dur + 0.02);
+      };
+      tinkle(2480, 0, 0.14);
+      tinkle(3720, 0.018, 0.12);
     }
   },
 };
@@ -706,6 +742,192 @@ function setFogFar(v, { toast = false } = {}) {
   if (toast) showToast(`Fog far ${Math.round(state.fogFar)}`);
 }
 
+function wrapHour(h) {
+  const x = Number(h);
+  if (!Number.isFinite(x)) return TOD_DEFAULT;
+  let v = x % 24;
+  if (v < 0) v += 24;
+  return v;
+}
+
+function formatClock(h) {
+  const x = wrapHour(h);
+  let hh = Math.floor(x + 1e-8);
+  let mm = Math.round((x - hh) * 60);
+  if (mm >= 60) { mm = 0; hh += 1; }
+  if (hh >= 24) hh = 0;
+  return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+}
+
+/** Keyframed scene lighting. 18:30 matches the previous dusk range (SCENE_BG_BASE / warm key). */
+const TOD_KEYS = [
+  { h: 0, sky: 0x070b12, hemiSky: 0x1c2838, hemiGnd: 0x12100c, amb: 0x1a222c, sun: 0x1a2430, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.16, ambI: 0.09, fillI: 0.08, rimI: 0.05, moonI: 0.15 },
+  { h: 5.2, sky: 0x14101e, hemiSky: 0x3a3050, hemiGnd: 0x1a1410, amb: 0x2a2438, sun: 0xff8860, fill: 0x7a90b8, rim: 0x3a3048, sunI: 0, hemiI: 0.22, ambI: 0.12, fillI: 0.12, rimI: 0.08, moonI: 0.10 },
+  { h: 6.4, sky: 0x5a6a88, hemiSky: 0xffd0b0, hemiGnd: 0x5a4030, amb: 0xc09070, sun: 0xffb080, fill: 0x8aa0c8, rim: 0x6a5870, sunI: 0.42, hemiI: 0.48, ambI: 0.22, fillI: 0.28, rimI: 0.16, moonI: 0.02 },
+  { h: 9.0, sky: 0x7a96b0, hemiSky: 0xe8f0f8, hemiGnd: 0x6a6050, amb: 0xc0c8d0, sun: 0xffeed8, fill: 0x90a8c8, rim: 0x6a7888, sunI: 0.88, hemiI: 0.82, ambI: 0.34, fillI: 0.42, rimI: 0.22, moonI: 0 },
+  { h: 12.0, sky: 0x8aa6b8, hemiSky: 0xf2f6fa, hemiGnd: 0x7a7468, amb: 0xd0d6dc, sun: 0xf4f1e6, fill: 0x9ab0cc, rim: 0x788898, sunI: 1.02, hemiI: 0.90, ambI: 0.36, fillI: 0.46, rimI: 0.24, moonI: 0 },
+  { h: 16.0, sky: 0x6a8498, hemiSky: 0xe4d8c8, hemiGnd: 0x6a5848, amb: 0xc8b8a8, sun: 0xffe2c0, fill: 0x88a0c0, rim: 0x667888, sunI: 0.92, hemiI: 0.80, ambI: 0.32, fillI: 0.44, rimI: 0.24, moonI: 0 },
+  { h: 18.5, sky: 0x1c2430, hemiSky: 0xd0dceb, hemiGnd: 0x4a4034, amb: 0x7a8898, sun: 0xfff1dd, fill: 0x7a9ccc, rim: 0x556677, sunI: 1.15, hemiI: 0.78, ambI: 0.32, fillI: 0.50, rimI: 0.26, moonI: 0 },
+  { h: 20.0, sky: 0x121820, hemiSky: 0x4a5870, hemiGnd: 0x2a241c, amb: 0x3a4450, sun: 0xff7040, fill: 0x6a88b0, rim: 0x334050, sunI: 0.06, hemiI: 0.28, ambI: 0.14, fillI: 0.16, rimI: 0.10, moonI: 0.08 },
+  { h: 22.0, sky: 0x0a1018, hemiSky: 0x243040, hemiGnd: 0x14120e, amb: 0x1c2430, sun: 0x202830, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.18, ambI: 0.10, fillI: 0.10, rimI: 0.06, moonI: 0.14 },
+  { h: 24.0, sky: 0x070b12, hemiSky: 0x1c2838, hemiGnd: 0x12100c, amb: 0x1a222c, sun: 0x1a2430, fill: 0x8aa0c0, rim: 0x334050, sunI: 0, hemiI: 0.16, ambI: 0.09, fillI: 0.08, rimI: 0.05, moonI: 0.15 },
+];
+
+function hexRgb(hex) {
+  return [((hex >> 16) & 0xff) / 255, ((hex >> 8) & 0xff) / 255, (hex & 0xff) / 255];
+}
+
+function sampleTod(hour) {
+  const h = wrapHour(hour);
+  const keys = TOD_KEYS;
+  let i = 0;
+  while (i < keys.length - 1 && keys[i + 1].h <= h) i++;
+  const a = keys[i];
+  const b = keys[Math.min(i + 1, keys.length - 1)];
+  const span = Math.max(1e-6, b.h - a.h);
+  const t = clamp((h - a.h) / span, 0, 1);
+  const u = t * t * (3 - 2 * t);
+  const mixC = (ka, kb) => {
+    const ca = hexRgb(a[ka]);
+    const cb = hexRgb(b[kb || ka]);
+    return new THREE.Color(lerp(ca[0], cb[0], u), lerp(ca[1], cb[1], u), lerp(ca[2], cb[2], u));
+  };
+  const mixN = (k) => lerp(a[k], b[k], u);
+  return {
+    sky: mixC("sky"),
+    hemiSky: mixC("hemiSky"),
+    hemiGnd: mixC("hemiGnd"),
+    amb: mixC("amb"),
+    sun: mixC("sun"),
+    fill: mixC("fill"),
+    rim: mixC("rim"),
+    sunI: mixN("sunI"),
+    hemiI: mixN("hemiI"),
+    ambI: mixN("ambI"),
+    fillI: mixN("fillI"),
+    rimI: mixN("rimI"),
+    moonI: mixN("moonI"),
+  };
+}
+
+/** Simple sun path: rise ~6:05, set ~19:42, noon elevation capped. Not an astro sim. */
+function sunPath(hour) {
+  const h = wrapHour(hour);
+  const rise = 6.05;
+  const set = 19.7;
+  const span = set - rise;
+  const dayT = (h - rise) / span;
+  let elevDeg;
+  if (dayT > 0 && dayT < 1) {
+    elevDeg = Math.sin(dayT * Math.PI) * 56;
+  } else {
+    const nightSpan = 24 - span;
+    const nt = h < rise ? (h + (24 - set)) / nightSpan : (h - set) / nightSpan;
+    elevDeg = -6 - 16 * Math.sin(clamp(nt, 0, 1) * Math.PI);
+  }
+  let azDeg = 90 + dayT * 180;
+  azDeg = ((azDeg % 360) + 360) % 360;
+  return { elevDeg, azDeg, dayT };
+}
+
+function ensureSkyDiscs() {
+  if (!scene) return;
+  if (!sunDisc) {
+    sunDisc = new THREE.Mesh(
+      new THREE.SphereGeometry(6.5, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffe4b8, fog: false, depthWrite: false, toneMapped: false })
+    );
+    sunDisc.renderOrder = -10;
+    sunDisc.raycast = () => {};
+    scene.add(sunDisc);
+  }
+  if (!moonDisc) {
+    moonDisc = new THREE.Mesh(
+      new THREE.SphereGeometry(3.2, 12, 10),
+      new THREE.MeshBasicMaterial({ color: 0xc8d4e4, fog: false, depthWrite: false, transparent: true, opacity: 0.55, toneMapped: false })
+    );
+    moonDisc.renderOrder = -9;
+    moonDisc.raycast = () => {};
+    scene.add(moonDisc);
+  }
+}
+
+function applyTimeOfDay() {
+  const pal = sampleTod(state.timeOfDay);
+  const path = sunPath(state.timeOfDay);
+  const elRad = path.elevDeg * (Math.PI / 180);
+  const azRad = path.azDeg * (Math.PI / 180);
+  const dist = 90;
+  const cosE = Math.cos(elRad);
+  const sunX = Math.sin(azRad) * cosE * dist;
+  const sunY = Math.sin(elRad) * dist;
+  const sunZ = Math.cos(azRad) * cosE * dist;
+  if (keyLight) {
+    keyLight.position.set(sunX, Math.max(sunY, -20), sunZ);
+    keyLight.color.copy(pal.sun);
+    keyLight.userData.todBase = pal.sunI;
+  }
+  if (hemiLight) {
+    hemiLight.color.copy(pal.hemiSky);
+    hemiLight.groundColor.copy(pal.hemiGnd);
+    hemiLight.userData.todBase = pal.hemiI;
+  }
+  if (ambLight) {
+    ambLight.color.copy(pal.amb);
+    ambLight.userData.todBase = pal.ambI;
+  }
+  if (fillLight) {
+    fillLight.position.set(-sunX * 0.35, 14, -sunZ * 0.2);
+    fillLight.color.copy(pal.fill);
+    fillLight.userData.todBase = pal.fillI;
+  }
+  if (rimLight) {
+    rimLight.position.set(0, 10, -40);
+    rimLight.color.copy(pal.rim);
+    rimLight.userData.todBase = pal.rimI;
+  }
+  if (moonLight) {
+    moonLight.position.set(-sunX * 0.6, Math.max(18, -sunY * 0.4 + 16), -sunZ * 0.6);
+    moonLight.color.setHex(0xb8c8dc);
+    moonLight.userData.todBase = pal.moonI;
+  }
+  ensureSkyDiscs();
+  const skyR = 210;
+  if (sunDisc) {
+    const up = path.elevDeg > -1.5;
+    sunDisc.visible = up;
+    if (up) {
+      const s = Math.max(0.15, Math.cos(elRad));
+      sunDisc.position.set(Math.sin(azRad) * cosE * skyR, Math.sin(elRad) * skyR, Math.cos(azRad) * cosE * skyR);
+      sunDisc.material.color.copy(pal.sun);
+    }
+  }
+  if (moonDisc) {
+    const show = pal.moonI > 0.04 && path.elevDeg < 8;
+    moonDisc.visible = show;
+    if (show) {
+      moonDisc.position.set(-Math.sin(azRad) * cosE * skyR, 48, -Math.cos(azRad) * cosE * skyR);
+      moonDisc.material.opacity = clamp(pal.moonI * 3.2, 0.2, 0.7);
+    }
+  }
+  if (scene) {
+    if (scene.background && scene.background.isColor) scene.background.copy(pal.sky);
+    else scene.background = pal.sky.clone();
+  }
+  return pal;
+}
+
+function setTimeOfDay(v, { toast = false } = {}) {
+  state.timeOfDay = clamp(parseFloat(v), 0, 24);
+  if (!Number.isFinite(state.timeOfDay)) state.timeOfDay = TOD_DEFAULT;
+  applyDisplayLook();
+  const slider = el("todSlider");
+  const val = el("todVal");
+  if (slider && document.activeElement !== slider) slider.value = String(state.timeOfDay);
+  if (val) val.textContent = formatClock(state.timeOfDay);
+  if (toast) showToast("Time " + formatClock(state.timeOfDay));
+}
+
 /** Map Settings brightness/gamma → CSS filter on #view3d + mild fog/bg/light lift. */
 function applyDisplayLook() {
   const b = clamp(Number(state.brightness) || 1, 0.5, 1.5);
@@ -716,29 +938,45 @@ function applyDisplayLook() {
   const canvas = el("view3d");
   if (canvas) canvas.style.filter = `brightness(${b}) contrast(${g})`;
 
+  const pal = applyTimeOfDay();
+
   // Mild clear/fog/bg lift so far lane isn’t crushed before the CSS filter.
-  // Keep hue of SCENE_BG_BASE; scale lift with how far brightness/gamma sit above 1.
+  // Grade only — time of day owns hue; brightness/gamma stay display.
   const lift = clamp((b - 1) * 0.45 + (g - 1) * 0.2, -0.2, 0.4);
-  const br = ((SCENE_BG_BASE >> 16) & 0xff) / 255;
-  const bg = ((SCENE_BG_BASE >> 8) & 0xff) / 255;
-  const bb = (SCENE_BG_BASE & 0xff) / 255;
-  const r = clamp(br + lift * 0.1, 0, 1);
-  const gv = clamp(bg + lift * 0.1, 0, 1);
-  const bv = clamp(bb + lift * 0.12, 0, 1);
-  if (renderer) renderer.setClearColor(new THREE.Color(r, gv, bv), 1);
+  const sky = (scene && scene.background && scene.background.isColor)
+    ? scene.background
+    : (pal && pal.sky) || new THREE.Color(SCENE_BG_BASE);
+  const r = clamp(sky.r + lift * 0.1, 0, 1);
+  const gv = clamp(sky.g + lift * 0.1, 0, 1);
+  const bv = clamp(sky.b + lift * 0.12, 0, 1);
+  sky.setRGB(r, gv, bv);
+  if (renderer) renderer.setClearColor(sky, 1);
   if (scene) {
-    if (scene.background && scene.background.isColor) scene.background.setRGB(r, gv, bv);
-    else scene.background = new THREE.Color(r, gv, bv);
+    if (scene.background && scene.background.isColor) scene.background.copy(sky);
+    else scene.background = sky.clone();
   }
   applyFog();
 
   const lightMul = 0.88 + 0.12 * b;
-  if (hemiLight) hemiLight.intensity = HEMI_INT_BASE * lightMul;
-  if (ambLight) ambLight.intensity = AMB_INT_BASE * lightMul;
-  if (keyLight) keyLight.intensity = KEY_INT_BASE * lightMul;
-  if (fillLight) fillLight.intensity = FILL_INT_BASE * lightMul;
-  if (rimLight) rimLight.intensity = RIM_INT_BASE * lightMul;
-  for (const L of floodLights) {
+  const todI = (obj, fallback) => {
+    if (!obj) return;
+    const base = (obj.userData && obj.userData.todBase != null) ? obj.userData.todBase : fallback;
+    obj.intensity = base * lightMul;
+  };
+  todI(hemiLight, HEMI_INT_BASE);
+  todI(ambLight, AMB_INT_BASE);
+  todI(keyLight, KEY_INT_BASE);
+  todI(fillLight, FILL_INT_BASE);
+  todI(rimLight, RIM_INT_BASE);
+  todI(moonLight, 0);
+  const fixtures = floodFixtures.length ? floodFixtures : floodLights.map((L) => ({ light: L, shotOut: !!(L.userData && L.userData.shotOut) }));
+  for (const fx of fixtures) {
+    const L = fx.light || fx;
+    if (!L) continue;
+    if (fx.shotOut || (L.userData && L.userData.shotOut)) {
+      L.intensity = 0;
+      continue;
+    }
     const base = (L.userData && L.userData.floodIntBase) || 55;
     L.intensity = base * lightMul;
   }
@@ -843,6 +1081,11 @@ function syncSettingsUI() {
 
   const chkPluge = el("chkPluge");
   if (chkPluge) chkPluge.checked = !!state.showPluge;
+
+  const todSlider = el("todSlider");
+  const todVal = el("todVal");
+  if (todSlider) todSlider.value = String(state.timeOfDay);
+  if (todVal) todVal.textContent = formatClock(state.timeOfDay);
 }
 
 function renderGunList() {
@@ -1074,10 +1317,16 @@ function nudgeSelected(sign) {
 /* ---- Three.js scene + player ---- */
 let renderer, camera, scene, holdRoot, gunRoot;
 /** Kept so Settings brightness/gamma can nudge intensities + fog. */
-let hemiLight, ambLight, keyLight, fillLight, rimLight;
+let hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight;
+let sunDisc = null;
+let moonDisc = null;
 /** Side-bay flood PointLights (+ fake floor pools) so the long lane reads at night. */
 let floodLights = [];
+/** Fixture records: lamp/head hit, pool meshes, shot-out flag. */
+let floodFixtures = [];
 const SCENE_BG_BASE = 0x1c2430;
+/** Default clock (18:30) — palettes below are keyed so this hour matches SCENE_BG_BASE. */
+const TOD_DEFAULT = 18.5;
 const HEMI_INT_BASE = 0.78;
 const AMB_INT_BASE = 0.32;
 const KEY_INT_BASE = 1.15;
@@ -1127,6 +1376,7 @@ const _leanDir = new THREE.Vector3();
 let pickups = [];
 let rangeTargets = [];
 let silhouetteTargets = [];
+let bermPopupTargets = [];
 let scorePopups = [];
 let clock = new THREE.Clock();
 const _fwd = new THREE.Vector3();
@@ -2366,6 +2616,8 @@ function buildShootingRange() {
   clearGroundRangeLines();
   rangeTargets = [];
   silhouetteTargets = [];
+  bermPopupTargets.forEach((f) => { if (f.group && f.group.parent) f.group.parent.remove(f.group); });
+  bermPopupTargets = [];
   scorePopups.forEach((p) => p.el && p.el.remove());
   scorePopups = [];
   const fl = el("floatLabels");
@@ -2468,6 +2720,221 @@ function buildShootingRange() {
 
   buildSilhouetteLane();
   buildBackBerm();
+  buildBermPopupFigures();
+}
+
+/** Crest chunks on the ~410 m backstop: [x, y, zOff, w, h, d]. */
+const BERM_CREST_CHUNKS = [
+  [-8, 3.2, -0.5, 6, 1.4, 2.2],
+  [-2, 3.5, 0.2, 5, 1.8, 2.5],
+  [5, 3.1, -0.2, 7, 1.3, 2.0],
+  [10, 2.9, -1.0, 5, 1.1, 1.8],
+];
+
+function bermPopupRandDelay() { return 2 + Math.random() * 6; }
+function bermPopupUpTime() { return 1.5 + Math.random() * 2; }
+function bermPopupAnimDur() { return 0.15 + Math.random() * 0.1; }
+
+function syncBermPopupZones(fig) {
+  const wp = new THREE.Vector3();
+  for (const z of fig.zones) {
+    const mesh = fig.plates[z.id];
+    if (!mesh) continue;
+    mesh.getWorldPosition(wp);
+    z.center.copy(wp);
+    z.normal.set(0, 0, 1);
+  }
+}
+
+function bermPopupZoneActive(fig, zoneId) {
+  if (!fig || fig.lift < 0.72) return false;
+  if (fig.phase === "falling" && fig.lift < 0.85) return false;
+  if (zoneId === "head") return true;
+  if (zoneId === "chest") return true;
+  return false;
+}
+
+/**
+ * Darker steel/cardboard popup figure — slightly smaller than lane silhouettes.
+ * Head is a facing disc (visual + hit). Lower body exists but sits behind the crest.
+ */
+function createBermPopupFigure(x, z, yUp, yDown, scale) {
+  const group = new THREE.Group();
+  group.position.set(x, yDown, z);
+
+  const steel = 0x3e444c;
+  const steelDark = 0x2a3036;
+  const card = 0x3a322a;
+  const matOpts = { roughness: 0.82, metalness: 0.18 };
+  const s = scale;
+
+  group.add(makeBox(0.28 * s, 0.05 * s, 0.18 * s, 0x4a3a2c, 0, 0.03 * s, 0, matOpts));
+  group.add(makeBox(0.09 * s, 0.46 * s, 0.07 * s, steelDark, -0.09 * s, 0.46 * s, 0, matOpts));
+  group.add(makeBox(0.09 * s, 0.46 * s, 0.07 * s, steelDark, 0.09 * s, 0.46 * s, 0, matOpts));
+  group.add(makeBox(0.28 * s, 0.14 * s, 0.06 * s, card, 0, 0.78 * s, 0.01 * s, matOpts));
+
+  const chestY = 1.12 * s;
+  const chestPlate = makeBox(0.32 * s, 0.40 * s, 0.055 * s, steel, 0, chestY, 0.02 * s, matOpts);
+  group.add(chestPlate);
+  group.add(makeBox(0.11 * s, 0.10 * s, 0.07 * s, steelDark, -0.20 * s, 1.34 * s, 0.01 * s, matOpts));
+  group.add(makeBox(0.11 * s, 0.10 * s, 0.07 * s, steelDark, 0.20 * s, 1.34 * s, 0.01 * s, matOpts));
+
+  const chestFlash = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.34 * s, 0.42 * s),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+  );
+  chestFlash.position.set(0, chestY, 0.055 * s);
+  group.add(chestFlash);
+
+  const headY = 1.62 * s;
+  const headR = 0.105 * s;
+  const headDisc = new THREE.Mesh(
+    new THREE.CylinderGeometry(headR, headR, 0.07 * s, 14),
+    new THREE.MeshStandardMaterial({ color: 0x353a40, roughness: 0.78, metalness: 0.22 })
+  );
+  headDisc.rotation.x = Math.PI / 2;
+  headDisc.position.set(0, headY, 0.02 * s);
+  headDisc.castShadow = true;
+  group.add(headDisc);
+
+  const headFlash = new THREE.Mesh(
+    new THREE.CircleGeometry(headR * 1.15, 14),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+  );
+  headFlash.position.set(0, headY, 0.06 * s);
+  group.add(headFlash);
+
+  const now = performance.now() * 0.001;
+  const fig = {
+    group,
+    plates: { head: headDisc, chest: chestPlate },
+    flashes: { head: headFlash, chest: chestFlash },
+    hitUntil: { head: 0, chest: 0 },
+    scale: s,
+    yUp,
+    yDown,
+    lift: 0,
+    phase: "down",
+    animT: 0,
+    animDur: 0.2,
+    hideAt: 0,
+    nextAt: now + 0.6 + Math.random() * 2.5,
+    knocked: false,
+    zones: [
+      { id: "head", center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), radius: headR * 1.05, pts: 50 },
+      { id: "chest", center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), radius: 0.18 * s, pts: 20 },
+    ],
+  };
+  scene.add(group);
+  syncBermPopupZones(fig);
+  return fig;
+}
+
+function scheduleBermPopup(fig, now, extra = 0) {
+  fig.phase = "down";
+  fig.lift = 0;
+  fig.knocked = false;
+  fig.animT = 0;
+  fig.group.position.y = fig.yDown;
+  fig.group.rotation.x = 0;
+  fig.nextAt = now + extra + bermPopupRandDelay();
+}
+
+function buildBermPopupFigures() {
+  bermPopupTargets.forEach((f) => { if (f.group && f.group.parent) f.group.parent.remove(f.group); });
+  bermPopupTargets = [];
+  const bermZ = rangeZ(410);
+  const scale = 0.76;
+  const shoulderTopRel = 1.44 * scale;
+  const headTopRel = 1.725 * scale;
+  // Left / center-right / right peaks (skip the center-left chunk so they don't stack).
+  const slots = [0, 2, 3];
+  const now = performance.now() * 0.001;
+  slots.forEach((idx, i) => {
+    const [x0, y, zOff, w, h, d] = BERM_CREST_CHUNKS[idx];
+    const crestTop = y + h * 0.5;
+    const x = x0 + (Math.random() - 0.5) * Math.min(1.6, w * 0.22);
+    const z = bermZ + zOff - d * 0.38;
+    const yUp = crestTop + 0.07 - shoulderTopRel;
+    const yDown = crestTop - 0.48 - headTopRel;
+    const fig = createBermPopupFigure(x, z, yUp, yDown, scale);
+    fig.nextAt = now + 0.9 + i * 2.4 + Math.random() * 2.8;
+    bermPopupTargets.push(fig);
+  });
+}
+
+function resetBermPopups() {
+  const now = performance.now() * 0.001;
+  bermPopupTargets.forEach((fig, i) => {
+    for (const k of Object.keys(fig.flashes)) {
+      fig.flashes[k].material.opacity = 0;
+      fig.hitUntil[k] = 0;
+    }
+    scheduleBermPopup(fig, now, i * 1.6);
+    syncBermPopupZones(fig);
+  });
+}
+
+function flashBermPopupZone(fig, zone, hitPos) {
+  const id = zone.id;
+  fig.hitUntil[id] = performance.now() + 220;
+  if (fig.flashes[id]) fig.flashes[id].material.opacity = 1;
+  const pts = zone.pts;
+  const klass = id === "head" ? "bull" : "mid";
+  if (id === "head") sfx.play("bullseye");
+  else sfx.play("hit");
+  pushScorePopup(pts, klass, hitPos || zone.center);
+  fig.knocked = true;
+  fig.phase = "falling";
+  fig.animT = 0;
+  fig.animDur = bermPopupAnimDur();
+}
+
+function updateBermPopups(dt) {
+  const now = performance.now() * 0.001;
+  for (const fig of bermPopupTargets) {
+    if (fig.phase === "down") {
+      if (now >= fig.nextAt) {
+        fig.phase = "rising";
+        fig.animT = 0;
+        fig.animDur = bermPopupAnimDur();
+        fig.knocked = false;
+      }
+    } else if (fig.phase === "rising") {
+      fig.animT += dt;
+      const u = clamp(fig.animT / fig.animDur, 0, 1);
+      fig.lift = u * u * (3 - 2 * u);
+      if (u >= 1) {
+        fig.lift = 1;
+        fig.phase = "up";
+        fig.hideAt = now + bermPopupUpTime();
+      }
+    } else if (fig.phase === "up") {
+      fig.lift = 1;
+      if (now >= fig.hideAt) {
+        fig.phase = "falling";
+        fig.animT = 0;
+        fig.animDur = bermPopupAnimDur();
+      }
+    } else if (fig.phase === "falling") {
+      fig.animT += dt;
+      const u = clamp(fig.animT / fig.animDur, 0, 1);
+      fig.lift = 1 - u * u * (3 - 2 * u);
+      if (u >= 1) {
+        scheduleBermPopup(fig, now, 0);
+      }
+    }
+    fig.group.position.y = fig.yDown + (fig.yUp - fig.yDown) * fig.lift;
+    fig.group.rotation.x = fig.knocked ? (1 - fig.lift) * 0.55 : 0;
+    const tnow = performance.now();
+    for (const id of ["head", "chest"]) {
+      const flash = fig.flashes[id];
+      if (!flash) continue;
+      if (tnow < fig.hitUntil[id]) flash.material.opacity = 1;
+      else flash.material.opacity = Math.max(0, flash.material.opacity - dt * 3);
+    }
+    syncBermPopupZones(fig);
+  }
 }
 
 /** Earthen backstop berm ~410 m from spawn — layered dirt/rock silhouette for distance read. */
@@ -2500,12 +2967,7 @@ function buildBackBerm() {
   face.receiveShadow = true;
   addLeanSolid(face);
   // Crest / uneven top chunks
-  for (const [x, y, zOff, w, h, d] of [
-    [-8, 3.2, -0.5, 6, 1.4, 2.2],
-    [-2, 3.5, 0.2, 5, 1.8, 2.5],
-    [5, 3.1, -0.2, 7, 1.3, 2.0],
-    [10, 2.9, -1.0, 5, 1.1, 1.8],
-  ]) {
+  for (const [x, y, zOff, w, h, d] of BERM_CREST_CHUNKS) {
     const chunk = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), darkMat.clone());
     chunk.position.set(x, y, bermZ + zOff);
     chunk.rotation.y = (x % 3) * 0.05;
@@ -2699,8 +3161,9 @@ function makeFloodlight(x, z, opts = {}) {
 
   // Tighter hot core so the spill stays readable from spawn.
   const coreR = opts.poolCoreRadius != null ? opts.poolCoreRadius : poolR * 0.32;
+  let core = null;
   if (coreR > 0.5) {
-    const core = new THREE.Mesh(
+    core = new THREE.Mesh(
       new THREE.CircleGeometry(coreR, 32),
       makeFloodPoolMaterial(getFloodPoolTexture("core"))
     );
@@ -2711,12 +3174,30 @@ function makeFloodlight(x, z, opts = {}) {
     group.add(core);
   }
 
-  return { group, light };
+  const fixture = {
+    group,
+    light,
+    head,
+    lamp,
+    pool,
+    core,
+    shotOut: false,
+    zone: {
+      center: new THREE.Vector3(),
+      normal: new THREE.Vector3(0, 0, 1),
+      radius: 0.15,
+    },
+  };
+  head.userData.floodFixture = fixture;
+  lamp.userData.floodFixture = fixture;
+  // Pole / arm / base stay generic env — they must not kill the light.
+  return fixture;
 }
 
 /** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m from spawn — PointLights + fake pools. */
 function buildRangeFloodlights() {
   floodLights = [];
+  floodFixtures = [];
   // PointLight intensity/distance sized to read on MeshStandard; soft peach discs sell the spill.
   // Pool radii ~10–14 m under fixture; depthTest:false NormalBlending so they stay visible.
   const posts = [
@@ -2726,9 +3207,65 @@ function buildRangeFloodlights() {
     { x: 9.4, meters: 280, intensity: 78, distance: 60, poolRadius: 11, poolCoreRadius: 3.5, poolInward: 5 },
   ];
   for (const p of posts) {
-    const { group, light } = makeFloodlight(p.x, rangeZ(p.meters), p);
-    addLeanSolid(group);
-    floodLights.push(light);
+    const fx = makeFloodlight(p.x, rangeZ(p.meters), p);
+    addLeanSolid(fx.group);
+    floodLights.push(fx.light);
+    floodFixtures.push(fx);
+  }
+}
+
+function syncFloodLampZones() {
+  const wp = new THREE.Vector3();
+  for (const fx of floodFixtures) {
+    if (!fx.lamp || !fx.zone) continue;
+    fx.lamp.getWorldPosition(wp);
+    fx.zone.center.copy(wp);
+    fx.zone.normal.set(0, 0, 1);
+  }
+}
+
+function shootOutFlood(fx, hitPos, normal) {
+  if (!fx || fx.shotOut) return;
+  fx.shotOut = true;
+  if (fx.light) {
+    fx.light.intensity = 0;
+    fx.light.visible = false;
+    if (fx.light.userData) fx.light.userData.shotOut = true;
+  }
+  if (fx.head && fx.head.material) {
+    fx.head.material.emissiveIntensity = 0;
+    if (fx.head.material.emissive) fx.head.material.emissive.setHex(0x000000);
+  }
+  if (fx.lamp && fx.lamp.material && fx.lamp.material.color) {
+    fx.lamp.material.color.setHex(0x1a1612);
+  }
+  if (fx.pool) fx.pool.visible = false;
+  if (fx.core) fx.core.visible = false;
+  const n = normal || new THREE.Vector3(0, 0, 1);
+  spawnImpactFX(hitPos || fx.zone.center, n, "punch");
+  sfx.play("glass");
+}
+
+function restoreFloodlights() {
+  const b = clamp(Number(state.brightness) || 1, 0.5, 1.5);
+  const lightMul = 0.88 + 0.12 * b;
+  for (const fx of floodFixtures) {
+    fx.shotOut = false;
+    if (fx.light) {
+      fx.light.visible = true;
+      if (fx.light.userData) fx.light.userData.shotOut = false;
+      const base = (fx.light.userData && fx.light.userData.floodIntBase) || 55;
+      fx.light.intensity = base * lightMul;
+    }
+    if (fx.head && fx.head.material) {
+      if (fx.head.material.emissive) fx.head.material.emissive.setHex(0xffc070);
+      fx.head.material.emissiveIntensity = 0.9;
+    }
+    if (fx.lamp && fx.lamp.material && fx.lamp.material.color) {
+      fx.lamp.material.color.setHex(0xffe2b0);
+    }
+    if (fx.pool) fx.pool.visible = true;
+    if (fx.core) fx.core.visible = true;
   }
 }
 
@@ -2939,6 +3476,8 @@ function clearPaperDecals() {
 /** Table-button / F reset: new paper + stand silhouettes back up. Score stays. */
 function resetRangeTargets() {
   resetSilhouettes();
+  resetBermPopups();
+  restoreFloodlights();
   clearPaperDecals();
   showToast("Targets reset");
 }
@@ -3103,6 +3642,10 @@ function initThree() {
   rimLight = new THREE.DirectionalLight(0x556677, RIM_INT_BASE);
   rimLight.position.set(0, 8, -30);
   scene.add(rimLight);
+  moonLight = new THREE.DirectionalLight(0xb8c8dc, 0);
+  moonLight.position.set(-12, 20, -8);
+  moonLight.castShadow = false;
+  scene.add(moonLight);
 
   holdRoot = new THREE.Group();
   camera.add(holdRoot);
@@ -3847,7 +4390,7 @@ function hitEnvSolidsSegment(prev, curr) {
   }
   // Prefer outward toward shooter if normal points away from segment start
   if (n.dot(_impactSeg) > 0) n.negate();
-  return { hit: h.point.clone(), normal: n, u: h.distance / dist, surface: "solid" };
+  return { hit: h.point.clone(), normal: n, u: h.distance / dist, surface: "solid", object: h.object };
 }
 
 function hitEnvironmentSegment(prev, curr) {
@@ -3886,6 +4429,7 @@ function updateTracers(dt) {
     }
   });
 
+  syncFloodLampZones();
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i];
     tr.life -= dt;
@@ -3924,9 +4468,30 @@ function updateTracers(dt) {
           }
         }
       }
+      for (const fig of bermPopupTargets) {
+        for (const zone of fig.zones) {
+          if (!bermPopupZoneActive(fig, zone.id)) continue;
+          const info = hitTargetDiskInfo(prev, tr.mesh.position, zone);
+          if (info && (!best || info.u < best.u)) {
+            best = { kind: "berm", fig, zone, hit: info.hit, normal: zone.normal, u: info.u };
+          }
+        }
+      }
+      for (const fx of floodFixtures) {
+        if (fx.shotOut || !fx.zone) continue;
+        const info = hitTargetDiskInfo(prev, tr.mesh.position, fx.zone);
+        if (info && (!best || info.u < best.u)) {
+          best = { kind: "flood", fixture: fx, hit: info.hit, normal: fx.zone.normal, u: info.u };
+        }
+      }
       const env = hitEnvironmentSegment(prev, tr.mesh.position);
       if (env && (!best || env.u < best.u)) {
-        best = { kind: "env", hit: env.hit, normal: env.normal, u: env.u, surface: env.surface };
+        const fx = env.object && env.object.userData && env.object.userData.floodFixture;
+        if (fx && !fx.shotOut) {
+          best = { kind: "flood", fixture: fx, hit: env.hit, normal: env.normal, u: env.u };
+        } else {
+          best = { kind: "env", hit: env.hit, normal: env.normal, u: env.u, surface: env.surface };
+        }
       }
       if (best) {
         tr.hit = true;
@@ -3941,6 +4506,11 @@ function updateTracers(dt) {
         } else if (best.kind === "sil") {
           flashSilhouetteZone(best.sil, best.zone, best.hit);
           spawnImpactFX(best.hit, best.normal, "punch");
+        } else if (best.kind === "berm") {
+          flashBermPopupZone(best.fig, best.zone, best.hit);
+          spawnImpactFX(best.hit, best.normal, "punch");
+        } else if (best.kind === "flood") {
+          shootOutFlood(best.fixture, best.hit, best.normal);
         } else {
           sfx.play("miss");
           spawnImpactFX(best.hit, best.normal, "scuff");
@@ -4413,6 +4983,7 @@ function updatePlayer(dt) {
   updateCasings(dt);
   updateImpactFX(dt);
   updateSilhouettes(dt);
+  updateBermPopups(dt);
   updateScorePopups(dt);
 }
 
@@ -5053,6 +5624,13 @@ function bind() {
     chkPluge.checked = state.showPluge;
     chkPluge.onchange = (e) => setPluge(e.target.checked, { toast: true });
   }
+  const todSlider = el("todSlider");
+  if (todSlider) {
+    todSlider.value = String(state.timeOfDay);
+    todSlider.oninput = (e) => setTimeOfDay(e.target.value);
+  }
+  const todVal = el("todVal");
+  if (todVal) todVal.textContent = formatClock(state.timeOfDay);
 
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);

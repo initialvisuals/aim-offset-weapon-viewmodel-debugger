@@ -37,6 +37,7 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 | Q / E | Lean; E also equips looked-at optic |
 | RMB | Hold ADS |
 | Space | Hold breath (damp sway) |
+| `-` / `=` | Cycle zero distance (presets 25–300 m; clamp at ends) |
 | LMB | Fire (tracers); LMB on pickup equips |
 | Click canvas | Pointer lock |
 | Insert | ADS preview |

@@ -13,6 +13,7 @@ const AXIS_DEFS = [
 ];
 const POS_STEPS = { micro: 0.0005, fine: 0.002, med: 0.01, coarse: 0.05 };
 const ROT_STEPS = { micro: 0.001, fine: 0.005, med: 0.02, coarse: 0.1 };
+const ZERO_DIST_PRESETS = [25, 50, 100, 200, 300];
 
 const OPTIC_LABELS = {
   iron: "Iron",
@@ -546,6 +547,20 @@ function cycleStep(which, dir) {
     el("attStepSelect").value = next;
   }
 }
+function cycleZeroDist(dir) {
+  let i = ZERO_DIST_PRESETS.indexOf(state.zeroDist);
+  if (i < 0) i = ZERO_DIST_PRESETS.indexOf(100);
+  if (i < 0) i = 2;
+  const next = clamp(i + dir, 0, ZERO_DIST_PRESETS.length - 1);
+  state.zeroDist = ZERO_DIST_PRESETS[next];
+  const sel = el("zeroDistSelect");
+  if (sel) sel.value = String(state.zeroDist);
+  showToast(`Zero ${state.zeroDist} m`);
+  updateHobReadout();
+  updateAimBoreRays();
+}
+
+
 function nudgeSelected(sign) {
   const weaponMode = state.mode === "weapon";
   const axisIndex = weaponMode ? state.selectedAxis : state.attSelectedAxis;
@@ -2112,6 +2127,14 @@ function onKeyDown(e) {
     }
     if ((k === "r" || k === "R") && !e.repeat) {
       resetSilhouettes();
+      e.preventDefault();
+    }
+    if ((k === "-" || code === "Minus") && !e.repeat) {
+      cycleZeroDist(-1);
+      e.preventDefault();
+    }
+    if ((k === "=" || code === "Equal") && !e.repeat) {
+      cycleZeroDist(1);
       e.preventDefault();
     }
   }

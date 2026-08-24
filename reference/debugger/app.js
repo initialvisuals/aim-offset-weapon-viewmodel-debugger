@@ -511,9 +511,9 @@ function makeOpticMesh(profile) {
     const rearBase = makeBox(0.05, 0.014, 0.022, 0x1a1f28, 0, 0.01, 0.055);
     const notchL = makeBox(0.01, 0.028, 0.014, 0x11151c, -0.016, 0.028, 0.055);
     const notchR = makeBox(0.01, 0.028, 0.014, 0x11151c, 0.016, 0.028, 0.055);
-    const frontBase = makeBox(0.014, 0.012, 0.014, 0x1a1f28, 0, 0.014, -0.14);
-    const post = makeBox(0.007, 0.032, 0.007, 0xc45c2a, 0, 0.036, -0.14);
-    const tip = makeBox(0.009, 0.006, 0.009, 0xffaa66, 0, 0.054, -0.14);
+    const frontBase = makeBox(0.014, 0.01, 0.014, 0x1a1f28, 0, 0.01, -0.14);
+    const post = makeBox(0.007, 0.022, 0.007, 0xc45c2a, 0, 0.026, -0.14);
+    const tip = makeBox(0.009, 0.005, 0.009, 0xffaa66, 0, 0.039, -0.14);
     g.add(rearBase, notchL, notchR, frontBase, post, tip);
   } else if (profile === "holo") {
     // Short window — peripheral frame when ADS; HUD red-dot overlay is primary reticle

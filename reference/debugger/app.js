@@ -32,9 +32,9 @@ const FOV_BY_OPTIC = {
 
 const BALLISTICS = {
   // Demo units ≈ meters. .45 ACP-ish SMG vs 7.62×54R-class rifle.
-  example_smg: { speed: 300, gravity: 14, life: 2.0, tracerLen: 0.55 },
-  example_rifle: { speed: 800, gravity: 9.8, life: 2.6, tracerLen: 0.75 },
-  sniper_boost: { speed: 860, gravity: 9.5, life: 3.0, tracerLen: 0.85 },
+  example_smg: { speed: 300, gravity: 14, life: 3.2, tracerLen: 0.55 },
+  example_rifle: { speed: 800, gravity: 9.8, life: 3.5, tracerLen: 0.75 },
+  sniper_boost: { speed: 860, gravity: 9.5, life: 4.0, tracerLen: 0.85 },
 };
 
 
@@ -665,16 +665,16 @@ function updateOpticVisibility() {
 
 function buildRoom() {
   const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1e28, roughness: 0.9 });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 50), floorMat);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 450), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -1.4;
-  floor.position.z = -12;
+  floor.position.z = -200;
   floor.receiveShadow = true;
   scene.add(floor);
 
-  const grid = new THREE.GridHelper(40, 40, 0x3a4560, 0x252b38);
+  const grid = new THREE.GridHelper(40, 80, 0x3a4560, 0x252b38);
   grid.position.y = -1.39;
-  grid.position.z = -12;
+  grid.position.z = -200;
   scene.add(grid);
 
 
@@ -721,25 +721,26 @@ function buildOpticsTable() {
 
 function buildShootingRange() {
   const baseLanes = [
-    { z: -10, pts: 5, label: "≈30m" },
-    { z: -18, pts: 8, label: "≈55m" },
-    { z: -28, pts: 12, label: "≈85m" },
-    { z: -40, pts: 16, label: "≈120m" },
-    { z: -52, pts: 20, label: "≈155m" },
+    { z: -25, pts: 5, label: "≈50m" },
+    { z: -55, pts: 8, label: "≈100m" },
+    { z: -100, pts: 12, label: "≈150m" },
+    { z: -160, pts: 16, label: "≈200m" },
+    { z: -250, pts: 22, label: "≈300m" },
+    { z: -380, pts: 30, label: "≈400m" },
   ];
   rangeTargets = [];
   scorePopups = [];
 
   const strip = new THREE.Mesh(
-    new THREE.PlaneGeometry(14, 60),
+    new THREE.PlaneGeometry(18, 420),
     new THREE.MeshStandardMaterial({ color: 0x161a22, roughness: 0.95 })
   );
   strip.rotation.x = -Math.PI / 2;
-  strip.position.set(0, -1.385, -28);
+  strip.position.set(0, -1.385, -200);
   scene.add(strip);
 
   for (const side of [-5.5, 5.5]) {
-    scene.add(makeBox(0.08, 0.12, 58, 0x2a3140, side, -1.3, -28));
+    scene.add(makeBox(0.08, 0.12, 400, 0x2a3140, side, -1.3, -200));
   }
 
   baseLanes.forEach((lane, i) => {
@@ -798,7 +799,7 @@ function buildShootingRange() {
     });
   });
 
-  scene.add(makeBox(16, 3.2, 0.4, 0x2a2030, 0, 0.1, -58));
+  scene.add(makeBox(20, 4.5, 0.6, 0x2a2030, 0, 0.5, -410));
 }
 
 function makeScoreSprite(text, color = "#ffffff", size = 160) {
@@ -886,7 +887,7 @@ function initThree() {
   renderer.shadowMap.enabled = true;
 
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(player.fovHip, 1, 0.01, 100);
+  camera = new THREE.PerspectiveCamera(player.fovHip, 1, 0.01, 500);
 
   playerRoot = new THREE.Group();
   leanPivot = new THREE.Group();
@@ -1165,7 +1166,7 @@ function updatePlayer(dt) {
     player.pos.x += (mx * cy + mz * sy) * speed * dt;
     player.pos.z += (-mx * sy + mz * cy) * speed * dt;
     player.pos.x = clamp(player.pos.x, -10, 10);
-    player.pos.z = clamp(player.pos.z, -55, 4);
+    player.pos.z = clamp(player.pos.z, -410, 4);
   }
 
   // View bob
@@ -1200,7 +1201,7 @@ function updatePlayer(dt) {
   // light strafe tilt
   // Strafe tilt only — tiny roll from lateral move (<< Q/E lean). Cap ~0.4% of leanMax — barely noticeable.
   const lateral = gameplayActive() ? (Number(input.left) - Number(input.right)) : 0;
-  const strafeTarget = lateral * player.leanMax * 0.004;
+  const strafeTarget = lateral * player.leanMax * 0.002;
   player.strafeTilt = lerp(player.strafeTilt || 0, strafeTarget, 1 - Math.exp(-10 * dt));
   leanPivot.rotation.z = leanZ + player.strafeTilt;
 

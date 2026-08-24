@@ -137,6 +137,15 @@ const ADS_DOF_BREATH_MUL = 1.6;
 const GOD_RAYS_STEPS = 48;
 /** Settings default; 0 skips the pass. */
 const GOD_RAYS_DEFAULT = 0.9;
+/** Settings default; 0 skips the pass. */
+const BLOOM_DEFAULT = 0.45;
+/** Bright-pass luminance floor (HDR). Knee is a fraction of this. */
+const BLOOM_THRESHOLD = 1.0;
+const BLOOM_KNEE = 0.22;
+/** Dual-filter pyramid depth (half / quarter / eighth). */
+const BLOOM_MIPS = 3;
+/** Warm HDR lamp glass — pops under threshold without lifting the bay. */
+const FLOOD_LAMP_HDR = [3.15, 2.65, 1.78];
 
 const state = {
   mode: "weapon",
@@ -242,6 +251,8 @@ const state = {
   casingFade: 12,
   /** Volumetric sun shafts (0 = off, 2 = strong). */
   godRays: GOD_RAYS_DEFAULT,
+  /** HDR bloom (0 = off, 2 = strong). Independent of god rays. */
+  bloom: BLOOM_DEFAULT,
 };
 
 const LOOK_SENS_BASE = 0.0022;
@@ -1101,6 +1112,7 @@ function ensureSkyDiscs() {
       new THREE.SphereGeometry(6.5, 16, 12),
       new THREE.MeshBasicMaterial({ color: 0xffe4b8, fog: false, depthWrite: false, toneMapped: false })
     );
+    sunDisc.material.color.setRGB(4.2, 3.5, 2.4);
     sunDisc.renderOrder = -10;
     sunDisc.raycast = () => {};
     scene.add(sunDisc);
@@ -1192,6 +1204,7 @@ function applyTimeOfDay() {
       const s = Math.max(0.15, Math.cos(elRad));
       sunDisc.position.set(Math.sin(azRad) * cosE * skyR, Math.sin(elRad) * skyR, Math.cos(azRad) * cosE * skyR);
       sunDisc.material.color.copy(pal.sun);
+      sunDisc.material.color.multiplyScalar(4.2);
     }
   }
   if (moonDisc) {
@@ -1320,6 +1333,21 @@ function setGodRays(v, { toast = false } = {}) {
   if (toast) showToast(`God rays ${state.godRays.toFixed(2)}`);
 }
 
+function syncBloomUI() {
+  const n = state.bloom ?? BLOOM_DEFAULT;
+  const slider = el("bloomSlider");
+  const val = el("bloomVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2);
+}
+
+function setBloom(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, 2);
+  state.bloom = Number.isFinite(n) ? n : BLOOM_DEFAULT;
+  syncBloomUI();
+  if (toast) showToast(`Bloom ${state.bloom.toFixed(2)}`);
+}
+
 function setLightMul(key, v, { toast = false } = {}) {
   const n = clamp(parseFloat(v), 0, 2.5);
   state[key] = Number.isFinite(n) ? n : 1;
@@ -1431,6 +1459,7 @@ function syncSettingsUI() {
   Object.keys(LIGHT_MUL_UI).forEach(syncLightMulUI);
 
   syncGodRaysUI();
+  syncBloomUI();
   syncFxSettingsUI();
 }
 
@@ -1687,6 +1716,8 @@ let renderer, camera, scene, holdRoot, gunRoot;
 let adsDof = null;
 /** Half-res volumetric sun shafts (shadow-map ray march). */
 let godRays = null;
+/** HDR scene RT + 3-mip dual-filter bloom (Jimenez-style). */
+let hdrBloom = null;
 /** Kept so Settings brightness/gamma can nudge intensities + fog. */
 let hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight;
 let sunDisc = null;
@@ -2691,10 +2722,14 @@ function makeMuzzleFlashSprite(x, y, z, scale = 1) {
     });
   // Readable burst: hotter core + 3 crossed planes, same pose offsets; ~80ms visible.
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.018 * scale, 10, 10), mkMat(0xfffaf0, 1));
+  core.material.color.setRGB(4.8, 4.4, 3.6);
   const long = new THREE.Mesh(new THREE.PlaneGeometry(0.11 * scale, 0.032 * scale), mkMat(0xffcc66, 1));
+  long.material.color.setRGB(3.6, 2.4, 0.75);
   const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.1 * scale, 0.03 * scale), mkMat(0xfff0b8, 0.98));
+  cross.material.color.setRGB(4.2, 3.5, 2.1);
   cross.rotation.z = Math.PI / 2;
   const diag = new THREE.Mesh(new THREE.PlaneGeometry(0.074 * scale, 0.022 * scale), mkMat(0xffa028, 0.95));
+  diag.material.color.setRGB(3.2, 1.6, 0.35);
   diag.rotation.z = Math.PI / 3;
   g.add(core, long, cross, diag);
   g.visible = false;
@@ -3890,7 +3925,7 @@ function makeFloodlight(x, z, opts = {}) {
     roughness: 0.48,
     metalness: 0.55,
     emissive: 0xffc070,
-    emissiveIntensity: 0.9,
+    emissiveIntensity: 2.4,
   });
 
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.12, 8), steelDark);
@@ -3922,6 +3957,7 @@ function makeFloodlight(x, z, opts = {}) {
     new THREE.BoxGeometry(0.3, 0.045, 0.2),
     new THREE.MeshBasicMaterial({ color: 0xffe2b0 })
   );
+  lamp.material.color.setRGB(FLOOD_LAMP_HDR[0], FLOOD_LAMP_HDR[1], FLOOD_LAMP_HDR[2]);
   lamp.position.set(headX + inward * 0.02, headY - 0.1, -0.02);
   lamp.rotation.z = inward * 0.48;
   lamp.rotation.x = -0.32;
@@ -4065,10 +4101,10 @@ function restoreFloodlights() {
     }
     if (fx.head && fx.head.material) {
       if (fx.head.material.emissive) fx.head.material.emissive.setHex(0xffc070);
-      fx.head.material.emissiveIntensity = 0.9;
+      fx.head.material.emissiveIntensity = 2.4;
     }
     if (fx.lamp && fx.lamp.material && fx.lamp.material.color) {
-      fx.lamp.material.color.setHex(0xffe2b0);
+      fx.lamp.material.color.setRGB(FLOOD_LAMP_HDR[0], FLOOD_LAMP_HDR[1], FLOOD_LAMP_HDR[2]);
     }
     if (fx.pool) fx.pool.visible = true;
     if (fx.core) fx.core.visible = true;
@@ -4554,44 +4590,56 @@ function restoreCameraLayers() {
 
 function renderScene() {
   const amount = adsDofAmount();
+  const bloomOn = bloomWanted();
+  const dest = bloomOn ? hdrBloom.sceneRT : null;
+  const prevTM = renderer.toneMapping;
+  if (bloomOn) renderer.toneMapping = THREE.NoToneMapping;
+
   if (!adsDof || amount < 0.02) {
     restoreCameraLayers();
+    renderer.setRenderTarget(dest);
     renderer.render(scene, camera);
-    renderGodRays();
-    return;
+  } else {
+    const prevAutoClear = renderer.autoClear;
+    const prevShadowAuto = renderer.shadowMap.autoUpdate;
+    const prevBg = scene.background;
+    renderer.getClearColor(adsDof._clear);
+    const prevClearAlpha = renderer.getClearAlpha();
+
+    camera.layers.set(0);
+    renderer.autoClear = true;
+    renderer.setRenderTarget(dest);
+    renderer.render(scene, camera);
+
+    camera.layers.set(VIEWMODEL_LAYER);
+    scene.background = null;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.setRenderTarget(adsDof.rt);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    renderer.render(scene, camera);
+
+    scene.background = prevBg;
+    renderer.setClearColor(adsDof._clear, prevClearAlpha);
+    renderer.shadowMap.autoUpdate = prevShadowAuto;
+
+    adsDof.material.uniforms.tDiffuse.value = adsDof.rt.texture;
+    adsDof.material.uniforms.radius.value = ADS_DOF_RADIUS * amount;
+
+    renderer.autoClear = false;
+    renderer.setRenderTarget(dest);
+    renderer.render(adsDof.fsScene, adsDof.fsCam);
+    renderer.autoClear = prevAutoClear;
+    restoreCameraLayers();
   }
 
-  const prevAutoClear = renderer.autoClear;
-  const prevShadowAuto = renderer.shadowMap.autoUpdate;
-  const prevBg = scene.background;
-  renderer.getClearColor(adsDof._clear);
-  const prevClearAlpha = renderer.getClearAlpha();
-
-  camera.layers.set(0);
-  renderer.autoClear = true;
-  renderer.setRenderTarget(null);
-  renderer.render(scene, camera);
-
-  camera.layers.set(VIEWMODEL_LAYER);
-  scene.background = null;
-  renderer.shadowMap.autoUpdate = false;
-  renderer.setRenderTarget(adsDof.rt);
-  renderer.setClearColor(0x000000, 0);
-  renderer.clear();
-  renderer.render(scene, camera);
-  renderer.setRenderTarget(null);
-
-  scene.background = prevBg;
-  renderer.setClearColor(adsDof._clear, prevClearAlpha);
-  renderer.shadowMap.autoUpdate = prevShadowAuto;
-
-  adsDof.material.uniforms.tDiffuse.value = adsDof.rt.texture;
-  adsDof.material.uniforms.radius.value = ADS_DOF_RADIUS * amount;
-
-  renderer.autoClear = false;
-  renderer.render(adsDof.fsScene, adsDof.fsCam);
-  renderer.autoClear = prevAutoClear;
-  restoreCameraLayers();
+  if (bloomOn) {
+    renderer.toneMapping = prevTM;
+    renderBloom();
+  } else {
+    renderer.setRenderTarget(null);
+    renderer.toneMapping = prevTM;
+  }
   renderGodRays();
 }
 
@@ -5097,6 +5145,270 @@ function renderGodRays() {
   restoreCameraLayers();
 }
 
+/* ---- HDR bloom (Jimenez dual-filter, 3 mips) ----
+ * UnrealBloomPass fights logarithmicDepthBuffer / ACES and milks LDR.
+ * Capture the scene (and ADS composite) to a HalfFloat RT with tone
+ * mapping off, bright-pass at threshold ~1, dual-filter pyramid, then
+ * add and ACES onto the backbuffer. God rays still composite after.
+ * Slider 0 skips the capture so the direct ACES path stays untouched.
+ */
+function makeBloomTarget(withDepth) {
+  const rt = new THREE.WebGLRenderTarget(1, 1, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    type: THREE.HalfFloatType,
+    format: THREE.RGBAFormat,
+    depthBuffer: !!withDepth,
+    stencilBuffer: false,
+  });
+  rt.texture.colorSpace = THREE.LinearSRGBColorSpace;
+  return rt;
+}
+
+function bloomWanted() {
+  return !!(hdrBloom && (state.bloom ?? 0) >= 0.01);
+}
+
+function initHdrBloom() {
+  const sceneRT = makeBloomTarget(true);
+  const down = [];
+  const up = [];
+  for (let i = 0; i < BLOOM_MIPS; i++) down.push(makeBloomTarget(false));
+  for (let i = 0; i < BLOOM_MIPS - 1; i++) up.push(makeBloomTarget(false));
+
+  const vs = /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = vec4(position.xy, 0.0, 1.0);
+    }
+  `;
+
+  const prefilterMat = new THREE.ShaderMaterial({
+    name: "BloomPrefilter",
+    uniforms: {
+      tInput: { value: null },
+      threshold: { value: BLOOM_THRESHOLD },
+      knee: { value: BLOOM_KNEE },
+    },
+    vertexShader: vs,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tInput;
+      uniform float threshold;
+      uniform float knee;
+      varying vec2 vUv;
+      void main() {
+        vec3 c = texture2D(tInput, vUv).rgb;
+        float br = max(c.r, max(c.g, c.b));
+        float k = max(threshold * knee, 1e-4);
+        float soft = clamp(br - threshold + k, 0.0, 2.0 * k);
+        soft = (soft * soft) / (4.0 * k + 1e-4);
+        float contrib = max(br - threshold, soft) / max(br, 1e-4);
+        c *= contrib;
+        c = min(c, vec3(12.0));
+        gl_FragColor = vec4(c, 1.0);
+      }
+    `,
+    fog: false,
+    toneMapped: false,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const downMat = new THREE.ShaderMaterial({
+    name: "BloomDownsample",
+    uniforms: {
+      tInput: { value: null },
+      texel: { value: new THREE.Vector2(1, 1) },
+    },
+    vertexShader: vs,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tInput;
+      uniform vec2 texel;
+      varying vec2 vUv;
+      void main() {
+        vec4 A = texture2D(tInput, vUv + texel * vec2(-1.0, -1.0));
+        vec4 B = texture2D(tInput, vUv + texel * vec2( 0.0, -1.0));
+        vec4 C = texture2D(tInput, vUv + texel * vec2( 1.0, -1.0));
+        vec4 D = texture2D(tInput, vUv + texel * vec2(-0.5, -0.5));
+        vec4 E = texture2D(tInput, vUv + texel * vec2( 0.5, -0.5));
+        vec4 F = texture2D(tInput, vUv + texel * vec2(-1.0,  0.0));
+        vec4 G = texture2D(tInput, vUv);
+        vec4 H = texture2D(tInput, vUv + texel * vec2( 1.0,  0.0));
+        vec4 I = texture2D(tInput, vUv + texel * vec2(-0.5,  0.5));
+        vec4 J = texture2D(tInput, vUv + texel * vec2( 0.5,  0.5));
+        vec4 K = texture2D(tInput, vUv + texel * vec2(-1.0,  1.0));
+        vec4 L = texture2D(tInput, vUv + texel * vec2( 0.0,  1.0));
+        vec4 M = texture2D(tInput, vUv + texel * vec2( 1.0,  1.0));
+        vec4 o = (D + E + I + J) * 0.125;
+        o += (A + B + G + F) * 0.03125;
+        o += (B + C + H + G) * 0.03125;
+        o += (F + G + L + K) * 0.03125;
+        o += (G + H + M + L) * 0.03125;
+        gl_FragColor = o;
+      }
+    `,
+    fog: false,
+    toneMapped: false,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const upMat = new THREE.ShaderMaterial({
+    name: "BloomUpsample",
+    uniforms: {
+      tLow: { value: null },
+      tHigh: { value: null },
+      texel: { value: new THREE.Vector2(1, 1) },
+      combine: { value: 1 },
+    },
+    vertexShader: vs,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tLow;
+      uniform sampler2D tHigh;
+      uniform vec2 texel;
+      uniform float combine;
+      varying vec2 vUv;
+      void main() {
+        vec4 A = texture2D(tLow, vUv + texel * vec2(-1.0, -1.0));
+        vec4 B = texture2D(tLow, vUv + texel * vec2( 0.0, -1.0));
+        vec4 C = texture2D(tLow, vUv + texel * vec2( 1.0, -1.0));
+        vec4 D = texture2D(tLow, vUv + texel * vec2(-1.0,  0.0));
+        vec4 E = texture2D(tLow, vUv);
+        vec4 F = texture2D(tLow, vUv + texel * vec2( 1.0,  0.0));
+        vec4 G = texture2D(tLow, vUv + texel * vec2(-1.0,  1.0));
+        vec4 H = texture2D(tLow, vUv + texel * vec2( 0.0,  1.0));
+        vec4 I = texture2D(tLow, vUv + texel * vec2( 1.0,  1.0));
+        vec4 o = E * 4.0;
+        o += (B + D + F + H) * 2.0;
+        o += (A + C + G + I);
+        o *= 0.0625;
+        if (combine > 0.5) o.rgb += texture2D(tHigh, vUv).rgb;
+        gl_FragColor = o;
+      }
+    `,
+    fog: false,
+    toneMapped: false,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const compositeMat = new THREE.ShaderMaterial({
+    name: "BloomComposite",
+    uniforms: {
+      tScene: { value: null },
+      tBloom: { value: null },
+      intensity: { value: BLOOM_DEFAULT },
+    },
+    vertexShader: vs,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tScene;
+      uniform sampler2D tBloom;
+      uniform float intensity;
+      varying vec2 vUv;
+      void main() {
+        vec3 scene = texture2D(tScene, vUv).rgb;
+        vec3 bloom = texture2D(tBloom, vUv).rgb;
+        gl_FragColor = vec4(scene + bloom * intensity, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+    fog: false,
+    toneMapped: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), prefilterMat);
+  quad.frustumCulled = false;
+  const fsScene = new THREE.Scene();
+  fsScene.add(quad);
+  const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  hdrBloom = {
+    sceneRT,
+    down,
+    up,
+    prefilterMat,
+    downMat,
+    upMat,
+    compositeMat,
+    quad,
+    fsScene,
+    fsCam,
+    _clear: new THREE.Color(),
+  };
+  resizeHdrBloom();
+}
+
+function resizeHdrBloom() {
+  if (!hdrBloom || !renderer) return;
+  const canvas = el("view3d");
+  const wrap = canvas && canvas.parentElement;
+  const w = (wrap && wrap.clientWidth) || (canvas && canvas.clientWidth) || window.innerWidth;
+  const h = (wrap && wrap.clientHeight) || (canvas && canvas.clientHeight) || window.innerHeight;
+  const pr = renderer.getPixelRatio();
+  const fw = Math.max(1, Math.floor(w * pr));
+  const fh = Math.max(1, Math.floor(h * pr));
+  hdrBloom.sceneRT.setSize(fw, fh);
+  let mw = Math.max(1, Math.floor(fw * 0.5));
+  let mh = Math.max(1, Math.floor(fh * 0.5));
+  for (let i = 0; i < BLOOM_MIPS; i++) {
+    hdrBloom.down[i].setSize(mw, mh);
+    if (i < hdrBloom.up.length) hdrBloom.up[i].setSize(mw, mh);
+    mw = Math.max(1, Math.floor(mw * 0.5));
+    mh = Math.max(1, Math.floor(mh * 0.5));
+  }
+}
+
+function blitBloom(mat, target) {
+  hdrBloom.quad.material = mat;
+  renderer.setRenderTarget(target);
+  renderer.render(hdrBloom.fsScene, hdrBloom.fsCam);
+}
+
+function renderBloom() {
+  if (!hdrBloom || !renderer) return;
+  const prevAutoClear = renderer.autoClear;
+  renderer.getClearColor(hdrBloom._clear);
+  const prevClearAlpha = renderer.getClearAlpha();
+  renderer.autoClear = true;
+  renderer.setClearColor(0x000000, 1);
+
+  const sceneTex = hdrBloom.sceneRT.texture;
+  hdrBloom.prefilterMat.uniforms.tInput.value = sceneTex;
+  hdrBloom.prefilterMat.uniforms.threshold.value = BLOOM_THRESHOLD;
+  hdrBloom.prefilterMat.uniforms.knee.value = BLOOM_KNEE;
+  blitBloom(hdrBloom.prefilterMat, hdrBloom.down[0]);
+
+  for (let i = 0; i < BLOOM_MIPS - 1; i++) {
+    const src = hdrBloom.down[i];
+    hdrBloom.downMat.uniforms.tInput.value = src.texture;
+    hdrBloom.downMat.uniforms.texel.value.set(1 / Math.max(1, src.width), 1 / Math.max(1, src.height));
+    blitBloom(hdrBloom.downMat, hdrBloom.down[i + 1]);
+  }
+
+  let low = hdrBloom.down[BLOOM_MIPS - 1];
+  for (let i = BLOOM_MIPS - 2; i >= 0; i--) {
+    const dest = hdrBloom.up[i];
+    const high = hdrBloom.down[i];
+    hdrBloom.upMat.uniforms.tLow.value = low.texture;
+    hdrBloom.upMat.uniforms.tHigh.value = high.texture;
+    hdrBloom.upMat.uniforms.texel.value.set(1 / Math.max(1, low.width), 1 / Math.max(1, low.height));
+    hdrBloom.upMat.uniforms.combine.value = 1;
+    blitBloom(hdrBloom.upMat, dest);
+    low = dest;
+  }
+
+  hdrBloom.compositeMat.uniforms.tScene.value = sceneTex;
+  hdrBloom.compositeMat.uniforms.tBloom.value = low.texture;
+  hdrBloom.compositeMat.uniforms.intensity.value = state.bloom;
+  renderer.setClearColor(hdrBloom._clear, prevClearAlpha);
+  blitBloom(hdrBloom.compositeMat, null);
+
+  renderer.autoClear = prevAutoClear;
+}
 
 function initThree() {
   const canvas = el("view3d");
@@ -5164,6 +5476,7 @@ function initThree() {
   buildBlockGun(state.weaponId);
   initAdsDof();
   initGodRays();
+  initHdrBloom();
   resize();
   applyDisplayLook();
   const ro = new ResizeObserver(() => resize());
@@ -5182,6 +5495,7 @@ function resize() {
   camera.updateProjectionMatrix();
   resizeAdsDof();
   resizeGodRays();
+  resizeHdrBloom();
 }
 
 function applyAttachmentOffsets() {
@@ -5779,6 +6093,7 @@ function fireWeapon({ fromHold = false } = {}) {
     depthWrite: false,
     toneMapped: false,
   });
+  mat.color.setRGB(2.85, 2.25, 0.95);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   // Start past the barrel so the streak does not draw inside the receiver.
@@ -7514,6 +7829,13 @@ function bind() {
     godRaysSlider.oninput = (e) => setGodRays(e.target.value);
   }
   syncGodRaysUI();
+
+  const bloomSlider = el("bloomSlider");
+  if (bloomSlider) {
+    bloomSlider.value = String(state.bloom);
+    bloomSlider.oninput = (e) => setBloom(e.target.value);
+  }
+  syncBloomUI();
 
   Object.keys(LIGHT_MUL_UI).forEach((key) => {
     const meta = LIGHT_MUL_UI[key];

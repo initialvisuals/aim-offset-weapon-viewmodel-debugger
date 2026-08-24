@@ -40,6 +40,6 @@ You keep iterating in play mode. Art and balance stay data.
 ## Design principles
 
 1. **Authoring offsets ≠ procedural motion.** Sway/bob/recoil multiply or add *after* the hold pose.
-2. **One clipboard format** shared across tools so ports and sibling projects can exchange tunes.
+2. **One clipboard format** shared across tools so different engines and ports can exchange tunes.
 3. **Explicit contracts** for forward axis and rotation label meaning — silent “fixes” destroy all existing tunes.
 4. **Optic-specific ADS poses** beat one ADS pose plus endless FOV hacks.

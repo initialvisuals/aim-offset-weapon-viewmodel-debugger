@@ -2,7 +2,7 @@
 
 **Engine-agnostic docs and schemas** for live first-person weapon pose tuning — hip, ADS, optic-specific ADS, and attachment mounts — so iron sights and optics line up with the reticle without recompile-and-guess loops.
 
-This repo is a **knowledge share**, not a drop-in Unity/Unreal plugin or standalone app. It distills a battle-tested workflow: author hold offsets as data, nudge them live in-game, clipboard them back into files.
+This repo is a **knowledge share**, not a drop-in Unity/Unreal plugin or standalone app. It documents a practical workflow: author hold offsets as data, nudge them live in play mode, and clipboard them back into files.
 
 ## Who this is for
 
@@ -45,7 +45,7 @@ Runtime juice (sway, bob, recoil kick) stays **separate** from authored hold off
 ## What this is not
 
 - Not a full debugger binary
-- Not CE/Mycelium source dumps
+- Not a dump of any proprietary game project
 - Not mesh / animation / IP packs
 
 Optional tiny language cores or engine adapters can come later if people want them. The portable value is the **workflow + schema**.

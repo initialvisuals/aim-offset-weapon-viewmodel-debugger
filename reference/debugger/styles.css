@@ -225,3 +225,22 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
 .float-popup.mid { color: #ffffff; }
 .float-popup.outer { color: #d0d6e0; }
 .float-popup.edge { color: #9aa6bd; }
+
+.sil-legend {
+  pointer-events: none;
+  position: absolute;
+  right: 1rem;
+  top: 2.6rem;
+  color: #b8c0d0;
+  font: 500 0.78rem/1.25 ui-sans-serif, system-ui, sans-serif;
+  text-shadow: 0 1px 3px #000;
+  opacity: 0.9;
+}
+.sil-legend kbd {
+  font: 600 0.72rem/1 ui-monospace, monospace;
+  padding: 0.05rem 0.28rem;
+  border: 1px solid #4a5568;
+  border-radius: 3px;
+  background: rgba(20, 24, 32, 0.75);
+  color: #e2e8f0;
+}

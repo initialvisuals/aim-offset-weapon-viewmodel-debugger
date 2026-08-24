@@ -146,6 +146,150 @@ function typingFocus() {
   return t && (t.matches("input, select, textarea") || t.isContentEditable);
 }
 
+
+/* ---- Cheap Web Audio SFX (no external files) ---- */
+const sfx = {
+  ctx: null,
+  ensure() {
+    if (this.ctx) return this.ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    this.ctx = new AC();
+    return this.ctx;
+  },
+  resume() {
+    const c = this.ensure();
+    if (c && c.state === "suspended") c.resume().catch(() => {});
+    return c;
+  },
+  noiseBuffer(duration = 0.08) {
+    const c = this.ensure();
+    if (!c) return null;
+    const n = Math.max(1, Math.floor(c.sampleRate * duration));
+    const buf = c.createBuffer(1, n, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1;
+    return buf;
+  },
+  play(kind) {
+    const c = this.resume();
+    if (!c) return;
+    const now = c.currentTime;
+    const out = c.createGain();
+    out.connect(c.destination);
+
+    if (kind === "fire") {
+      out.gain.setValueAtTime(0.0001, now);
+      out.gain.exponentialRampToValueAtTime(0.35, now + 0.004);
+      out.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+      const noise = c.createBufferSource();
+      noise.buffer = this.noiseBuffer(0.06);
+      const bp = c.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 1200;
+      bp.Q.value = 0.7;
+      noise.connect(bp);
+      bp.connect(out);
+      noise.start(now);
+      noise.stop(now + 0.07);
+      const osc = c.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(95, now);
+      osc.frequency.exponentialRampToValueAtTime(45, now + 0.08);
+      const og = c.createGain();
+      og.gain.setValueAtTime(0.0001, now);
+      og.gain.exponentialRampToValueAtTime(0.45, now + 0.005);
+      og.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+      osc.connect(og);
+      og.connect(c.destination);
+      osc.start(now);
+      osc.stop(now + 0.11);
+      return;
+    }
+
+    if (kind === "bullseye") {
+      out.gain.setValueAtTime(0.0001, now);
+      out.gain.exponentialRampToValueAtTime(0.28, now + 0.005);
+      out.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+      const o1 = c.createOscillator();
+      o1.type = "triangle";
+      o1.frequency.setValueAtTime(1480, now);
+      o1.frequency.exponentialRampToValueAtTime(2200, now + 0.05);
+      o1.connect(out);
+      o1.start(now);
+      o1.stop(now + 0.22);
+      const o2 = c.createOscillator();
+      o2.type = "sine";
+      o2.frequency.value = 2960;
+      const g2 = c.createGain();
+      g2.gain.setValueAtTime(0.0001, now);
+      g2.gain.exponentialRampToValueAtTime(0.12, now + 0.01);
+      g2.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+      o2.connect(g2);
+      g2.connect(c.destination);
+      o2.start(now);
+      o2.stop(now + 0.18);
+      return;
+    }
+
+    if (kind === "hit") {
+      out.gain.setValueAtTime(0.0001, now);
+      out.gain.exponentialRampToValueAtTime(0.32, now + 0.003);
+      out.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+      const noise = c.createBufferSource();
+      noise.buffer = this.noiseBuffer(0.05);
+      const bp = c.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 780;
+      bp.Q.value = 1.4;
+      noise.connect(bp);
+      bp.connect(out);
+      noise.start(now);
+      noise.stop(now + 0.05);
+      const osc = c.createOscillator();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(220, now);
+      osc.frequency.exponentialRampToValueAtTime(90, now + 0.12);
+      const og = c.createGain();
+      og.gain.setValueAtTime(0.0001, now);
+      og.gain.exponentialRampToValueAtTime(0.14, now + 0.004);
+      og.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
+      osc.connect(og);
+      og.connect(c.destination);
+      osc.start(now);
+      osc.stop(now + 0.14);
+      return;
+    }
+
+    if (kind === "miss") {
+      out.gain.setValueAtTime(0.0001, now);
+      out.gain.exponentialRampToValueAtTime(0.22, now + 0.008);
+      out.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+      const noise = c.createBufferSource();
+      noise.buffer = this.noiseBuffer(0.12);
+      const lp = c.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 280;
+      noise.connect(lp);
+      lp.connect(out);
+      noise.start(now);
+      noise.stop(now + 0.12);
+      const osc = c.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(70, now);
+      osc.frequency.exponentialRampToValueAtTime(32, now + 0.15);
+      const og = c.createGain();
+      og.gain.setValueAtTime(0.0001, now);
+      og.gain.exponentialRampToValueAtTime(0.2, now + 0.01);
+      og.gain.exponentialRampToValueAtTime(0.0001, now + 0.17);
+      osc.connect(og);
+      og.connect(c.destination);
+      osc.start(now);
+      osc.stop(now + 0.18);
+    }
+  },
+};
+
 /* ---- Toast ---- */
 function showToast(message, isError = false) {
   const host = el("toastHost");
@@ -406,6 +550,7 @@ let tracers = [];
 let playerRoot, leanPivot;
 let pickups = [];
 let rangeTargets = [];
+let silhouetteTargets = [];
 let scorePopups = [];
 let clock = new THREE.Clock();
 const _fwd = new THREE.Vector3();
@@ -729,6 +874,7 @@ function buildShootingRange() {
     { z: -380, pts: 30, label: "≈400m" },
   ];
   rangeTargets = [];
+  silhouetteTargets = [];
   scorePopups.forEach((p) => p.el && p.el.remove());
   scorePopups = [];
   const fl = el("floatLabels");
@@ -822,7 +968,243 @@ function buildShootingRange() {
     });
   });
 
+  buildSilhouetteLane();
+
   scene.add(makeBox(20, 4.5, 0.6, 0x2a2030, 0, 0.5, -410));
+}
+
+
+function syncSilhouetteZones(sil) {
+  const _wp = new THREE.Vector3();
+  for (const z of sil.zones) {
+    const mesh = sil.plates[z.id];
+    if (!mesh) continue;
+    mesh.getWorldPosition(_wp);
+    z.center.copy(_wp);
+    // Face shooter (+Z in world for upright plates; still fine when flopped)
+    z.normal.set(0, 0, 1);
+  }
+  if (sil.headHinge) {
+    sil.headHinge.getWorldPosition(_wp);
+    sil.labelAnchor.set(_wp.x, _wp.y + 0.28 * sil.scale, _wp.z);
+  }
+}
+
+function createKnockdownSilhouette(x, z, scale, label) {
+  const group = new THREE.Group();
+  group.position.set(x, -1.35, z);
+
+  const steel = 0x6a737e;
+  const steelDark = 0x4a5560;
+  const wood = 0x5c4632;
+  const zoneCol = 0x8a949e;
+
+  group.add(makeBox(0.38 * scale, 0.07 * scale, 0.28 * scale, wood, 0, 0.035 * scale, 0));
+  group.add(makeBox(0.07 * scale, 0.5 * scale, 0.07 * scale, steelDark, 0, 0.32 * scale, -0.04 * scale));
+
+  // Static lower legs / lower plate
+  group.add(makeBox(0.11 * scale, 0.52 * scale, 0.08 * scale, steel, -0.11 * scale, 0.52 * scale, 0));
+  group.add(makeBox(0.11 * scale, 0.52 * scale, 0.08 * scale, steel, 0.11 * scale, 0.52 * scale, 0));
+  group.add(makeBox(0.34 * scale, 0.1 * scale, 0.06 * scale, steelDark, 0, 0.78 * scale, 0.01 * scale));
+
+  const hipY = 0.88 * scale;
+  const pelvisHinge = new THREE.Group();
+  pelvisHinge.position.set(0, hipY, 0);
+  group.add(pelvisHinge);
+
+  const pelvisPlate = makeBox(0.34 * scale, 0.2 * scale, 0.05 * scale, zoneCol, 0, 0.06 * scale, 0.025 * scale);
+  pelvisHinge.add(pelvisPlate);
+  const pelvisFlash = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.36 * scale, 0.22 * scale),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+  );
+  pelvisFlash.position.set(0, 0.06 * scale, 0.055 * scale);
+  pelvisHinge.add(pelvisFlash);
+
+  // Torso rocker parented under pelvis hinge (drops on kneel / collapse)
+  const torsoPivot = new THREE.Group();
+  torsoPivot.position.set(0, 0.14 * scale, 0);
+  pelvisHinge.add(torsoPivot);
+
+  const chestPlate = makeBox(0.38 * scale, 0.52 * scale, 0.06 * scale, steel, 0, 0.28 * scale, 0.02 * scale);
+  torsoPivot.add(chestPlate);
+  // Blocky shoulder stubs
+  torsoPivot.add(makeBox(0.14 * scale, 0.12 * scale, 0.08 * scale, steelDark, -0.24 * scale, 0.46 * scale, 0.01 * scale));
+  torsoPivot.add(makeBox(0.14 * scale, 0.12 * scale, 0.08 * scale, steelDark, 0.24 * scale, 0.46 * scale, 0.01 * scale));
+  const chestFlash = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.4 * scale, 0.54 * scale),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+  );
+  chestFlash.position.set(0, 0.28 * scale, 0.055 * scale);
+  torsoPivot.add(chestFlash);
+
+  const headHinge = new THREE.Group();
+  headHinge.position.set(0, 0.56 * scale, 0);
+  torsoPivot.add(headHinge);
+
+  const headPlate = makeBox(0.2 * scale, 0.24 * scale, 0.16 * scale, zoneCol, 0, 0.13 * scale, 0.02 * scale);
+  headHinge.add(headPlate);
+  // Ocular strip (original block accent — not a copyrighted face)
+  headHinge.add(makeBox(0.14 * scale, 0.05 * scale, 0.02 * scale, 0x9aa8b5, 0, 0.15 * scale, 0.11 * scale));
+  const headFlash = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.22 * scale, 0.26 * scale),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+  );
+  headFlash.position.set(0, 0.13 * scale, 0.12 * scale);
+  headHinge.add(headFlash);
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "float-label";
+  labelEl.textContent = label;
+  const host = el("floatLabels");
+  if (host) host.appendChild(labelEl);
+
+  const sil = {
+    group,
+    pelvisHinge,
+    torsoPivot,
+    headHinge,
+    plates: { pelvis: pelvisPlate, chest: chestPlate, head: headPlate },
+    flashes: { pelvis: pelvisFlash, chest: chestFlash, head: headFlash },
+    pose: "standing",
+    headDown: false,
+    chestHitCount: 0,
+    chestHitsNeeded: 3,
+    kneelAngle: 0,
+    kneelTarget: 0,
+    collapseAngle: 0,
+    collapseTarget: 0,
+    headAngle: 0,
+    headTarget: 0,
+    scale,
+    label,
+    labelEl,
+    labelAnchor: new THREE.Vector3(x, -1.35 + hipY + 0.85 * scale, z),
+    hitUntil: { head: 0, chest: 0, pelvis: 0 },
+    zones: [
+      { id: "head", center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), radius: 0.13 * scale, pts: 25 },
+      { id: "chest", center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), radius: 0.22 * scale, pts: 5 },
+      { id: "pelvis", center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, 1), radius: 0.16 * scale, pts: 15 },
+    ],
+  };
+  scene.add(group);
+  syncSilhouetteZones(sil);
+  return sil;
+}
+
+function buildSilhouetteLane() {
+  silhouetteTargets = [];
+  const lanes = [
+    { z: -42, label: "≈80m" },
+    { z: -88, label: "≈140m" },
+    { z: -145, label: "≈190m" },
+    { z: -230, label: "≈280m" },
+    { z: -340, label: "≈370m" },
+  ];
+  const laneX = 7.4;
+  lanes.forEach((lane) => {
+    const x = laneX + (Math.random() - 0.5) * 1.6;
+    const z = lane.z + (Math.random() - 0.5) * 4;
+    const scale = 0.92 + Math.random() * 0.22;
+    silhouetteTargets.push(createKnockdownSilhouette(x, z, scale, lane.label));
+  });
+}
+
+function zoneActive(sil, zoneId) {
+  if (zoneId === "head") return !sil.headDown;
+  if (zoneId === "pelvis") return sil.pose === "standing";
+  if (zoneId === "chest") return sil.pose !== "down" && sil.chestHitCount < sil.chestHitsNeeded;
+  return false;
+}
+
+function pushScorePopup(pts, klass, anchor) {
+  const host = el("floatLabels");
+  if (host) {
+    const node = document.createElement("div");
+    node.className = "float-popup " + klass;
+    node.textContent = "+" + pts;
+    host.appendChild(node);
+    const a = anchor.clone();
+    a.y += 0.35;
+    scorePopups.push({ el: node, anchor: a, life: 1.15, drift: 0 });
+  }
+  state.score = (state.score || 0) + pts;
+  const hud = el("scoreHud");
+  if (hud) hud.textContent = "Score " + state.score;
+}
+
+function flashSilhouetteZone(sil, zone, hitPos) {
+  const id = zone.id;
+  sil.hitUntil[id] = performance.now() + 220;
+  if (sil.flashes[id]) sil.flashes[id].material.opacity = 1;
+
+  let pts = zone.pts;
+  let klass = "outer";
+  if (id === "head") {
+    klass = "bull";
+    sfx.play("bullseye");
+  } else {
+    klass = id === "pelvis" ? "mid" : "outer";
+    sfx.play("hit");
+  }
+  pushScorePopup(pts, klass, hitPos || zone.center);
+
+  if (id === "head" && !sil.headDown) {
+    sil.headDown = true;
+    sil.headTarget = -Math.PI * 0.52; // flop back/down ~90°+
+  } else if (id === "pelvis" && sil.pose === "standing") {
+    sil.pose = "kneeling";
+    sil.kneelTarget = 1.05; // ~60°
+  } else if (id === "chest") {
+    sil.chestHitCount += 1;
+    if (sil.chestHitCount >= sil.chestHitsNeeded && sil.pose !== "down") {
+      sil.pose = "down";
+      sil.kneelTarget = Math.max(sil.kneelTarget, 0.9);
+      sil.collapseTarget = 1.25; // full fold
+    }
+  }
+}
+
+function resetSilhouettes() {
+  for (const sil of silhouetteTargets) {
+    sil.pose = "standing";
+    sil.headDown = false;
+    sil.chestHitCount = 0;
+    sil.kneelTarget = 0;
+    sil.collapseTarget = 0;
+    sil.headTarget = 0;
+    sil.kneelAngle = 0;
+    sil.collapseAngle = 0;
+    sil.headAngle = 0;
+    sil.pelvisHinge.rotation.x = 0;
+    sil.torsoPivot.rotation.x = 0;
+    sil.headHinge.rotation.x = 0;
+    for (const k of Object.keys(sil.flashes)) {
+      sil.flashes[k].material.opacity = 0;
+      sil.hitUntil[k] = 0;
+    }
+    syncSilhouetteZones(sil);
+  }
+}
+
+function updateSilhouettes(dt) {
+  const now = performance.now();
+  const k = 1 - Math.exp(-10 * dt);
+  for (const sil of silhouetteTargets) {
+    sil.kneelAngle = lerp(sil.kneelAngle, sil.kneelTarget, k);
+    sil.collapseAngle = lerp(sil.collapseAngle, sil.collapseTarget, k);
+    sil.headAngle = lerp(sil.headAngle, sil.headTarget, k);
+    sil.pelvisHinge.rotation.x = sil.kneelAngle;
+    sil.torsoPivot.rotation.x = sil.collapseAngle;
+    sil.headHinge.rotation.x = sil.headAngle;
+    for (const id of ["head", "chest", "pelvis"]) {
+      const flash = sil.flashes[id];
+      if (!flash) continue;
+      if (now < sil.hitUntil[id]) flash.material.opacity = 1;
+      else flash.material.opacity = Math.max(0, flash.material.opacity - dt * 3);
+    }
+    syncSilhouetteZones(sil);
+  }
 }
 
 function worldToScreen(world, out = { x: 0, y: 0, visible: false }) {
@@ -839,7 +1221,7 @@ function worldToScreen(world, out = { x: 0, y: 0, visible: false }) {
   return out;
 }
 
-function hitTargetDisk(prev, curr, t) {
+function hitTargetDiskInfo(prev, curr, t) {
   const n = t.normal;
   const center = t.center;
   const seg = curr.clone().sub(prev);
@@ -851,7 +1233,12 @@ function hitTargetDisk(prev, curr, t) {
   const radial = hit.clone().sub(center);
   radial.addScaledVector(n, -radial.dot(n));
   if (radial.length() > t.radius) return null;
-  return center.clone().add(radial);
+  return { hit: center.clone().add(radial), u };
+}
+
+function hitTargetDisk(prev, curr, t) {
+  const info = hitTargetDiskInfo(prev, curr, t);
+  return info ? info.hit : null;
 }
 
 function flashTarget(t, hitPos) {
@@ -875,26 +1262,17 @@ function flashTarget(t, hitPos) {
     klass = "edge";
   }
 
-  const host = el("floatLabels");
-  if (host) {
-    const node = document.createElement("div");
-    node.className = "float-popup " + klass;
-    node.textContent = "+" + pts;
-    host.appendChild(node);
-    const anchor = (hitPos || t.center).clone();
-    anchor.y += 0.35;
-    scorePopups.push({ el: node, anchor, life: 1.15, drift: 0 });
-  }
+  if (klass === "bull") sfx.play("bullseye");
+  else sfx.play("hit");
 
-  state.score = (state.score || 0) + pts;
-  const hud = el("scoreHud");
-  if (hud) hud.textContent = "Score " + state.score;
+  pushScorePopup(pts, klass, hitPos || t.center);
 }
 
 function updateScorePopups(dt) {
   const tmp = { x: 0, y: 0, visible: false };
   // Distance labels — fixed screen size, pinned near target
-  rangeTargets.forEach((t) => {
+  const labelSources = rangeTargets.concat(silhouetteTargets);
+  labelSources.forEach((t) => {
     if (!t.labelEl) return;
     worldToScreen(t.labelAnchor || t.center, tmp);
     if (!tmp.visible) {
@@ -1110,6 +1488,8 @@ function fireWeapon() {
     tryEquipLooked();
     return;
   }
+  sfx.resume();
+  sfx.play("fire");
   player.fireCooldown = state.optic === "sniper_scope" ? 0.35 : 0.12;
   fireFlash();
   // Recoil punch on swayRig (not authored hold)
@@ -1164,22 +1544,36 @@ function updateTracers(dt) {
       );
     }
 
-    // Accurate planar disk hit test vs range targets
+    // First hit along segment: circular bullseyes + silhouette zones
     if (!tr.hit) {
+      let best = null;
       for (const t of rangeTargets) {
-        const hitPt = hitTargetDisk(prev, tr.mesh.position, t);
-        if (hitPt) {
-          tr.hit = true;
-          tr.life = Math.min(tr.life, 0.02);
-          flashTarget(t, hitPt);
-          break;
+        const info = hitTargetDiskInfo(prev, tr.mesh.position, t);
+        if (info && (!best || info.u < best.u)) {
+          best = { kind: "circle", target: t, hit: info.hit, u: info.u };
         }
+      }
+      for (const sil of silhouetteTargets) {
+        for (const zone of sil.zones) {
+          if (!zoneActive(sil, zone.id)) continue;
+          const info = hitTargetDiskInfo(prev, tr.mesh.position, zone);
+          if (info && (!best || info.u < best.u)) {
+            best = { kind: "sil", sil, zone, hit: info.hit, u: info.u };
+          }
+        }
+      }
+      if (best) {
+        tr.hit = true;
+        tr.life = Math.min(tr.life, 0.02);
+        if (best.kind === "circle") flashTarget(best.target, best.hit);
+        else flashSilhouetteZone(best.sil, best.zone, best.hit);
       }
     }
     if (tr.prev) tr.prev.copy(tr.mesh.position);
     else tr.prev = tr.mesh.position.clone();
 
     if (tr.life <= 0 || tr.mesh.position.y < -2.5) {
+      if (!tr.hit) sfx.play("miss");
       scene.remove(tr.mesh);
       tr.mesh.geometry.dispose();
       tr.mesh.material.dispose();
@@ -1287,6 +1681,8 @@ function updatePlayer(dt) {
   applyHoldToScene();
   applySwayAndRecoil(dt, moving);
   updateTracers(dt);
+  updateSilhouettes(dt);
+  updateScorePopups(dt);
 }
 
 function syncAdsSlider() {
@@ -1484,6 +1880,10 @@ function onKeyDown(e) {
     if (k === "f" || k === "F") {
       if (state.lookPickup) tryEquipLooked();
     }
+    if ((k === "r" || k === "R") && !e.repeat) {
+      resetSilhouettes();
+      e.preventDefault();
+    }
   }
 
   // Debugger hotkeys when panel open
@@ -1596,7 +1996,7 @@ function onMouseMove(e) {
 function bindPointerLock() {
   const canvas = el("view3d");
   canvas.addEventListener("click", () => {
-    if (gameplayActive() && !document.pointerLockElement) canvas.requestPointerLock();
+    if (gameplayActive() && !document.pointerLockElement) { sfx.resume(); canvas.requestPointerLock(); }
   });
   document.addEventListener("pointerlockchange", () => {
     if (!document.pointerLockElement) {

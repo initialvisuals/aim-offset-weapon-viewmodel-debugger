@@ -16,12 +16,12 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 
 ## What you get
 
-1. **3D viewport** — walkable room, optics table, procedural shooting range (25/50/75/100m targets), first-person block guns, cyan aim ray (camera −Z), crosshair.
+1. **3D viewport** — walkable room, optics table, procedural shooting range (circular bullseye lanes + side knockdown silhouette lane), first-person block guns, cyan aim ray (camera −Z), crosshair.
 2. **Player controls** (panel closed) — WASD, Shift sprint, mouse look, Q/E lean (full roll + lateral offset), tiny A/D strafe tilt only (~2.5% of lean max), RMB ADS, Alt hold-breath, LMB/Space fire.
 3. **ADS presentation** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), screen-space HUD reticle (holo dot / ACOG chevron / sniper mil-cross), peripheral tube frame + vignette for magnified optics. Iron uses 3D front-post / rear-notch geometry. Attachment offsets still move the optic mesh on the gun for hip/inspection.
 4. **Sway + recoil** — procedural on a `swayRig` *after* the authored hold pose (never baked into hip/ADS JSON). Header **Sway** toggle (default ON); turn OFF for clean aim-offset tuning.
 5. **Hold breath (Alt)** — damps sway for up to ~3s (HUD stamina bar); release/exhaust recovers with a brief overshoot.
-6. **Shooting** — tracers spawn at the muzzle and travel along **camera aim** (Policy A) with simple ballistic drop (`vel.y -= g·dt`). SMG drops more / slower; rifle flatter; sniper scope fastest/flattest. Hits flash range targets.
+6. **Shooting** — tracers spawn at the muzzle and travel along **camera aim** (Policy A) with simple ballistic drop (`vel.y -= g·dt`). SMG drops more / slower; rifle flatter; sniper scope fastest/flattest. Hits flash range targets. Cheap Web Audio SFX (fire / hit / bullseye / miss) unlock on first gesture.
 7. **Optics table** — iron / holo / acog / sniper_scope props match equipped style; look + click or E to equip.
 8. **Debugger panel (C)** — view/attachment tabs, ads_factor slider (synced from RMB), six-axis editors, Copy JSON + toast. **G** = gun picker.
 
@@ -40,8 +40,13 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 | Insert | ADS preview |
 | End / arrows / PgUp/PgDn | Pose / axis / step (panel open) |
 | Esc | Exit lock / close modal / panel |
+| R | Reset silhouette poses |
 
 When the panel is open, gameplay keys do not steal typing from axis inputs.
+
+## Silhouette lane
+
+Offset to the right of the circular bullseyes: original blocky steel/wood knockdown silhouettes (not a copy of any commercial target art). Zones: **head** (flops back), **pelvis** (kneel / torso drops), **chest** (rocker — needs 3 hits to fully drop). Watch the body move; center-mass alone does not instantly neutralize. **R** resets all silhouette poses (score unchanged). HUD legend: `Silhouette: head / chest×3 / pelvis`.
 
 ## Notes
 

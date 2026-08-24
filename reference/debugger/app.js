@@ -124,6 +124,20 @@ const MAG_SPEC = {
 const BOLT_CYCLE_SEC = 0.65;
 /** SMG AUTO interval — ~1200 rpm (50 ms). Semi is still one shot per click. */
 const SMG_AUTO_SEC = 0.05;
+/**
+ * Barrel heat: energy per shot / thermal mass, plus cool time-constant (s).
+ * Stored heat is shots-through minus exponential cool — not a flat glow.
+ * SMG auto (~20 rps) cooks a mag; DMR semi (~7 rps) warms; bolt (~1.5 rps) barely ticks.
+ */
+const BARREL_HEAT_SPEC = {
+  example_smg: { add: 0.052, tau: 4.2 },
+  example_rifle: { add: 0.028, tau: 6.0 },
+  example_sniper: { add: 0.011, tau: 7.5 },
+};
+const barrelHeatAmt = { example_smg: 0, example_rifle: 0, example_sniper: 0 };
+let barrelHeatClock = 0;
+let barrelHeatEmissiveMap = null;
+let barrelHeatShimmerMap = null;
 /** Recoil pattern index resets after this gap of not firing. */
 const RECOIL_RESET_MS = 200;
 
@@ -148,6 +162,10 @@ const BLOOM_THRESHOLD = 1.0;
 const BLOOM_KNEE = 0.22;
 /** Dual-filter pyramid depth (half / quarter / eighth). */
 const BLOOM_MIPS = 3;
+/** Settings default; 0 skips the glow. Multiplies barrel emissive only. */
+const BARREL_HEAT_DEFAULT = 1;
+/** Settings max (0–2). */
+const BARREL_HEAT_MUL_MAX = 2;
 /** Settings default cloud cover (0 = clear). */
 const CLOUDS_DEFAULT = 0.55;
 /** Dust / edge wear on bay concrete (0 = clean pour). Shared GPU uniform. */
@@ -264,6 +282,8 @@ const state = {
   godRays: GOD_RAYS_DEFAULT,
   /** HDR bloom (0 = off, 2 = strong). Independent of god rays. */
   bloom: BLOOM_DEFAULT,
+  /** Barrel heat glow mul (0 = off, 2 = strong). Default 1. */
+  barrelHeat: BARREL_HEAT_DEFAULT,
   /** Mesh sun angular diameter in degrees (real sun ~0.53). */
   sunSize: SUN_SIZE_DEFAULT,
   /** HDR mul on ToD sun color for the mesh disc. */
@@ -1614,6 +1634,22 @@ function setBloom(v, { toast = false } = {}) {
   state.bloom = Number.isFinite(n) ? n : BLOOM_DEFAULT;
   syncBloomUI();
   if (toast) showToast(`Bloom ${state.bloom.toFixed(2)}`);
+}
+
+function syncBarrelHeatUI() {
+  const n = state.barrelHeat ?? BARREL_HEAT_DEFAULT;
+  const slider = el("barrelHeatSlider");
+  const val = el("barrelHeatVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2);
+}
+
+function setBarrelHeat(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, BARREL_HEAT_MUL_MAX);
+  state.barrelHeat = Number.isFinite(n) ? n : BARREL_HEAT_DEFAULT;
+  syncBarrelHeatUI();
+  applyBarrelHeatVisual();
+  if (toast) showToast(`Barrel heat ${state.barrelHeat.toFixed(2)}`);
 }
 
 function syncSunSizeUI() {
@@ -3462,6 +3498,169 @@ function makeOpticMesh(profile) {
   return g;
 }
 
+/* ---- Barrel heat (rounds-through, exponential cool) ----
+ * Per-weapon 0–1 stored heat. Each shot adds energy/mass; cool is e^{-t/τ}
+ * (τ ≈ 4–8 s), not a linear snap. Visual is orange/amber emissive on the
+ * barrel + muzzle device only (not receiver / optic). Bloom already in stack.
+ */
+function getBarrelHeatSpec(weaponId = state.weaponId) {
+  return BARREL_HEAT_SPEC[weaponId] || BARREL_HEAT_SPEC.example_smg;
+}
+
+function addBarrelHeatShot(weaponId = state.weaponId) {
+  const spec = getBarrelHeatSpec(weaponId);
+  const h = barrelHeatAmt[weaponId] || 0;
+  // Soft saturate so a long dump holds orange-hot instead of clipping hard.
+  barrelHeatAmt[weaponId] = clamp(h + spec.add * (1 - h * 0.28), 0, 1);
+}
+
+function coolBarrelHeat(dt) {
+  const ids = Object.keys(barrelHeatAmt);
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    const h = barrelHeatAmt[id];
+    if (h <= 1e-5) {
+      barrelHeatAmt[id] = 0;
+      continue;
+    }
+    const spec = getBarrelHeatSpec(id);
+    barrelHeatAmt[id] = h * Math.exp(-dt / spec.tau);
+  }
+}
+
+function getBarrelHeatEmissiveMap() {
+  if (barrelHeatEmissiveMap) return barrelHeatEmissiveMap;
+  const w = 8;
+  const h = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  // Canvas top → v=1 (cylinder +Y / muzzle after rotX). Hotter toward muzzle.
+  for (let y = 0; y < h; y++) {
+    const t = 1 - y / (h - 1);
+    const g = 0.20 + 0.80 * Math.pow(t, 1.55);
+    const v = Math.round(g * 255);
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.fillRect(0, y, w, 1);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.flipY = true;
+  barrelHeatEmissiveMap = tex;
+  return tex;
+}
+
+function getBarrelHeatShimmerMap() {
+  if (barrelHeatShimmerMap) return barrelHeatShimmerMap;
+  const s = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = s;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, s, s);
+  for (let i = 0; i < 16; i++) {
+    const x = (i * 17 + 9) % s;
+    const ww = 2 + (i % 4);
+    const grd = ctx.createLinearGradient(0, 0, 0, s);
+    grd.addColorStop(0, "rgba(255,200,90,0)");
+    grd.addColorStop(0.35, "rgba(255,140,40,0.5)");
+    grd.addColorStop(1, "rgba(255,80,20,0)");
+    ctx.fillStyle = grd;
+    ctx.globalAlpha = 0.22 + (i % 5) * 0.08;
+    ctx.fillRect(x, 0, ww, s);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.LinearSRGBColorSpace;
+  tex.repeat.set(1, 1.4);
+  barrelHeatShimmerMap = tex;
+  return tex;
+}
+
+function tagBarrelHeatMesh(mesh, role) {
+  if (!mesh || !mesh.material) return;
+  mesh.userData.barrelHeat = role || "tube";
+  const mat = mesh.material;
+  mat.emissive = new THREE.Color(0x000000);
+  mat.emissiveIntensity = 0;
+  if (role === "tube") {
+    mat.emissiveMap = getBarrelHeatEmissiveMap();
+  }
+}
+
+function addBarrelHeatShimmer(x, y, z, length) {
+  const tex = getBarrelHeatShimmerMap();
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex,
+    color: new THREE.Color(1.25, 0.52, 0.12),
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+    fog: false,
+  });
+  const len = Math.max(0.1, length);
+  // Flat card just above the barrel (look-down hip/ADS reads the top of the tube).
+  const flat = new THREE.Mesh(new THREE.PlaneGeometry(0.036, len), mat);
+  flat.position.set(x, y, z);
+  flat.rotation.x = -Math.PI / 2;
+  flat.renderOrder = 6;
+  flat.visible = false;
+  flat.name = "barrelHeatShimmer";
+  flat.userData.barrelHeatShimmer = true;
+  flat.frustumCulled = false;
+  // Thin vertical ribbon for a bit of rising volume without a world-wide warp.
+  const vert = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.034), mat);
+  vert.position.set(x, y - 0.004, z);
+  vert.rotation.y = Math.PI / 2;
+  vert.renderOrder = 6;
+  vert.visible = false;
+  vert.name = "barrelHeatShimmerV";
+  vert.userData.barrelHeatShimmer = true;
+  vert.frustumCulled = false;
+  gunRoot.add(flat, vert);
+}
+
+function applyBarrelHeatVisual() {
+  if (!gunRoot) return;
+  const mul = state.barrelHeat ?? BARREL_HEAT_DEFAULT;
+  const raw = barrelHeatAmt[state.weaponId] || 0;
+  const h = mul < 0.01 ? 0 : raw;
+  const r = 1.0;
+  const g = lerp(0.14, 0.70, h);
+  const b = lerp(0.025, 0.16, h * h);
+  const punch = Math.pow(h, 1.45) * (0.2 + 3.1 * h) * mul;
+  gunRoot.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.userData.barrelHeat && o.material) {
+      const tip = o.userData.barrelHeat === "tip" ? 1.28 : 1;
+      o.material.emissive.setRGB(r, g * (o.userData.barrelHeat === "tip" ? 1.05 : 1), b);
+      o.material.emissiveIntensity = punch * tip;
+    }
+    if (o.userData.barrelHeatShimmer && o.material) {
+      const show = h > 0.38 && mul >= 0.01;
+      o.visible = show;
+      o.material.opacity = show ? clamp((h - 0.38) * 0.55 * mul, 0, 0.42) : 0;
+    }
+  });
+}
+
+function tickBarrelHeat(dt) {
+  barrelHeatClock += dt;
+  coolBarrelHeat(dt);
+  if (barrelHeatShimmerMap && (barrelHeatAmt[state.weaponId] || 0) > 0.3) {
+    const h = barrelHeatAmt[state.weaponId] || 0;
+    barrelHeatShimmerMap.offset.y = (barrelHeatClock * (0.28 + 0.55 * h)) % 1;
+    barrelHeatShimmerMap.offset.x = Math.sin(barrelHeatClock * 3.1) * 0.04;
+  }
+  applyBarrelHeatVisual();
+}
+
 function buildBlockGun(style) {
   if (gunRoot) {
     const parent = gunRoot.parent;
@@ -3515,13 +3714,18 @@ function buildBlockGun(style) {
     const hgSideR = makeBox(0.004, 0.016, 0.26, 0x1a1f28, 0.03, 0.008, -0.28, dark);
     // 20"-class barrel, gas block, flip-up front BUIS
     const barrel = makeCyl(0.009, 0.012, 0.44, 0x1e2430, 0, 0.018, -0.56, Math.PI / 2, 0, 0, 12, dark);
+    tagBarrelHeatMesh(barrel, "tube");
     const gasBlock = makeBox(0.024, 0.024, 0.032, 0x2a3140, 0, 0.032, -0.42, metal);
     const frontBuis = makeBox(0.016, 0.02, 0.014, 0x1a2030, 0, 0.048, -0.42, dark);
     // Birdcage / 3-prong flash hider (not a hunting brake)
     const flashBody = makeCyl(0.013, 0.011, 0.026, 0x12161c, 0, 0.018, -0.795, Math.PI / 2, 0, 0, 10, dark);
+    tagBarrelHeatMesh(flashBody, "tip");
     const prongT = makeBox(0.005, 0.016, 0.018, 0x0a0c10, 0, 0.028, -0.81, dark);
     const prongL = makeBox(0.014, 0.005, 0.018, 0x0a0c10, -0.009, 0.018, -0.81, dark);
     const prongR = makeBox(0.014, 0.005, 0.018, 0x0a0c10, 0.009, 0.018, -0.81, dark);
+    tagBarrelHeatMesh(prongT, "tip");
+    tagBarrelHeatMesh(prongL, "tip");
+    tagBarrelHeatMesh(prongR, "tip");
     // 20-round 7.62 box — slightly fatter than 5.56, straight-ish, dark polymer
     const magWell = makeBox(0.046, 0.024, 0.062, 0x4a5568, 0, -0.044, 0.005, metal);
     const mag = makeBox(0.042, 0.145, 0.052, 0x1c2028, 0, -0.118, 0.005, polyD);
@@ -3536,6 +3740,7 @@ function buildBlockGun(style) {
     // RAS bottom rail / bipod pad (attachment host) — not a wood forend
     gripMesh = makeBox(0.03, 0.016, 0.09, 0x2a3038, 0, -0.022, -0.26, poly);
     muzzleFlash = makeMuzzleFlashSprite(0, 0.018, -0.83, 1.15);
+    addBarrelHeatShimmer(0, 0.038, -0.70, 0.28);
     gunRoot.add(
       buffer, stock, stockWeb, stockPad, stockPadLip,
       lower, receiver, receiverTop, ejectionHood, chHump, chLatch, rail,
@@ -3572,13 +3777,16 @@ function buildBlockGun(style) {
     const forendTip = makeBox(0.038, 0.028, 0.04, 0x1e242c, 0, 0.0, -0.30, polyD);
     // 24"-class barrel, target crown (no flash hider)
     const barrel = makeCyl(0.008, 0.012, 0.52, 0x1e2430, 0, 0.014, -0.58, Math.PI / 2, 0, 0, 12, dark);
+    tagBarrelHeatMesh(barrel, "tube");
     const crown = makeCyl(0.011, 0.009, 0.016, 0x12161c, 0, 0.014, -0.85, Math.PI / 2, 0, 0, 10, dark);
+    tagBarrelHeatMesh(crown, "tip");
     const magWell = makeBox(0.036, 0.016, 0.052, 0x4a5568, 0, -0.028, 0.01, metal);
     const mag = makeBox(0.032, 0.055, 0.048, 0x1c2028, 0, -0.055, 0.01, polyD);
     mag.name = "mag";
     magMesh = mag;
     gripMesh = makeBox(0.028, 0.014, 0.08, 0x2a3038, 0, -0.022, -0.2, poly);
     muzzleFlash = makeMuzzleFlashSprite(0, 0.014, -0.87, 1.2);
+    addBarrelHeatShimmer(0, 0.034, -0.72, 0.32);
     gunRoot.add(
       stock, stockComb, stockPad, stockWrist,
       receiver, receiverTop, rail, bolt,
@@ -3599,8 +3807,11 @@ function buildBlockGun(style) {
     const handguard = makeBox(0.048, 0.046, 0.115, 0x323840, 0, 0.004, -0.13, poly);
     const hgBevel = makeBox(0.05, 0.008, 0.11, 0x3a4048, 0, 0.03, -0.13, polyD);
     const barrel = makeCyl(0.0085, 0.012, 0.2, 0x1e2430, 0, 0.016, -0.28, Math.PI / 2, 0, 0, 12, dark);
+    tagBarrelHeatMesh(barrel, "tube");
     const muzzleDevice = makeCyl(0.015, 0.012, 0.03, 0x12161c, 0, 0.016, -0.4, Math.PI / 2, 0, 0, 12, dark);
+    tagBarrelHeatMesh(muzzleDevice, "tip");
     const flashHiderRing = makeCyl(0.016, 0.015, 0.01, 0x0a0c10, 0, 0.016, -0.418, Math.PI / 2, 0, 0, 10, dark);
+    tagBarrelHeatMesh(flashHiderRing, "tip");
     const magWell = makeBox(0.044, 0.02, 0.056, 0x4a5568, 0, -0.04, 0.01, metal);
     const mag = makeBox(0.036, 0.115, 0.048, 0x2e343e, 0, -0.102, 0.01, polyD);
     const magRib = makeBox(0.038, 0.01, 0.05, 0x3a404c, 0, -0.07, 0.01, poly);
@@ -3613,6 +3824,7 @@ function buildBlockGun(style) {
     const gripBevel = makeBox(0.034, 0.008, 0.04, 0x4a3a2e, 0, -0.028, -0.1, polyD);
     gripMesh.add(gripBevel);
     muzzleFlash = makeMuzzleFlashSprite(0, 0.016, -0.43, 0.95);
+    addBarrelHeatShimmer(0, 0.034, -0.34, 0.16);
     gunRoot.add(
       stock, stockPad, receiver, receiverTop, rail,
       handguard, hgBevel, barrel, muzzleDevice, flashHiderRing,
@@ -3640,6 +3852,7 @@ function buildBlockGun(style) {
   rebuildOpticMeshes();
   swayRig.add(gunRoot);
   stampViewmodelLayer(holdRoot);
+  applyBarrelHeatVisual();
 }
 
 function rebuildOpticMeshes() {
@@ -6706,6 +6919,7 @@ function fireWeapon({ fromHold = false } = {}) {
   updateAmmoHud();
   sfx.play("fire");
   player.fireCooldown = fireCooldownForLoadout();
+  addBarrelHeatShot();
   fireFlash();
   if (isBoltGun()) beginBoltCycle();
   else spawnCasing();
@@ -7813,6 +8027,7 @@ function updatePlayer(dt) {
   updateGlassShards(dt);
   updateImpactFX(dt);
   updateBulbSparks(dt);
+  tickBarrelHeat(dt);
   updateSilhouettes(dt);
   updateBermPopups(dt);
   updateScorePopups(dt);
@@ -8481,6 +8696,12 @@ function bind() {
     bloomSlider.oninput = (e) => setBloom(e.target.value);
   }
   syncBloomUI();
+  const barrelHeatSlider = el("barrelHeatSlider");
+  if (barrelHeatSlider) {
+    barrelHeatSlider.value = String(state.barrelHeat);
+    barrelHeatSlider.oninput = (e) => setBarrelHeat(e.target.value);
+  }
+  syncBarrelHeatUI();
   const sunSizeSlider = el("sunSizeSlider");
   if (sunSizeSlider) {
     sunSizeSlider.value = String(state.sunSize);

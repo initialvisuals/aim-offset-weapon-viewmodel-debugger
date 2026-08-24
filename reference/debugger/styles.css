@@ -145,3 +145,52 @@ kbd { font-family: var(--mono); font-size: 0.75rem; background: #222834; border:
   transform-origin: left center; transition: none;
 }
 
+
+/* ---- Optic HUD (screen-space ADS overlays) ---- */
+.crosshair.ads-hide { opacity: 0; }
+.optic-hud {
+  pointer-events: none;
+  position: absolute; inset: 0;
+  z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.08s linear;
+}
+.optic-hud[hidden] { display: none; }
+.optic-hud.active { opacity: 1; }
+.optic-vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at center,
+    transparent 18%,
+    rgba(0,0,0,0.35) 42%,
+    rgba(0,0,0,0.82) 68%,
+    rgba(0,0,0,0.95) 100%);
+  opacity: 0;
+}
+.optic-vignette.heavy { opacity: 1; }
+.optic-vignette.medium { opacity: 0.65; }
+.optic-tube-frame {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at center,
+    transparent 22%,
+    transparent 28%,
+    rgba(12,14,18,0.55) 38%,
+    rgba(8,10,14,0.92) 55%,
+    #050608 72%);
+  opacity: 0;
+  mix-blend-mode: multiply;
+}
+.optic-tube-frame.show { opacity: 1; }
+.reticle {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.reticle[hidden] { display: none !important; }
+.reticle-holo .holo-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #ff3030;
+  box-shadow: 0 0 6px 2px rgba(255,48,48,0.95), 0 0 14px 4px rgba(255,40,40,0.55);
+}
+.reticle-acog svg, .reticle-sniper svg {
+  filter: drop-shadow(0 0 1px rgba(255,255,255,0.25));
+  opacity: 0.92;
+}

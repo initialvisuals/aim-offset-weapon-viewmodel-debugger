@@ -16,13 +16,14 @@ Then open http://localhost:8765/ in a browser. Click the canvas for mouse look (
 
 ## What you get
 
-1. **3D viewport** — walkable room, optics table, first-person block guns, cyan aim ray (camera −Z), crosshair.
-2. **Player controls** (panel closed) — WASD, Shift sprint, mouse look, Q/E lean (roll + lateral offset), RMB ADS (`ads_factor` + FOV squeeze + look sens ×0.5), Alt hold-breath, LMB/Space fire.
-3. **Sway + recoil** — procedural on a `swayRig` *after* the authored hold pose (never baked into hip/ADS JSON). Header **Sway** toggle (default ON); turn OFF for clean aim-offset tuning.
-4. **Hold breath (Alt)** — damps sway for up to ~3s (HUD stamina bar); release/exhaust recovers with a brief overshoot.
-5. **Shooting** — tracers spawn at the muzzle socket and travel along **camera aim** (Policy A) so the aim-offset story reads clearly; light viewmodel recoil punch + muzzle flash.
-6. **Optics table** — iron / holo / acog / sniper_scope; look + click or E to equip.
-7. **Debugger panel (C)** — view/attachment tabs, ads_factor slider (synced from RMB), six-axis editors, Copy JSON + toast. **G** = gun picker.
+1. **3D viewport** — walkable room, optics table, procedural shooting range (25/50/75/100m targets), first-person block guns, cyan aim ray (camera −Z), crosshair.
+2. **Player controls** (panel closed) — WASD, Shift sprint, mouse look, Q/E lean (full roll + lateral offset), tiny A/D strafe tilt only (~2.5% of lean max), RMB ADS, Alt hold-breath, LMB/Space fire.
+3. **ADS presentation** — FOV by optic (hip 90 → iron/holo 60, acog 25, sniper 10), screen-space HUD reticle (holo dot / ACOG chevron / sniper mil-cross), peripheral tube frame + vignette for magnified optics. Iron uses 3D front-post / rear-notch geometry. Attachment offsets still move the optic mesh on the gun for hip/inspection.
+4. **Sway + recoil** — procedural on a `swayRig` *after* the authored hold pose (never baked into hip/ADS JSON). Header **Sway** toggle (default ON); turn OFF for clean aim-offset tuning.
+5. **Hold breath (Alt)** — damps sway for up to ~3s (HUD stamina bar); release/exhaust recovers with a brief overshoot.
+6. **Shooting** — tracers spawn at the muzzle and travel along **camera aim** (Policy A) with simple ballistic drop (`vel.y -= g·dt`). SMG drops more / slower; rifle flatter; sniper scope fastest/flattest. Hits flash range targets.
+7. **Optics table** — iron / holo / acog / sniper_scope props match equipped style; look + click or E to equip.
+8. **Debugger panel (C)** — view/attachment tabs, ads_factor slider (synced from RMB), six-axis editors, Copy JSON + toast. **G** = gun picker.
 
 ## Hotkeys
 
@@ -44,8 +45,8 @@ When the panel is open, gameplay keys do not steal typing from axis inputs.
 
 ## Notes
 
-- `blendHold(hip, ads_pose(optic), t)` → `holdRoot`; sway/recoil → child `swayRig`. Default `rotY` = π/2.
-- Tracer policy: spawn at muzzle, direction = camera forward (documents aim-offset vs barrel).
+- `blendHold(hip, ads_pose(optic), t)` → `holdRoot`; sway/recoil → child `swayRig`. Default `rotY` = 0.
+- Tracer policy: spawn at muzzle, initial direction = camera forward, gravity per weapon/optic (documents aim-offset vs barrel + drop).
 - Port this state machine into your engine editor (Unity EditorWindow / Unreal EUW).
 
 See ../viewmodel_math.ts and ../../docs/03-tuner-ux.md.

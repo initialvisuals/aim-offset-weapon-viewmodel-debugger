@@ -16,7 +16,41 @@
 <body class="app-shell">
   <div class="viewport-wrap">
     <canvas id="view3d"></canvas>
-    <div class="crosshair" aria-hidden="true"></div>
+    <div class="crosshair" aria-hidden="true" id="hipCrosshair"></div>
+    <div class="optic-hud" id="opticHud" aria-hidden="true" hidden>
+      <div class="optic-vignette" id="opticVignette"></div>
+      <div class="optic-tube-frame" id="opticTubeFrame"></div>
+      <div class="reticle reticle-holo" id="reticleHolo" hidden>
+        <span class="holo-dot"></span>
+      </div>
+      <div class="reticle reticle-acog" id="reticleAcog" hidden>
+        <svg viewBox="0 0 120 120" width="120" height="120" aria-hidden="true">
+          <path d="M60 28 L72 58 L60 52 L48 58 Z" fill="#1a1a1a" stroke="#0a0a0a" stroke-width="1.5"/>
+          <path d="M36 62 H84" stroke="#1a1a1a" stroke-width="2" fill="none"/>
+          <path d="M44 70 H76 M50 78 H70" stroke="#1a1a1a" stroke-width="1.2" fill="none"/>
+        </svg>
+      </div>
+      <div class="reticle reticle-sniper" id="reticleSniper" hidden>
+        <svg viewBox="0 0 200 200" width="200" height="200" aria-hidden="true">
+          <line x1="100" y1="20" x2="100" y2="180" stroke="#111" stroke-width="1.4"/>
+          <line x1="20" y1="100" x2="180" y2="100" stroke="#111" stroke-width="1.4"/>
+          <circle cx="100" cy="100" r="2.2" fill="#111"/>
+          <!-- mil dots -->
+          <circle cx="100" cy="70" r="1.6" fill="#111"/>
+          <circle cx="100" cy="55" r="1.6" fill="#111"/>
+          <circle cx="100" cy="40" r="1.6" fill="#111"/>
+          <circle cx="100" cy="130" r="1.6" fill="#111"/>
+          <circle cx="100" cy="145" r="1.6" fill="#111"/>
+          <circle cx="100" cy="160" r="1.6" fill="#111"/>
+          <circle cx="70" cy="100" r="1.6" fill="#111"/>
+          <circle cx="55" cy="100" r="1.6" fill="#111"/>
+          <circle cx="40" cy="100" r="1.6" fill="#111"/>
+          <circle cx="130" cy="100" r="1.6" fill="#111"/>
+          <circle cx="145" cy="100" r="1.6" fill="#111"/>
+          <circle cx="160" cy="100" r="1.6" fill="#111"/>
+        </svg>
+      </div>
+    </div>
     <div class="equip-prompt" id="equipPrompt" hidden></div>
     <div class="breath-bar" id="breathBar" hidden><div class="breath-fill" id="breathFill"></div></div>
     <div class="hud-hint" id="hudHint">Press <kbd>C</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns</div>
@@ -92,7 +126,7 @@
                 <li><kbd>↑</kbd><kbd>↓</kbd> select axis · <kbd>←</kbd><kbd>→</kbd> nudge</li>
                 <li><kbd>PgUp</kbd><kbd>PgDn</kbd> step size</li>
               </ul>
-              <p class="note">Cyan ray = aim along camera −Z. Composition: camera → authored hold → sway/recoil → attachments. Demo poses are meant to be tuned with this on-screen tuner.</p>
+              <p class="note">Cyan ray = aim along camera −Z. ADS: FOV by optic + screen HUD reticle / peripheral tube (not primary in-lens reticle). Composition: camera → authored hold → sway/recoil → attachments.</p>
             </aside>
           </div>
         </section>

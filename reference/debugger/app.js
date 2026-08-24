@@ -21,6 +21,22 @@ const OPTIC_LABELS = {
   sniper_scope: "Sniper scope",
 };
 
+
+const FOV_BY_OPTIC = {
+  hip: 90,
+  iron: 60,
+  holo: 60,
+  acog: 25,
+  sniper_scope: 10,
+};
+
+const BALLISTICS = {
+  example_smg: { speed: 62, gravity: 18, life: 1.4, tracerLen: 0.42 },
+  example_rifle: { speed: 95, gravity: 9.5, life: 1.8, tracerLen: 0.55 },
+  sniper_boost: { speed: 120, gravity: 6.5, life: 2.2, tracerLen: 0.65 },
+};
+
+
 function emptyPose() {
   return { x: 0, y: 0, z: 0, rotX: 0, rotY: 0, rotZ: 0 };
 }
@@ -387,6 +403,7 @@ let opticRoot, gripMesh, aimHelper, muzzleFlash, muzzleSocket, swayRig;
 let tracers = [];
 let playerRoot, leanPivot;
 let pickups = [];
+let rangeTargets = [];
 let clock = new THREE.Clock();
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -416,9 +433,10 @@ const player = {
   leanSpring: 8,
   leanLerp: 0.1,
   leanOffset: 0.5,
-  fovHip: 70,
-  fovAds: 50,
-  fov: 70,
+  fovHip: FOV_BY_OPTIC.hip,
+  fovAds: FOV_BY_OPTIC.iron,
+  fov: FOV_BY_OPTIC.hip,
+  strafeTilt: 0,
   flashUntil: 0,
   swayT: 0,
   swayAmp: 1,
@@ -438,58 +456,104 @@ function makeBox(w, h, d, color, x, y, z) {
   return mesh;
 }
 
+function adsFovForOptic(optic) {
+  if (optic === "sniper_scope") return FOV_BY_OPTIC.sniper_scope;
+  if (optic === "acog") return FOV_BY_OPTIC.acog;
+  if (optic === "holo") return FOV_BY_OPTIC.holo;
+  return FOV_BY_OPTIC.iron;
+}
+
+function makeCyl(rTop, rBot, h, color, x, y, z, rx, ry, rz, segs = 16) {
+  const geo = new THREE.CylinderGeometry(rTop, rBot, h, segs);
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.35 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  mesh.rotation.set(rx || 0, ry || 0, rz || 0);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function makeLensGlass(radius, opacity = 0.2) {
+  return new THREE.Mesh(
+    new THREE.CircleGeometry(radius, 24),
+    new THREE.MeshBasicMaterial({
+      color: 0x88aacc,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+  );
+}
+
+function makeRingTube(innerR, outerR, length, color, segs = 20) {
+  const g = new THREE.Group();
+  const outer = new THREE.Mesh(
+    new THREE.CylinderGeometry(outerR, outerR, length, segs, 1, true),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.4, side: THREE.DoubleSide })
+  );
+  outer.rotation.x = Math.PI / 2;
+  const lipMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.4, side: THREE.DoubleSide });
+  const lipF = new THREE.Mesh(new THREE.RingGeometry(innerR, outerR, segs), lipMat);
+  lipF.position.z = length / 2;
+  const lipB = new THREE.Mesh(new THREE.RingGeometry(innerR, outerR, segs), lipMat.clone());
+  lipB.position.z = -length / 2;
+  g.add(outer, lipF, lipB);
+  return g;
+}
+
 function makeOpticMesh(profile) {
   const g = new THREE.Group();
   g.name = "optic_" + profile;
   if (profile === "iron") {
-    const rear = makeBox(0.045, 0.028, 0.018, 0x1a1f28, 0, 0.012, 0.03);
-    const notchL = makeBox(0.008, 0.02, 0.012, 0x11151c, -0.014, 0.022, 0.03);
-    const notchR = makeBox(0.008, 0.02, 0.012, 0x11151c, 0.014, 0.022, 0.03);
-    const front = makeBox(0.012, 0.038, 0.012, 0x1a1f28, 0, 0.02, -0.1);
-    const post = makeBox(0.006, 0.018, 0.006, 0xc45c2a, 0, 0.038, -0.1);
-    g.add(rear, notchL, notchR, front, post);
+    // Front post + rear notch — no glass; alignment geometry for hip/ADS
+    const rearBase = makeBox(0.05, 0.014, 0.022, 0x1a1f28, 0, 0.01, 0.055);
+    const notchL = makeBox(0.01, 0.028, 0.014, 0x11151c, -0.016, 0.028, 0.055);
+    const notchR = makeBox(0.01, 0.028, 0.014, 0x11151c, 0.016, 0.028, 0.055);
+    const frontBase = makeBox(0.014, 0.012, 0.014, 0x1a1f28, 0, 0.014, -0.14);
+    const post = makeBox(0.007, 0.032, 0.007, 0xc45c2a, 0, 0.036, -0.14);
+    const tip = makeBox(0.009, 0.006, 0.009, 0xffaa66, 0, 0.054, -0.14);
+    g.add(rearBase, notchL, notchR, frontBase, post, tip);
   } else if (profile === "holo") {
-    const body = makeBox(0.055, 0.04, 0.055, 0x2a8f6a, 0, 0.02, 0);
-    const hood = makeBox(0.05, 0.03, 0.012, 0x1e6b50, 0, 0.035, -0.028);
-    const glass = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.038, 0.028),
-      new THREE.MeshBasicMaterial({ color: 0x7dffc8, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
-    );
-    glass.position.set(0, 0.035, -0.034);
-    const reticle = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.012, 0.012),
-      new THREE.MeshBasicMaterial({ color: 0xff4040, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
-    );
-    reticle.position.set(0, 0.035, -0.033);
-    const dot = new THREE.Mesh(
-      new THREE.CircleGeometry(0.0025, 12),
-      new THREE.MeshBasicMaterial({ color: 0xff6060, transparent: true, opacity: 1, side: THREE.DoubleSide, depthWrite: false })
-    );
-    dot.position.set(0, 0.035, -0.032);
-    g.add(body, hood, glass, reticle, dot);
+    // Short window — peripheral frame when ADS; HUD red-dot overlay is primary reticle
+    const mount = makeBox(0.042, 0.012, 0.05, 0x2a3140, 0, 0.006, 0);
+    const body = makeBox(0.058, 0.048, 0.052, 0x2a8f6a, 0, 0.036, 0);
+    const frameL = makeBox(0.008, 0.036, 0.04, 0x1e6b50, -0.025, 0.04, 0);
+    const frameR = makeBox(0.008, 0.036, 0.04, 0x1e6b50, 0.025, 0.04, 0);
+    const frameTop = makeBox(0.058, 0.008, 0.04, 0x1e6b50, 0, 0.06, 0);
+    const hood = makeBox(0.056, 0.01, 0.014, 0x16553f, 0, 0.062, -0.02);
+    const glass = makeLensGlass(0.018, 0.16);
+    glass.position.set(0, 0.04, -0.02);
+    g.add(mount, body, frameL, frameR, frameTop, hood, glass);
   } else if (profile === "acog") {
-    const mount = makeBox(0.04, 0.018, 0.08, 0x3a4558, 0, 0.008, 0);
-    const tube = makeBox(0.038, 0.038, 0.14, 0x4a5568, 0, 0.035, -0.02);
-    const bell = makeBox(0.048, 0.048, 0.03, 0x2c3340, 0, 0.035, -0.1);
-    const eye = makeBox(0.042, 0.042, 0.025, 0x2c3340, 0, 0.035, 0.06);
-    const glass = new THREE.Mesh(
-      new THREE.CircleGeometry(0.014, 16),
-      new THREE.MeshBasicMaterial({ color: 0x88ccaa, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
-    );
-    glass.position.set(0, 0.035, -0.116);
-    g.add(mount, tube, bell, eye, glass);
+    // Longer tube + eye relief; open aperture; HUD chevron when ADS
+    const mount = makeBox(0.038, 0.014, 0.09, 0x3a4558, 0, 0.007, 0.01);
+    const tube = makeRingTube(0.012, 0.02, 0.13, 0x4a5568, 18);
+    tube.position.set(0, 0.038, -0.01);
+    const bell = makeRingTube(0.014, 0.026, 0.028, 0x2c3340, 18);
+    bell.position.set(0, 0.038, -0.09);
+    const ocular = makeRingTube(0.011, 0.022, 0.024, 0x2c3340, 18);
+    ocular.position.set(0, 0.038, 0.065);
+    const glassF = makeLensGlass(0.013, 0.14);
+    glassF.position.set(0, 0.038, -0.105);
+    const glassB = makeLensGlass(0.011, 0.1);
+    glassB.position.set(0, 0.038, 0.078);
+    g.add(mount, tube, bell, ocular, glassF, glassB);
   } else {
-    // sniper_scope
-    const mount = makeBox(0.038, 0.016, 0.1, 0x3a4558, 0, 0.006, 0);
-    const tube = makeBox(0.042, 0.042, 0.22, 0x2a3140, 0, 0.038, -0.04);
-    const obj = makeBox(0.06, 0.06, 0.045, 0x1a1f28, 0, 0.038, -0.16);
-    const ocular = makeBox(0.05, 0.05, 0.035, 0x1a1f28, 0, 0.038, 0.09);
-    const glass = new THREE.Mesh(
-      new THREE.CircleGeometry(0.02, 20),
-      new THREE.MeshBasicMaterial({ color: 0x446688, transparent: true, opacity: 0.45, side: THREE.DoubleSide })
-    );
-    glass.position.set(0, 0.038, -0.184);
-    g.add(mount, tube, obj, ocular, glass);
+    // sniper_scope — long tube, objective bell + ocular
+    const mount = makeBox(0.036, 0.012, 0.12, 0x3a4558, 0, 0.006, 0);
+    const tube = makeRingTube(0.011, 0.019, 0.2, 0x2a3140, 20);
+    tube.position.set(0, 0.04, -0.02);
+    const obj = makeRingTube(0.016, 0.032, 0.04, 0x1a1f28, 22);
+    obj.position.set(0, 0.04, -0.14);
+    const ocular = makeRingTube(0.012, 0.024, 0.032, 0x1a1f28, 20);
+    ocular.position.set(0, 0.04, 0.1);
+    const glassObj = makeLensGlass(0.018, 0.18);
+    glassObj.position.set(0, 0.04, -0.162);
+    const glassEye = makeLensGlass(0.012, 0.12);
+    glassEye.position.set(0, 0.04, 0.118);
+    g.add(mount, tube, obj, ocular, glassObj, glassEye);
   }
   return g;
 }
@@ -515,40 +579,46 @@ function buildBlockGun(style) {
   const isRifle = style === "example_rifle";
 
   if (isRifle) {
-    const stock = makeBox(0.055, 0.09, 0.22, 0x4a3a2a, 0.01, -0.02, 0.18);
-    const receiver = makeBox(0.07, 0.085, 0.32, 0x5a6578, 0, 0, 0);
-    const handguard = makeBox(0.065, 0.07, 0.2, 0x3a4558, 0, 0.005, -0.22);
-    const barrel = makeBox(0.028, 0.028, 0.36, 0x2c3340, 0, 0.02, -0.48);
-    const mag = makeBox(0.038, 0.14, 0.055, 0x444b58, 0, -0.11, 0.02);
-    const pistol = makeBox(0.04, 0.1, 0.05, 0x2a3140, 0, -0.09, 0.08);
-    gripMesh = makeBox(0.04, 0.06, 0.08, 0x6b5344, 0, -0.055, -0.18);
-    muzzleFlash = makeBox(0.04, 0.04, 0.04, 0xffcc66, 0, 0.02, -0.68);
-    gunRoot.add(stock, receiver, handguard, barrel, mag, pistol, gripMesh, muzzleFlash);
-    gripMesh.userData.base = { x: 0, y: -0.055, z: -0.18, rotX: 0, rotY: 0, rotZ: 0 };
+    const stock = makeBox(0.05, 0.085, 0.2, 0x4a3a2a, 0.008, -0.015, 0.2);
+    const stockPad = makeBox(0.052, 0.095, 0.03, 0x3a2e22, 0.008, -0.01, 0.31);
+    const receiver = makeBox(0.062, 0.078, 0.28, 0x5a6578, 0, 0.002, 0.02);
+    const rail = makeBox(0.028, 0.01, 0.26, 0x2a3140, 0, 0.046, -0.02);
+    const handguard = makeBox(0.058, 0.055, 0.22, 0x3a4558, 0, 0.008, -0.22);
+    const barrel = makeCyl(0.012, 0.012, 0.38, 0x2c3340, 0, 0.022, -0.52, Math.PI / 2, 0, 0, 12);
+    const muzzleBrake = makeCyl(0.016, 0.014, 0.04, 0x1a1f28, 0, 0.022, -0.72, Math.PI / 2, 0, 0, 10);
+    const mag = makeBox(0.036, 0.15, 0.05, 0x444b58, 0, -0.115, 0.0);
+    const pistol = makeBox(0.036, 0.1, 0.048, 0x2a3140, 0, -0.085, 0.1);
+    pistol.rotation.x = 0.22;
+    gripMesh = makeBox(0.038, 0.055, 0.07, 0x6b5344, 0, -0.048, -0.2);
+    muzzleFlash = makeBox(0.04, 0.04, 0.04, 0xffcc66, 0, 0.022, -0.76);
+    gunRoot.add(stock, stockPad, receiver, rail, handguard, barrel, muzzleBrake, mag, pistol, gripMesh, muzzleFlash);
+    gripMesh.userData.base = { x: 0, y: -0.048, z: -0.2, rotX: 0, rotY: 0, rotZ: 0 };
     opticRoot = new THREE.Group();
-    opticRoot.position.set(0, 0.055, -0.04);
-    opticRoot.userData.base = { x: 0, y: 0.055, z: -0.04, rotX: 0, rotY: 0, rotZ: 0 };
+    opticRoot.position.set(0, 0.052, -0.02);
+    opticRoot.userData.base = { x: 0, y: 0.052, z: -0.02, rotX: 0, rotY: 0, rotZ: 0 };
   } else {
-    const stock = makeBox(0.05, 0.07, 0.12, 0x3a4558, 0.015, -0.015, 0.12);
-    const receiver = makeBox(0.065, 0.08, 0.2, 0x5a6578, 0, 0, 0);
-    const handguard = makeBox(0.055, 0.06, 0.12, 0x445060, 0, 0.005, -0.14);
-    const barrel = makeBox(0.03, 0.03, 0.22, 0x2c3340, 0, 0.015, -0.3);
-    const mag = makeBox(0.04, 0.11, 0.055, 0x444b58, 0, -0.095, 0.015);
-    const pistol = makeBox(0.038, 0.09, 0.045, 0x2a3140, 0, -0.08, 0.06);
-    gripMesh = makeBox(0.038, 0.055, 0.05, 0x6b5344, 0, -0.06, -0.1);
-    muzzleFlash = makeBox(0.035, 0.035, 0.035, 0xffcc66, 0, 0.015, -0.42);
-    gunRoot.add(stock, receiver, handguard, barrel, mag, pistol, gripMesh, muzzleFlash);
-    gripMesh.userData.base = { x: 0, y: -0.06, z: -0.1, rotX: 0, rotY: 0, rotZ: 0 };
+    const stock = makeBox(0.042, 0.06, 0.1, 0x3a4558, 0.01, -0.01, 0.13);
+    const receiver = makeBox(0.058, 0.072, 0.18, 0x5a6578, 0, 0.0, 0.01);
+    const rail = makeBox(0.024, 0.009, 0.16, 0x2a3140, 0, 0.042, -0.01);
+    const handguard = makeBox(0.05, 0.05, 0.12, 0x445060, 0, 0.006, -0.13);
+    const barrel = makeCyl(0.011, 0.011, 0.2, 0x2c3340, 0, 0.016, -0.28, Math.PI / 2, 0, 0, 12);
+    const muzzleDevice = makeCyl(0.014, 0.013, 0.028, 0x1a1f28, 0, 0.016, -0.4, Math.PI / 2, 0, 0, 10);
+    const mag = makeBox(0.038, 0.12, 0.05, 0x444b58, 0, -0.1, 0.01);
+    const pistol = makeBox(0.034, 0.088, 0.042, 0x2a3140, 0, -0.078, 0.07);
+    pistol.rotation.x = 0.28;
+    gripMesh = makeBox(0.034, 0.048, 0.048, 0x6b5344, 0, -0.052, -0.1);
+    muzzleFlash = makeBox(0.032, 0.032, 0.032, 0xffcc66, 0, 0.016, -0.43);
+    gunRoot.add(stock, receiver, rail, handguard, barrel, muzzleDevice, mag, pistol, gripMesh, muzzleFlash);
+    gripMesh.userData.base = { x: 0, y: -0.052, z: -0.1, rotX: 0, rotY: 0, rotZ: 0 };
     opticRoot = new THREE.Group();
-    opticRoot.position.set(0, 0.05, -0.02);
-    opticRoot.userData.base = { x: 0, y: 0.05, z: -0.02, rotX: 0, rotY: 0, rotZ: 0 };
+    opticRoot.position.set(0, 0.048, -0.01);
+    opticRoot.userData.base = { x: 0, y: 0.048, z: -0.01, rotX: 0, rotY: 0, rotZ: 0 };
   }
 
   muzzleFlash.material = new THREE.MeshBasicMaterial({ color: 0xffaa44, transparent: true, opacity: 0.95 });
   muzzleFlash.visible = false;
   muzzleSocket = new THREE.Object3D();
   muzzleSocket.name = "muzzleSocket";
-  // Place at muzzle tip (same local as flash)
   muzzleSocket.position.copy(muzzleFlash.position);
   gunRoot.add(muzzleSocket);
   gunRoot.add(opticRoot);
@@ -584,14 +654,16 @@ function updateOpticVisibility() {
 
 function buildRoom() {
   const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1e28, roughness: 0.9 });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), floorMat);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 50), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -1.4;
+  floor.position.z = -12;
   floor.receiveShadow = true;
   scene.add(floor);
 
-  const grid = new THREE.GridHelper(24, 48, 0x3a4560, 0x252b38);
+  const grid = new THREE.GridHelper(40, 40, 0x3a4560, 0x252b38);
   grid.position.y = -1.39;
+  grid.position.z = -12;
   scene.add(grid);
 
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x12161e, roughness: 1 });
@@ -613,6 +685,7 @@ function buildRoom() {
   }
 
   buildOpticsTable();
+  buildShootingRange();
 }
 
 function buildOpticsTable() {
@@ -626,36 +699,21 @@ function buildOpticsTable() {
   scene.add(top, legL, legR, legL2, legR2);
 
   const defs = [
-    { id: "iron", label: "Iron", color: 0x8899aa, x: -0.55, shape: "block" },
-    { id: "holo", label: "Holo", color: 0x2a8f6a, x: -0.18, shape: "cube" },
-    { id: "acog", label: "Acog", color: 0x4a5568, x: 0.18, shape: "tube" },
-    { id: "sniper_scope", label: "Sniper scope", color: 0x2a3140, x: 0.55, shape: "long" },
+    { id: "iron", label: "Iron", x: -0.55 },
+    { id: "holo", label: "Holo", x: -0.18 },
+    { id: "acog", label: "Acog", x: 0.18 },
+    { id: "sniper_scope", label: "Sniper scope", x: 0.55 },
   ];
   pickups = [];
   defs.forEach((d) => {
     const group = new THREE.Group();
     group.position.set(d.x, tableY + 0.08, tableZ);
-    let mesh;
-    if (d.shape === "tube") {
-      mesh = makeBox(0.06, 0.06, 0.16, d.color, 0, 0.04, 0);
-    } else if (d.shape === "long") {
-      mesh = makeBox(0.05, 0.05, 0.22, d.color, 0, 0.04, 0);
-      const bell = makeBox(0.08, 0.08, 0.04, 0x1a1f28, 0, 0.04, -0.12);
-      group.add(bell);
-    } else if (d.shape === "cube") {
-      mesh = makeBox(0.08, 0.07, 0.08, d.color, 0, 0.045, 0);
-      const glass = makeBox(0.06, 0.04, 0.01, 0x7dffc8, 0, 0.05, -0.04);
-      glass.material.transparent = true;
-      glass.material.opacity = 0.5;
-      group.add(glass);
-    } else {
-      mesh = makeBox(0.07, 0.05, 0.05, d.color, 0, 0.035, 0);
-      const post = makeBox(0.015, 0.04, 0.015, 0xc45c2a, 0, 0.06, -0.02);
-      group.add(post);
-    }
-    group.add(mesh);
+    const prop = makeOpticMesh(d.id);
+    prop.scale.setScalar(0.85);
+    prop.rotation.y = 0.35;
+    group.add(prop);
     const highlight = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 0.02, 0.14),
+      new THREE.BoxGeometry(0.16, 0.02, 0.16),
       new THREE.MeshBasicMaterial({ color: 0x6ea8ff, transparent: true, opacity: 0.0 })
     );
     highlight.position.y = 0.01;
@@ -664,6 +722,67 @@ function buildOpticsTable() {
     scene.add(group);
     pickups.push(group);
   });
+}
+
+function buildShootingRange() {
+  const laneZ = [-8, -14, -22, -32];
+  const labels = ["25m", "50m", "75m", "100m"];
+  rangeTargets = [];
+
+  const strip = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.5, 40),
+    new THREE.MeshStandardMaterial({ color: 0x161a22, roughness: 0.95 })
+  );
+  strip.rotation.x = -Math.PI / 2;
+  strip.position.set(0, -1.385, -18);
+  scene.add(strip);
+
+  for (const side of [-2.0, 2.0]) {
+    scene.add(makeBox(0.08, 0.12, 36, 0x2a3140, side, -1.3, -18));
+  }
+
+  laneZ.forEach((z, i) => {
+    scene.add(makeBox(0.08, 0.9, 0.08, 0x445060, -2.3, -0.95, z));
+    scene.add(makeBox(0.08, 1.2, 0.08, 0x3a4558, 0, -0.8, z));
+    scene.add(makeBox(0.9, 0.06, 0.06, 0x3a4558, 0, -0.2, z));
+
+    const board = new THREE.Mesh(
+      new THREE.CircleGeometry(0.45, 28),
+      new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.85 })
+    );
+    board.position.set(0, 0.15, z);
+    const ring1 = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.32, 28),
+      new THREE.MeshBasicMaterial({ color: 0x222833, side: THREE.DoubleSide })
+    );
+    ring1.position.set(0, 0.15, z + 0.01);
+    const ring2 = new THREE.Mesh(
+      new THREE.RingGeometry(0.14, 0.18, 28),
+      new THREE.MeshBasicMaterial({ color: 0xc45c2a, side: THREE.DoubleSide })
+    );
+    ring2.position.set(0, 0.15, z + 0.012);
+    const bull = new THREE.Mesh(
+      new THREE.CircleGeometry(0.05, 16),
+      new THREE.MeshBasicMaterial({ color: 0xc45c2a })
+    );
+    bull.position.set(0, 0.15, z + 0.014);
+    const flash = new THREE.Mesh(
+      new THREE.CircleGeometry(0.5, 28),
+      new THREE.MeshBasicMaterial({ color: 0xffee88, transparent: true, opacity: 0, depthWrite: false })
+    );
+    flash.position.set(0, 0.15, z + 0.02);
+    scene.add(board, ring1, ring2, bull, flash);
+    rangeTargets.push({
+      mesh: board,
+      flash,
+      center: new THREE.Vector3(0, 0.15, z),
+      radius: 0.48,
+      label: labels[i],
+      hitUntil: 0,
+    });
+  });
+
+  scene.add(makeBox(6, 3.2, 0.4, 0x2a2030, 0, 0.1, -36));
 }
 
 function clearInputFlags() {
@@ -843,6 +962,19 @@ function updateHoldBreath(dt) {
   }
 }
 
+function ballisticForWeapon() {
+  const base = BALLISTICS[state.weaponId] || BALLISTICS.example_smg;
+  if (state.optic === "sniper_scope") {
+    return {
+      speed: BALLISTICS.sniper_boost.speed,
+      gravity: BALLISTICS.sniper_boost.gravity,
+      life: BALLISTICS.sniper_boost.life,
+      tracerLen: BALLISTICS.sniper_boost.tracerLen,
+    };
+  }
+  return base;
+}
+
 function fireWeapon() {
   if (!gameplayActive()) return;
   if (player.fireCooldown > 0) return;
@@ -850,38 +982,77 @@ function fireWeapon() {
     tryEquipLooked();
     return;
   }
-  player.fireCooldown = 0.12;
+  player.fireCooldown = state.optic === "sniper_scope" ? 0.35 : 0.12;
   fireFlash();
   // Recoil punch on swayRig (not authored hold)
-  player.recoilPunch.z += 0.018;
-  player.recoilPunch.y += 0.006;
-  player.recoilRot.x -= 0.035;
-  player.recoilRot.y += (Math.random() - 0.5) * 0.02;
+  const kick = state.optic === "sniper_scope" ? 1.6 : (state.weaponId === "example_rifle" ? 1.15 : 1);
+  player.recoilPunch.z += 0.018 * kick;
+  player.recoilPunch.y += 0.006 * kick;
+  player.recoilRot.x -= 0.035 * kick;
+  player.recoilRot.y += (Math.random() - 0.5) * 0.02 * kick;
 
-  // Policy A: spawn at muzzle, travel along camera aim (-Z)
+  // Policy A: spawn at muzzle, initial dir = camera aim; gravity integrates per frame
   if (!muzzleSocket || !camera) return;
   muzzleSocket.updateWorldMatrix(true, false);
   const origin = new THREE.Vector3();
   muzzleSocket.getWorldPosition(origin);
   const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir); // already -Z aim
+  camera.getWorldDirection(dir);
   dir.normalize();
+  const bal = ballisticForWeapon();
+  const vel = dir.clone().multiplyScalar(bal.speed);
 
-  const geo = new THREE.CylinderGeometry(0.008, 0.008, 0.55, 6);
+  const geo = new THREE.CylinderGeometry(0.007, 0.007, bal.tracerLen, 6);
   const mat = new THREE.MeshBasicMaterial({ color: 0xffe08a });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   mesh.position.copy(origin).addScaledVector(dir, 0.28);
   scene.add(mesh);
-  tracers.push({ mesh, dir, speed: 85, life: 0.9 });
+  tracers.push({ mesh, vel, gravity: bal.gravity, life: bal.life, hit: false });
+}
+
+function flashTarget(t) {
+  t.hitUntil = performance.now() + 180;
+  if (t.flash) t.flash.material.opacity = 0.85;
 }
 
 function updateTracers(dt) {
+  const now = performance.now();
+  rangeTargets.forEach((t) => {
+    if (t.flash) {
+      if (now < t.hitUntil) t.flash.material.opacity = 0.7;
+      else t.flash.material.opacity = Math.max(0, t.flash.material.opacity - dt * 3);
+    }
+  });
+
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i];
     tr.life -= dt;
-    tr.mesh.position.addScaledVector(tr.dir, tr.speed * dt);
-    if (tr.life <= 0) {
+    // Simple ballistic: vel.y -= g*dt; pos += vel*dt
+    tr.vel.y -= tr.gravity * dt;
+    tr.mesh.position.addScaledVector(tr.vel, dt);
+    const speed = tr.vel.length();
+    if (speed > 1e-4) {
+      tr.mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        tr.vel.clone().normalize()
+      );
+    }
+
+    // Hit test vs range targets
+    if (!tr.hit) {
+      for (const t of rangeTargets) {
+        const d = tr.mesh.position.distanceTo(t.center);
+        if (d < t.radius) {
+          tr.hit = true;
+          tr.life = Math.min(tr.life, 0.02);
+          flashTarget(t);
+          break;
+        }
+      }
+    }
+
+    if (tr.life <= 0 || tr.mesh.position.y < -2.5) {
       scene.remove(tr.mesh);
       tr.mesh.geometry.dispose();
       tr.mesh.material.dispose();
@@ -934,13 +1105,15 @@ function updatePlayer(dt) {
   const bobY = Math.sin(player.bobPhase) * bobAmp;
   const bobX = Math.cos(player.bobPhase * 0.5) * bobAmp * 0.5;
 
-  // FOV lerp toward ADS
-  const fovTarget = (state.adsFactor > 0.05 || state.adsPreview) ? lerp(player.fovHip, player.fovAds, state.adsFactor) : player.fovHip;
+  // FOV lerp toward optic-specific ADS FOV (hip 90 / iron·holo 60 / acog 25 / sniper 10)
+  player.fovAds = adsFovForOptic(state.optic);
+  const fovTarget = lerp(player.fovHip, player.fovAds, state.adsPreview ? 1 : state.adsFactor);
   player.fov = lerp(player.fov, fovTarget, 1 - Math.exp(-10 * dt));
   if (Math.abs(camera.fov - player.fov) > 0.01) {
     camera.fov = player.fov;
     camera.updateProjectionMatrix();
   }
+  syncOpticHud();
 
   // Apply yaw/pitch on playerRoot / camera
   playerRoot.position.set(player.pos.x + bobX, player.pos.y + bobY, player.pos.z);
@@ -956,8 +1129,11 @@ function updatePlayer(dt) {
   const leanZ = lerp(leanPivot.rotation.z, player.leanAngle, player.leanLerp);
   leanPivot.rotation.z = leanZ;
   // light strafe tilt
-  const strafeTilt = gameplayActive() ? (Number(input.left) - Number(input.right)) * 0.03 : 0;
-  leanPivot.rotation.z = leanZ + strafeTilt;
+  // Strafe tilt only — tiny roll from lateral move (<< Q/E lean). Cap ~3% of leanMax.
+  const lateral = gameplayActive() ? (Number(input.left) - Number(input.right)) : 0;
+  const strafeTarget = lateral * player.leanMax * 0.025;
+  player.strafeTilt = lerp(player.strafeTilt || 0, strafeTarget, 1 - Math.exp(-10 * dt));
+  leanPivot.rotation.z = leanZ + player.strafeTilt;
 
   const leanRatio = leanZ / player.leanMax;
   // flat right from yaw (world XZ)
@@ -1040,6 +1216,44 @@ function updateEquipPrompt() {
       : `[E] Equip ${label}  ·  click to equip`;
   } else {
     prompt.hidden = true;
+  }
+}
+
+function syncOpticHud() {
+  const hud = el("opticHud");
+  const hipXh = el("hipCrosshair");
+  const vig = el("opticVignette");
+  const tube = el("opticTubeFrame");
+  const holo = el("reticleHolo");
+  const acog = el("reticleAcog");
+  const sniper = el("reticleSniper");
+  if (!hud) return;
+  const t = state.adsPreview ? 1 : state.adsFactor;
+  const adsOn = t > 0.12;
+  const optic = state.optic;
+  // Screen-space reticle is primary for glass optics; iron uses 3D posts
+  const showOverlay = adsOn && optic !== "iron";
+  hud.hidden = !showOverlay;
+  hud.setAttribute("aria-hidden", showOverlay ? "false" : "true");
+  hud.classList.toggle("active", showOverlay);
+  const fade = showOverlay ? clamp((t - 0.12) / 0.55, 0, 1) : 0;
+  hud.style.opacity = String(fade);
+  if (hipXh) hipXh.classList.toggle("ads-hide", adsOn);
+  if (holo) holo.hidden = !(showOverlay && optic === "holo");
+  if (acog) acog.hidden = !(showOverlay && optic === "acog");
+  if (sniper) sniper.hidden = !(showOverlay && optic === "sniper_scope");
+  if (vig) {
+    vig.classList.remove("heavy", "medium");
+    if (showOverlay && optic === "sniper_scope") vig.classList.add("heavy");
+    else if (showOverlay && optic === "acog") vig.classList.add("medium");
+  }
+  if (tube) {
+    const tubeOn = showOverlay && (optic === "acog" || optic === "sniper_scope" || optic === "holo");
+    tube.classList.toggle("show", tubeOn);
+    if (optic === "holo") tube.style.opacity = String(0.28 * fade);
+    else if (optic === "acog") tube.style.opacity = String(0.75 * fade);
+    else if (optic === "sniper_scope") tube.style.opacity = String(0.9 * fade);
+    else tube.style.opacity = "0";
   }
 }
 

@@ -325,6 +325,11 @@
           <input type="range" id="exposureSlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="exposureVal">1.00×</code>
         </label>
+        <label class="slider-row">God rays
+          <input type="range" id="godRaysSlider" min="0" max="2" step="0.01" value="0.90" />
+          <code id="godRaysVal">0.90</code>
+        </label>
+        <p class="note">Volumetric sun shafts from the ToD sun (shadow-map ray march). Strongest at low sun looking toward the light; noon is milder; night is off. 0 = skip the pass.</p>
       </div>
 
       <div class="settings-section">
@@ -400,7 +405,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / reset-targets button (weapons + optics; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + intensities) · Fog near/far · PLUGE strip</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + intensities + god rays) · Fog near/far · PLUGE strip</li>
         </ul>
       </div>
     </div>
@@ -408,6 +413,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v14"></script>
+    <script type="module" src="app.js?v=20260824v15"></script>
 </body>
 </html>

@@ -133,6 +133,10 @@ const VIEWMODEL_LAYER = 1;
 const ADS_DOF_RADIUS = 0.0028;
 /** Hold-breath multiplies near-blur (Space during ADS). */
 const ADS_DOF_BREATH_MUL = 1.6;
+/** Half-res volumetric sun-shaft march steps (shadow-map occluded). */
+const GOD_RAYS_STEPS = 48;
+/** Settings default; 0 skips the pass. */
+const GOD_RAYS_DEFAULT = 0.9;
 
 const state = {
   mode: "weapon",
@@ -236,6 +240,8 @@ const state = {
   holeFade: 18,
   /** Seconds after a casing sleeps before despawn. 0 = stay until cap recycles. */
   casingFade: 12,
+  /** Volumetric sun shafts (0 = off, 2 = strong). */
+  godRays: GOD_RAYS_DEFAULT,
 };
 
 const LOOK_SENS_BASE = 0.0022;
@@ -1299,6 +1305,21 @@ function syncLightMulUI(key) {
   if (val) val.textContent = Number(n).toFixed(2) + "×";
 }
 
+function syncGodRaysUI() {
+  const n = state.godRays ?? GOD_RAYS_DEFAULT;
+  const slider = el("godRaysSlider");
+  const val = el("godRaysVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2);
+}
+
+function setGodRays(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, 2);
+  state.godRays = Number.isFinite(n) ? n : GOD_RAYS_DEFAULT;
+  syncGodRaysUI();
+  if (toast) showToast(`God rays ${state.godRays.toFixed(2)}`);
+}
+
 function setLightMul(key, v, { toast = false } = {}) {
   const n = clamp(parseFloat(v), 0, 2.5);
   state[key] = Number.isFinite(n) ? n : 1;
@@ -1409,6 +1430,7 @@ function syncSettingsUI() {
 
   Object.keys(LIGHT_MUL_UI).forEach(syncLightMulUI);
 
+  syncGodRaysUI();
   syncFxSettingsUI();
 }
 
@@ -1663,6 +1685,8 @@ function nudgeSelected(sign) {
 let renderer, camera, scene, holdRoot, gunRoot;
 /** Half-res viewmodel RT + fullscreen composite for ADS DOF. */
 let adsDof = null;
+/** Half-res volumetric sun shafts (shadow-map ray march). */
+let godRays = null;
 /** Kept so Settings brightness/gamma can nudge intensities + fog. */
 let hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight;
 let sunDisc = null;
@@ -4533,6 +4557,7 @@ function renderScene() {
   if (!adsDof || amount < 0.02) {
     restoreCameraLayers();
     renderer.render(scene, camera);
+    renderGodRays();
     return;
   }
 
@@ -4567,7 +4592,511 @@ function renderScene() {
   renderer.render(adsDof.fsScene, adsDof.fsCam);
   renderer.autoClear = prevAutoClear;
   restoreCameraLayers();
+  renderGodRays();
 }
+
+/* ---- Volumetric sun shafts (god rays) ----
+ * EffectComposer radial blurs fight logarithmicDepthBuffer and smear a
+ * 2D wash. After the world (and ADS) render, ray-march view rays through
+ * a participating medium and occlude with the existing sun ortho shadow
+ * map (2048²). Beer-Lambert + Henyey-Greenstein. Half-res + dither /
+ * temporal blend. Night: no sun shafts; optional faint nearest-flood cone.
+ */
+function makeHalfResTarget(withDepth) {
+  const rt = new THREE.WebGLRenderTarget(1, 1, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    type: THREE.HalfFloatType,
+    format: THREE.RGBAFormat,
+    depthBuffer: !!withDepth,
+    stencilBuffer: false,
+  });
+  rt.texture.colorSpace = THREE.NoColorSpace;
+  return rt;
+}
+
+function initGodRays() {
+  const depthRT = makeHalfResTarget(true);
+  const volumeRT = makeHalfResTarget(false);
+  const historyRT = makeHalfResTarget(false);
+
+  const depthMat = new THREE.ShaderMaterial({
+    name: "GodRayViewZ",
+    uniforms: {
+      cameraFar: { value: 520 },
+    },
+    vertexShader: /* glsl */`
+      varying float vViewZ;
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vViewZ = -mv.z;
+        gl_Position = projectionMatrix * mv;
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform float cameraFar;
+      varying float vViewZ;
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+      void main() {
+        #include <logdepthbuf_fragment>
+        float z = clamp(vViewZ / max(cameraFar, 1.0), 0.0, 1.0);
+        gl_FragColor = vec4(z, 0.0, 0.0, 1.0);
+      }
+    `,
+    fog: false,
+    toneMapped: false,
+    lights: false,
+  });
+
+  const volumeMat = new THREE.ShaderMaterial({
+    name: "GodRayVolume",
+    defines: { STEPS: GOD_RAYS_STEPS },
+    uniforms: {
+      tDepth: { value: null },
+      tShadow: { value: null },
+      tHistory: { value: null },
+      shadowMatrix: { value: new THREE.Matrix4() },
+      projInverse: { value: new THREE.Matrix4() },
+      viewInverse: { value: new THREE.Matrix4() },
+      cameraPos: { value: new THREE.Vector3() },
+      cameraFar: { value: 520 },
+      sunDir: { value: new THREE.Vector3(0, 1, 0) },
+      sunColor: { value: new THREE.Vector3(1, 0.92, 0.78) },
+      sunAmt: { value: 0 },
+      intensity: { value: GOD_RAYS_DEFAULT },
+      volumeMax: { value: 80 },
+      shadowBias: { value: 0.0024 },
+      frame: { value: 0 },
+      historyBlend: { value: 0 },
+      dustTime: { value: 0 },
+      floodPos: { value: new THREE.Vector3() },
+      floodDir: { value: new THREE.Vector3(0, -1, 0) },
+      floodColor: { value: new THREE.Vector3(1.0, 0.86, 0.62) },
+      floodRange: { value: 40 },
+      floodCos: { value: 0.7 },
+      floodAmt: { value: 0 },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      #include <packing>
+      uniform sampler2D tDepth;
+      uniform sampler2D tShadow;
+      uniform sampler2D tHistory;
+      uniform mat4 shadowMatrix;
+      uniform mat4 projInverse;
+      uniform mat4 viewInverse;
+      uniform vec3 cameraPos;
+      uniform float cameraFar;
+      uniform vec3 sunDir;
+      uniform vec3 sunColor;
+      uniform float sunAmt;
+      uniform float intensity;
+      uniform float volumeMax;
+      uniform float shadowBias;
+      uniform float frame;
+      uniform float historyBlend;
+      uniform float dustTime;
+      uniform vec3 floodPos;
+      uniform vec3 floodDir;
+      uniform vec3 floodColor;
+      uniform float floodRange;
+      uniform float floodCos;
+      uniform float floodAmt;
+      varying vec2 vUv;
+
+      const float PI = 3.14159265359;
+
+      float ign(vec2 p) {
+        return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+      }
+
+      float hash13(vec3 p) {
+        p = fract(p * 0.1031);
+        p += dot(p, p.zyx + 33.33);
+        return fract((p.x + p.y) * p.z);
+      }
+
+      float hgPhase(float mu, float g) {
+        float g2 = g * g;
+        float denom = max(1e-4, 1.0 + g2 - 2.0 * g * mu);
+        return (1.0 - g2) / (4.0 * PI * pow(denom, 1.5));
+      }
+
+      float dustDensity(vec3 p) {
+        float n = hash13(floor(p * 0.62 + dustTime));
+        float n2 = hash13(floor(p * 1.85 + 19.0 - dustTime * 0.4));
+        // Subtle motes, not a noise storm.
+        return 0.78 + 0.28 * n + 0.10 * n2;
+      }
+
+      float sampleSunShadow(vec3 worldPos) {
+        vec4 sc = shadowMatrix * vec4(worldPos, 1.0);
+        if (abs(sc.w) < 1e-6) return 0.0;
+        sc.xyz /= sc.w;
+        if (sc.x < 0.002 || sc.x > 0.998 || sc.y < 0.002 || sc.y > 0.998 || sc.z < 0.0 || sc.z > 1.0) {
+          return 0.0;
+        }
+        vec2 jitter = (vec2(hash13(worldPos), hash13(worldPos.yzx)) - 0.5) * 0.0012;
+        float closest = unpackRGBAToDepth(texture2D(tShadow, sc.xy + jitter));
+        return step(sc.z - shadowBias, closest);
+      }
+
+      float sampleFlood(vec3 p) {
+        if (floodAmt < 1e-4) return 0.0;
+        vec3 toL = floodPos - p;
+        float dist = length(toL);
+        if (dist < 0.12 || dist > floodRange) return 0.0;
+        vec3 ldir = toL / dist;
+        float cone = dot(-ldir, floodDir);
+        float inner = mix(floodCos, 1.0, 0.38);
+        float spot = smoothstep(floodCos, inner, cone);
+        float att = pow(clamp(1.0 - dist / floodRange, 0.0, 1.0), 1.65);
+        return spot * att;
+      }
+
+      void main() {
+        vec4 clip = vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+        vec4 viewH = projInverse * clip;
+        vec3 viewDir = normalize(viewH.xyz / max(viewH.w, 1e-6));
+        vec3 worldDir = normalize((viewInverse * vec4(viewDir, 0.0)).xyz);
+
+        float sceneZ = texture2D(tDepth, vUv).r * cameraFar;
+        float rayLen = sceneZ / max(1e-4, abs(viewDir.z));
+        float marchLen = min(rayLen, volumeMax);
+        if (marchLen < 0.35 || intensity < 1e-4) {
+          vec3 hist0 = texture2D(tHistory, vUv).rgb;
+          gl_FragColor = vec4(mix(vec3(0.0), hist0, historyBlend * 0.5), 1.0);
+          return;
+        }
+
+        float dither = ign(gl_FragCoord.xy);
+        dither = fract(dither + frame * 0.61803398875);
+
+        float dt = marchLen / float(STEPS);
+        float T = 1.0;
+        vec3 acc = vec3(0.0);
+        float gSun = 0.78;
+        float gFlood = 0.62;
+        float sigmaT = 0.046;
+        float sigmaS = 0.090;
+
+        float muSun = clamp(dot(worldDir, sunDir), -1.0, 1.0);
+        float phaseSun = hgPhase(muSun, gSun);
+        // Low sun: longer air mass, stronger shafts. Noon is milder, not off.
+        float elev = clamp(sunDir.y, 0.0, 1.0);
+        float lowSun = pow(1.0 - elev / 0.86, 1.18);
+        float todPunch = mix(0.38, 1.42, lowSun);
+
+        for (int i = 0; i < STEPS; i++) {
+          float t = (float(i) + dither) * dt;
+          if (t >= marchLen - 0.08) break;
+          vec3 p = cameraPos + worldDir * t;
+          float dens = dustDensity(p);
+          // Slightly richer near the floor so the lane reads; keep sky shafts alive.
+          float h = p.y + 1.4;
+          dens *= 0.72 + 0.40 * exp(-max(0.0, h) * 0.11);
+
+          float stepT = exp(-sigmaT * dens * dt);
+          T *= stepT;
+
+          if (sunAmt > 1e-4) {
+            float lit = sampleSunShadow(p);
+            acc += T * lit * sunColor * sunAmt * todPunch * sigmaS * dens * phaseSun * dt;
+          }
+          if (floodAmt > 1e-4) {
+            float f = sampleFlood(p);
+            vec3 toL = floodPos - p;
+            float muF = dot(worldDir, normalize(toL + vec3(0.0, 1e-5, 0.0)));
+            float phaseF = hgPhase(clamp(muF, -1.0, 1.0), gFlood);
+            acc += T * f * floodColor * floodAmt * sigmaS * dens * phaseF * dt * 0.55;
+          }
+        }
+
+        // Mild shoulder so 2.0 is strong without a white frame wash.
+        acc *= intensity * 2.15;
+        acc = acc * (acc + 0.22) / (acc + 1.05);
+
+        vec3 hist = texture2D(tHistory, vUv).rgb;
+        vec3 mixed = mix(acc, hist, historyBlend);
+        gl_FragColor = vec4(mixed, 1.0);
+      }
+    `,
+    fog: false,
+    toneMapped: false,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const compositeMat = new THREE.ShaderMaterial({
+    name: "GodRayComposite",
+    uniforms: {
+      tVolume: { value: null },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tVolume;
+      varying vec2 vUv;
+      void main() {
+        vec3 c = texture2D(tVolume, vUv).rgb;
+        gl_FragColor = vec4(c, 1.0);
+        #include <colorspace_fragment>
+      }
+    `,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+    fog: false,
+    blending: THREE.AdditiveBlending,
+  });
+
+  const quadGeo = new THREE.PlaneGeometry(2, 2);
+  const volQuad = new THREE.Mesh(quadGeo, volumeMat);
+  volQuad.frustumCulled = false;
+  const volScene = new THREE.Scene();
+  volScene.add(volQuad);
+
+  const compQuad = new THREE.Mesh(quadGeo.clone(), compositeMat);
+  compQuad.frustumCulled = false;
+  const fsScene = new THREE.Scene();
+  fsScene.add(compQuad);
+  const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  godRays = {
+    depthRT,
+    volumeRT,
+    historyRT,
+    depthMat,
+    volumeMat,
+    compositeMat,
+    volScene,
+    fsScene,
+    fsCam,
+    _clear: new THREE.Color(),
+    _hidden: [],
+    _camPos: new THREE.Vector3(),
+    _prevCamPos: new THREE.Vector3(),
+    _camQ: new THREE.Quaternion(),
+    _prevCamQ: new THREE.Quaternion(),
+    _floodPos: new THREE.Vector3(),
+    _floodTgt: new THREE.Vector3(),
+    _floodDir: new THREE.Vector3(),
+    frame: 0,
+    historyValid: false,
+  };
+  resizeGodRays();
+}
+
+function resizeGodRays() {
+  if (!godRays || !renderer) return;
+  const canvas = el("view3d");
+  const wrap = canvas && canvas.parentElement;
+  const w = (wrap && wrap.clientWidth) || (canvas && canvas.clientWidth) || window.innerWidth;
+  const h = (wrap && wrap.clientHeight) || (canvas && canvas.clientHeight) || window.innerHeight;
+  const pr = renderer.getPixelRatio();
+  const dw = Math.max(1, Math.floor(w * pr * 0.5));
+  const dh = Math.max(1, Math.floor(h * pr * 0.5));
+  godRays.depthRT.setSize(dw, dh);
+  godRays.volumeRT.setSize(dw, dh);
+  godRays.historyRT.setSize(dw, dh);
+  godRays.historyValid = false;
+}
+
+function hideGodRayDepthSkip(list) {
+  list.length = 0;
+  if (!scene) return;
+  scene.traverse((o) => {
+    if (!o.visible) return;
+    if (o.isLine || o.isPoints || o.isSprite) {
+      o.visible = false;
+      list.push(o);
+      return;
+    }
+    if (!o.isMesh) return;
+    const m = o.material;
+    if (!m) return;
+    const mat0 = Array.isArray(m) ? m[0] : m;
+    if (!mat0) return;
+    if (mat0.transparent === true || mat0.depthWrite === false || (mat0.opacity != null && mat0.opacity < 0.99)) {
+      o.visible = false;
+      list.push(o);
+    }
+  });
+}
+
+function restoreGodRayDepthSkip(list) {
+  for (let i = 0; i < list.length; i++) list[i].visible = true;
+  list.length = 0;
+}
+
+function pickNightFlood() {
+  if (!godRays || !camera || !floodFixtures.length) return null;
+  camera.getWorldPosition(godRays._camPos);
+  const fwdX = -camera.matrixWorld.elements[8];
+  const fwdY = -camera.matrixWorld.elements[9];
+  const fwdZ = -camera.matrixWorld.elements[10];
+  let bestFx = null;
+  let bestScore = 0;
+  let bestLook = 0;
+  let bx = 0, by = 0, bz = 0;
+  for (let i = 0; i < floodFixtures.length; i++) {
+    const fx = floodFixtures[i];
+    if (!fx || fx.shotOut || !fx.light) continue;
+    fx.light.getWorldPosition(godRays._floodPos);
+    const dx = godRays._floodPos.x - godRays._camPos.x;
+    const dy = godRays._floodPos.y - godRays._camPos.y;
+    const dz = godRays._floodPos.z - godRays._camPos.z;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist > 58 || dist < 0.4) continue;
+    const inv = 1 / dist;
+    const look = fwdX * dx * inv + fwdY * dy * inv + fwdZ * dz * inv;
+    if (look < 0.18) continue;
+    const score = look * (1 / (1 + dist * 0.018));
+    if (score > bestScore) {
+      bestScore = score;
+      bestFx = fx;
+      bestLook = look;
+      bx = godRays._floodPos.x;
+      by = godRays._floodPos.y;
+      bz = godRays._floodPos.z;
+    }
+  }
+  if (!bestFx) return null;
+  godRays._floodPos.set(bx, by, bz);
+  bestFx.light.target.getWorldPosition(godRays._floodTgt);
+  godRays._floodDir.subVectors(godRays._floodTgt, godRays._floodPos);
+  if (godRays._floodDir.lengthSq() < 1e-8) godRays._floodDir.set(0, -1, 0);
+  else godRays._floodDir.normalize();
+  return {
+    pos: godRays._floodPos,
+    dir: godRays._floodDir,
+    range: bestFx.light.distance || 45,
+    angle: bestFx.light.angle || 0.5,
+    look: bestLook,
+  };
+}
+
+function godRaysWanted() {
+  const amt = state.godRays ?? 0;
+  if (amt < 0.01) return false;
+  const pal = sampleTod(state.timeOfDay);
+  const sunOn = !!(keyLight && keyLight.castShadow && pal.sunI > 0.05);
+  if (sunOn) return true;
+  // Night: only if a flood is in view — skip the pass entirely otherwise.
+  return !!pickNightFlood();
+}
+
+function renderGodRays() {
+  if (!godRays || !renderer || !scene || !camera) return;
+  if (!godRaysWanted()) return;
+
+  const pal = sampleTod(state.timeOfDay);
+  const sunOn = !!(keyLight && keyLight.castShadow && keyLight.shadow && keyLight.shadow.map && pal.sunI > 0.05);
+  const flood = sunOn ? null : pickNightFlood();
+  if (!sunOn && !flood) return;
+
+  const prevAutoClear = renderer.autoClear;
+  const prevShadowAuto = renderer.shadowMap.autoUpdate;
+  const prevOverride = scene.overrideMaterial;
+  const prevBg = scene.background;
+  renderer.getClearColor(godRays._clear);
+  const prevClearAlpha = renderer.getClearAlpha();
+  renderer.shadowMap.autoUpdate = false;
+
+  restoreCameraLayers();
+  hideGodRayDepthSkip(godRays._hidden);
+
+  godRays.depthMat.uniforms.cameraFar.value = camera.far;
+  scene.overrideMaterial = godRays.depthMat;
+  scene.background = null;
+  renderer.autoClear = true;
+  renderer.setRenderTarget(godRays.depthRT);
+  renderer.setClearColor(0xffffff, 1);
+  renderer.clear();
+  renderer.render(scene, camera);
+  scene.overrideMaterial = prevOverride;
+  restoreGodRayDepthSkip(godRays._hidden);
+  scene.background = prevBg;
+
+  camera.getWorldPosition(godRays._camPos);
+  camera.getWorldQuaternion(godRays._camQ);
+  const jump = godRays.historyValid ? godRays._prevCamPos.distanceTo(godRays._camPos) : 99;
+  const ang = godRays.historyValid ? godRays._prevCamQ.angleTo(godRays._camQ) : 99;
+  const hist = (jump > 1.15 || ang > 0.16) ? 0.05 : 0.32;
+  godRays._prevCamPos.copy(godRays._camPos);
+  godRays._prevCamQ.copy(godRays._camQ);
+  godRays.frame = (godRays.frame + 1) % 4096;
+
+  const u = godRays.volumeMat.uniforms;
+  u.tDepth.value = godRays.depthRT.texture;
+  u.tHistory.value = godRays.historyRT.texture;
+  u.projInverse.value.copy(camera.projectionMatrixInverse);
+  u.viewInverse.value.copy(camera.matrixWorld);
+  u.cameraPos.value.copy(godRays._camPos);
+  u.cameraFar.value = camera.far;
+  u.intensity.value = state.godRays;
+  u.volumeMax.value = 82;
+  u.frame.value = godRays.frame;
+  u.historyBlend.value = godRays.historyValid ? hist : 0;
+  u.dustTime.value = (performance.now() * 0.00015) % 256;
+
+  if (sunOn) {
+    const dir = (keyLight.userData && keyLight.userData.sunDir) || _keySunDir;
+    u.sunDir.value.copy(dir).normalize();
+    u.sunColor.value.set(keyLight.color.r, keyLight.color.g, keyLight.color.b);
+    const keyMul = state.lightKeyMul ?? 1;
+    u.sunAmt.value = Math.max(0, pal.sunI * keyMul);
+    u.tShadow.value = keyLight.shadow.map.texture;
+    u.shadowMatrix.value.copy(keyLight.shadow.matrix);
+    u.shadowBias.value = 0.0024;
+    u.floodAmt.value = 0;
+  } else {
+    u.sunAmt.value = 0;
+    u.tShadow.value = godRays.depthRT.texture;
+    u.floodAmt.value = (state.godRays * 0.55) * Math.min(1, 0.35 + flood.look);
+    u.floodPos.value.copy(flood.pos);
+    u.floodDir.value.copy(flood.dir);
+    u.floodRange.value = flood.range;
+    u.floodCos.value = Math.cos(flood.angle);
+  }
+
+  renderer.setRenderTarget(godRays.volumeRT);
+  renderer.setClearColor(0x000000, 1);
+  renderer.clear();
+  renderer.render(godRays.volScene, godRays.fsCam);
+
+  const tmp = godRays.volumeRT;
+  godRays.volumeRT = godRays.historyRT;
+  godRays.historyRT = tmp;
+  godRays.historyValid = true;
+
+  godRays.compositeMat.uniforms.tVolume.value = godRays.historyRT.texture;
+  renderer.setRenderTarget(null);
+  renderer.autoClear = false;
+  renderer.setClearColor(godRays._clear, prevClearAlpha);
+  renderer.render(godRays.fsScene, godRays.fsCam);
+
+  renderer.autoClear = prevAutoClear;
+  renderer.shadowMap.autoUpdate = prevShadowAuto;
+  restoreCameraLayers();
+}
+
 
 function initThree() {
   const canvas = el("view3d");
@@ -4634,6 +5163,7 @@ function initThree() {
   buildRoom();
   buildBlockGun(state.weaponId);
   initAdsDof();
+  initGodRays();
   resize();
   applyDisplayLook();
   const ro = new ResizeObserver(() => resize());
@@ -4651,6 +5181,7 @@ function resize() {
   camera.aspect = w / Math.max(h, 1);
   camera.updateProjectionMatrix();
   resizeAdsDof();
+  resizeGodRays();
 }
 
 function applyAttachmentOffsets() {
@@ -6976,6 +7507,13 @@ function bind() {
   }
   const todVal = el("todVal");
   if (todVal) todVal.textContent = formatClock(state.timeOfDay);
+
+  const godRaysSlider = el("godRaysSlider");
+  if (godRaysSlider) {
+    godRaysSlider.value = String(state.godRays);
+    godRaysSlider.oninput = (e) => setGodRays(e.target.value);
+  }
+  syncGodRaysUI();
 
   Object.keys(LIGHT_MUL_UI).forEach((key) => {
     const meta = LIGHT_MUL_UI[key];

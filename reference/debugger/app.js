@@ -931,7 +931,7 @@ const FLOOR_Y = -1.4;
 let casings = [];
 const CASING_MAX = 28;
 const CASING_GRAVITY = 12;
-const MUZZLE_FLASH_MS = 34;
+const MUZZLE_FLASH_MS = 80;
 let _casingGeo = null;
 let _casingMat = null;
 let _impactScorchTex = null;
@@ -1453,12 +1453,12 @@ function makeMuzzleFlashSprite(x, y, z, scale = 1) {
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
     });
-  // Punchier: hotter core + 3 crossed planes, slightly larger, same pose offsets.
-  const core = new THREE.Mesh(new THREE.SphereGeometry(0.013 * scale, 10, 10), mkMat(0xfff8e8, 1));
-  const long = new THREE.Mesh(new THREE.PlaneGeometry(0.092 * scale, 0.026 * scale), mkMat(0xffc266, 0.98));
-  const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.084 * scale, 0.024 * scale), mkMat(0xffe8a8, 0.95));
+  // Readable burst: hotter core + 3 crossed planes, same pose offsets; ~80ms visible.
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.018 * scale, 10, 10), mkMat(0xfffaf0, 1));
+  const long = new THREE.Mesh(new THREE.PlaneGeometry(0.11 * scale, 0.032 * scale), mkMat(0xffcc66, 1));
+  const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.1 * scale, 0.03 * scale), mkMat(0xfff0b8, 0.98));
   cross.rotation.z = Math.PI / 2;
-  const diag = new THREE.Mesh(new THREE.PlaneGeometry(0.062 * scale, 0.018 * scale), mkMat(0xff9018, 0.88));
+  const diag = new THREE.Mesh(new THREE.PlaneGeometry(0.074 * scale, 0.022 * scale), mkMat(0xffa028, 0.95));
   diag.rotation.z = Math.PI / 3;
   g.add(core, long, cross, diag);
   g.visible = false;
@@ -2739,16 +2739,19 @@ function fireLaunchDirection(muzzlePos, outDir) {
 }
 
 function getCasingGeo() {
-  if (!_casingGeo) _casingGeo = new THREE.CylinderGeometry(0.0042, 0.0048, 0.02, 7);
+  // ~2.25× prior size so ejected brass reads at range / night.
+  if (!_casingGeo) _casingGeo = new THREE.CylinderGeometry(0.0095, 0.011, 0.045, 7);
   return _casingGeo;
 }
 
 function getCasingMat() {
   if (!_casingMat) {
     _casingMat = new THREE.MeshStandardMaterial({
-      color: 0xd4b05a,
-      roughness: 0.38,
-      metalness: 0.78,
+      color: 0xf0d078,
+      roughness: 0.28,
+      metalness: 0.88,
+      emissive: 0x6a4018,
+      emissiveIntensity: 0.45,
     });
   }
   return _casingMat;
@@ -2802,7 +2805,7 @@ function spawnCasing() {
 }
 
 function updateCasings(dt) {
-  const floorY = FLOOR_Y + 0.007;
+  const floorY = FLOOR_Y + 0.016; // ~half of scaled casing height
   for (let i = 0; i < casings.length; i++) {
     const c = casings[i];
     if (c.sleeping) continue;
@@ -3273,7 +3276,8 @@ function updatePlayer(dt) {
       muzzleFlash.rotation.z += dt * 36;
       const remain = Math.max(0, player.flashUntil - now) / MUZZLE_FLASH_MS;
       const base = muzzleFlash.userData.flashScale || 1;
-      const sc = base * (0.9 + 0.7 * remain);
+      // Stronger early peak so the longer flash still reads on screen.
+      const sc = base * (1.05 + 0.95 * remain);
       muzzleFlash.scale.setScalar(sc);
     } else {
       muzzleFlash.scale.setScalar(muzzleFlash.userData.flashScale || 1);

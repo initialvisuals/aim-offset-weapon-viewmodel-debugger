@@ -1759,7 +1759,11 @@ function buildRoom() {
 
   buildOpticsTable();
   buildRangeProps();
-  buildRangeFloodlights();
+  try {
+    buildRangeFloodlights();
+  } catch (err) {
+    console.error('[flood] buildRangeFloodlights failed', err);
+  }
   buildShootingRange();
 }
 
@@ -2196,6 +2200,18 @@ function buildRangeFloodlights() {
     addLeanSolid(group);
     floodLights.push(light);
   }
+
+  // TODO removable — huge magenta box directly ahead of default spawn (looking -Z from z≈2.5).
+  const spawnMarker = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 4, 1),
+    new THREE.MeshBasicMaterial({ color: 0xff00ff, toneMapped: false })
+  );
+  spawnMarker.position.set(0, 1, -3);
+  spawnMarker.userData.debugFloodMarker = true;
+  spawnMarker.raycast = () => {};
+  scene.add(spawnMarker);
+
+  console.log('[flood] built', floodLights.length);
 }
 
 

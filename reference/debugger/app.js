@@ -627,7 +627,7 @@ function applyDisplayLook() {
   if (fillLight) fillLight.intensity = FILL_INT_BASE * lightMul;
   if (rimLight) rimLight.intensity = RIM_INT_BASE * lightMul;
   for (const L of floodLights) {
-    const base = (L.userData && L.userData.floodIntBase) || 120;
+    const base = (L.userData && L.userData.floodIntBase) || 2000;
     L.intensity = base * lightMul;
   }
 
@@ -2016,6 +2016,8 @@ function buildRangeProps() {
 /**
  * Cheap range floodlight: steel post + arm + fixture head, plus a warm SpotLight
  * aimed at the lane floor / targets. Shadows off to stay cheap.
+ * Three.js r170 SpotLight intensity is candela (physical); pools need ~1e3–4e3 cd
+ * with decay=2 so a ~15–40 m floor pool still reads against the key fill.
  */
 function makeFloodlight(x, z, opts = {}) {
   const inward = x >= 0 ? -1 : 1;
@@ -2026,6 +2028,13 @@ function makeFloodlight(x, z, opts = {}) {
 
   const steel = new THREE.MeshStandardMaterial({ color: 0x3c4652, roughness: 0.5, metalness: 0.5 });
   const steelDark = new THREE.MeshStandardMaterial({ color: 0x2a3138, roughness: 0.48, metalness: 0.62 });
+  const headMat = new THREE.MeshStandardMaterial({
+    color: 0x2a3138,
+    roughness: 0.48,
+    metalness: 0.55,
+    emissive: 0xffc070,
+    emissiveIntensity: 0.42,
+  });
 
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.12, 8), steelDark);
   base.position.y = 0.06;
@@ -2044,7 +2053,7 @@ function makeFloodlight(x, z, opts = {}) {
 
   const headX = inward * armLen;
   const headY = postH - 0.22;
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.28), steelDark);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.28), headMat);
   head.position.set(headX, headY, -0.04);
   head.rotation.z = inward * 0.48;
   head.rotation.x = -0.32;
@@ -2062,14 +2071,15 @@ function makeFloodlight(x, z, opts = {}) {
 
   group.add(base, post, arm, head, lamp);
 
-  const intensity = opts.intensity != null ? opts.intensity : 120;
-  const distance = opts.distance != null ? opts.distance : 90;
-  const light = new THREE.SpotLight(0xffe0b8, intensity, distance, 0.72, 0.55, 2);
+  const intensity = opts.intensity != null ? opts.intensity : 2000;
+  const distance = opts.distance != null ? opts.distance : 70;
+  // angle ~0.9 rad (~52°), soft penumbra; decay 2 matches physical SpotLight falloff.
+  const light = new THREE.SpotLight(0xffe0b8, intensity, distance, 0.9, 0.7, 2);
   light.castShadow = false;
   light.position.set(headX, headY - 0.06, -0.04);
   const aimZ = opts.aimZ != null ? opts.aimZ - z : -22;
-  // Toward lane center, slightly above the floor, downrange of the post.
-  light.target.position.set(inward * 8.2, 1.25, aimZ);
+  // Toward lane center on the floor (group y=0 == FLOOR_Y), side-aimed so spawn VM isn’t washed.
+  light.target.position.set(inward * 7.5, 0.05, aimZ);
   group.add(light);
   group.add(light.target);
   light.userData.floodIntBase = intensity;
@@ -2079,11 +2089,12 @@ function makeFloodlight(x, z, opts = {}) {
 /** Side-bay floodlight posts at ~25 / 80 / 160 / 280 m — 4 extra lights, no shadows. */
 function buildRangeFloodlights() {
   floodLights = [];
+  // Intensities in candela (r170); distance sized for ~15–40 m readable floor pools.
   const posts = [
-    { x: -9.2, z: -25, aimZ: -52, intensity: 110, distance: 72 },
-    { x: 9.4, z: -80, aimZ: -115, intensity: 130, distance: 90 },
-    { x: -9.2, z: -160, aimZ: -215, intensity: 150, distance: 105 },
-    { x: 9.4, z: -280, aimZ: -365, intensity: 175, distance: 130 },
+    { x: -9.2, z: -25, aimZ: -48, intensity: 1600, distance: 52 },
+    { x: 9.4, z: -80, aimZ: -108, intensity: 2100, distance: 68 },
+    { x: -9.2, z: -160, aimZ: -200, intensity: 2700, distance: 82 },
+    { x: 9.4, z: -280, aimZ: -335, intensity: 3400, distance: 100 },
   ];
   for (const p of posts) {
     const { group, light } = makeFloodlight(p.x, p.z, p);

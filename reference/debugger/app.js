@@ -3054,22 +3054,28 @@ function fireWeapon() {
   const bal = ballisticForWeapon();
   const vel = dir.clone().multiplyScalar(bal.speed);
 
-  // Visual only: thicker/longer additive streak (hit tests still use mesh.position).
-  const tracerLen = bal.tracerLen * 1.4;
-  const tracerR = 0.016;
-  const geo = new THREE.CylinderGeometry(tracerR * 0.75, tracerR, tracerLen, 8);
-  geo.translate(0, -tracerLen * 0.28, 0);
+  // Visual streak: unit-length cylinder with tip at local y=0 (body in -Y).
+  // Each frame scale.y stretches to visualLength; mesh.position stays the tip for hits.
+  const TRACER_BASE_LEN = 1;
+  const tracerR = 0.042;
+  const geo = new THREE.CylinderGeometry(tracerR * 0.85, tracerR, TRACER_BASE_LEN, 8);
+  geo.translate(0, -TRACER_BASE_LEN * 0.5, 0);
   const mat = new THREE.MeshBasicMaterial({
-    color: 0xffe8a0,
+    color: 0xffe090,
     transparent: true,
     opacity: 1,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
+    depthTest: false,
     depthWrite: false,
     toneMapped: false,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-  mesh.position.copy(origin).addScaledVector(dir, 0.28);
+  mesh.position.copy(origin);
+  const speed0 = vel.length();
+  const visualLength0 = Math.min(45, Math.max(3, speed0 * 0.06));
+  mesh.scale.set(1, visualLength0 / TRACER_BASE_LEN, 1);
+  mesh.renderOrder = 8;
   scene.add(mesh);
   tracers.push({
     mesh,
@@ -3079,6 +3085,7 @@ function fireWeapon() {
     maxLife: bal.life,
     hit: false,
     prev: mesh.position.clone(),
+    baseLen: TRACER_BASE_LEN,
   });
 }
 
@@ -3305,6 +3312,10 @@ function updateTracers(dt) {
         tr.vel.clone().normalize()
       );
     }
+    // Stretch cylinder along velocity so it reads as a long streak (tip = mesh.position).
+    const baseLen = tr.baseLen || 1;
+    const visualLength = Math.min(45, Math.max(3, speed * 0.06));
+    tr.mesh.scale.set(1, visualLength / baseLen, 1);
 
     // First hit along segment: circular bullseyes + silhouettes + env (floor/berm/walls)
     if (!tr.hit) {

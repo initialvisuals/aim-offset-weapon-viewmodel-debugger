@@ -2,7 +2,7 @@
 
 import * as THREE from "three";
 
-const POSE_KEYS = ["hip", "hip_low", "hip_cant", "sprint_high", "ads", "ads_holo", "ads_acog", "ads_sniper_scope"];
+const POSE_KEYS = ["hip", "hip_low", "hip_cant", "sprint_high", "ads", "ads_cant", "ads_holo", "ads_acog", "ads_sniper_scope"];
 const HOME_HOLD_KEYS = ["hip", "hip_low", "hip_cant"];
 const HOME_HOLD_LABELS = { hip: "chest", hip_low: "low hip", hip_cant: "canted" };
 const AXIS_DEFS = [
@@ -68,8 +68,9 @@ const db = {
     hip: { x: 0.1043, y: -0.1688, z: -0.1953, rotX: 0.0165, rotY: 0, rotZ: 0 },
     hip_low: { x: 0.1043, y: -0.2788, z: -0.1753, rotX: 0.0765, rotY: 0, rotZ: 0 },
     hip_cant: { x: 0.1393, y: -0.1938, z: -0.2103, rotX: 0.0365, rotY: 0.04, rotZ: 0.785 },
-    sprint_high: { x: 0.0593, y: -0.0438, z: -0.2253, rotX: 0.2765, rotY: 0.02, rotZ: -0.06 },
+    sprint_high: { x: 0.21, y: 0.018, z: -0.215, rotX: 0.52, rotY: 0.05, rotZ: -0.10 },
     ads: { x: 0.0084, y: -0.1343, z: -0.1887, rotX: 0, rotY: 0, rotZ: 0 },
+    ads_cant: { x: 0.034, y: -0.142, z: -0.172, rotX: 0.02, rotY: 0.035, rotZ: 0.785 },
     ads_holo: { x: 0.0082, y: -0.1478, z: -0.1335, rotX: 0.0115, rotY: 0, rotZ: 0 },
     ads_acog: { x: 0.0083, y: -0.15, z: -0.0724, rotX: 0.014, rotY: 0, rotZ: -0.003 },
   },
@@ -79,8 +80,9 @@ const db = {
     hip: { x: 0.12, y: -0.18, z: -0.22, rotX: 0.02, rotY: 0, rotZ: 0 },
     hip_low: { x: 0.12, y: -0.29, z: -0.20, rotX: 0.08, rotY: 0, rotZ: 0 },
     hip_cant: { x: 0.155, y: -0.205, z: -0.235, rotX: 0.04, rotY: 0.04, rotZ: 0.785 },
-    sprint_high: { x: 0.075, y: -0.055, z: -0.25, rotX: 0.28, rotY: 0.02, rotZ: -0.06 },
+    sprint_high: { x: 0.22, y: 0.012, z: -0.24, rotX: 0.54, rotY: 0.05, rotZ: -0.10 },
     ads: { x: 0.01, y: -0.14, z: -0.2, rotX: 0, rotY: 0, rotZ: 0 },
+    ads_cant: { x: 0.036, y: -0.148, z: -0.182, rotX: 0.02, rotY: 0.035, rotZ: 0.785 },
     ads_holo: { x: 0.01, y: -0.15, z: -0.15, rotX: 0.0115, rotY: 0, rotZ: 0 },
     ads_acog: { x: 0.01, y: -0.152, z: -0.08, rotX: 0.014, rotY: 0, rotZ: 0 },
     ads_sniper_scope: { x: 0.006, y: -0.155, z: -0.05, rotX: 0.01, rotY: 0, rotZ: 0 },
@@ -91,8 +93,9 @@ const db = {
     hip: { x: 0.125, y: -0.185, z: -0.24, rotX: 0.018, rotY: 0, rotZ: 0 },
     hip_low: { x: 0.125, y: -0.295, z: -0.22, rotX: 0.078, rotY: 0, rotZ: 0 },
     hip_cant: { x: 0.16, y: -0.21, z: -0.255, rotX: 0.038, rotY: 0.04, rotZ: 0.785 },
-    sprint_high: { x: 0.08, y: -0.06, z: -0.27, rotX: 0.278, rotY: 0.02, rotZ: -0.06 },
+    sprint_high: { x: 0.23, y: 0.008, z: -0.255, rotX: 0.56, rotY: 0.055, rotZ: -0.10 },
     ads: { x: 0.01, y: -0.14, z: -0.2, rotX: 0, rotY: 0, rotZ: 0 },
+    ads_cant: { x: 0.037, y: -0.148, z: -0.182, rotX: 0.02, rotY: 0.035, rotZ: 0.785 },
     ads_sniper_scope: { x: 0.006, y: -0.158, z: -0.04, rotX: 0.01, rotY: 0, rotZ: 0 },
   },
 };
@@ -425,8 +428,14 @@ function resolve(p) {
     rotX: p.rotX ?? 0, rotY: p.rotY ?? 0, rotZ: p.rotZ ?? 0,
   };
 }
+function adsCantedHome() {
+  // Runtime: U-cycle homeHold. Authoring: unaimedHoldKey() (poseKey) plus ads_cant dropdown.
+  if (state.panelOpen && state.poseKey === "ads_cant") return true;
+  return unaimedHoldKey() === "hip_cant";
+}
 function adsPose(cfg, profile) {
   const iron = cfg.ads;
+  if (adsCantedHome()) return cfg.ads_cant ?? iron;
   if (profile === "sniper_scope") return cfg.ads_sniper_scope ?? cfg.ads_acog ?? cfg.ads_holo ?? iron;
   if (profile === "acog") return cfg.ads_acog ?? cfg.ads_holo ?? iron;
   if (profile === "holo") return cfg.ads_holo ?? iron;
@@ -462,12 +471,16 @@ function cycleHomeHold() {
 function blendHold(cfg, profile, t, sprintT) {
   t = clamp(t, 0, 1);
   if (sprintT == null) sprintT = state.sprintHoldT || 0;
+  sprintT = clamp(sprintT, 0, 1);
   let hip = unaimedHoldPose(cfg);
   if (sprintT > 0.001 && unaimedHoldKey() !== "sprint_high") {
-    hip = blendPoses(hip, resolve(cfg.sprint_high || cfg.hip), clamp(sprintT, 0, 1));
+    hip = blendPoses(hip, resolve(cfg.sprint_high || cfg.hip), sprintT);
   }
+  // Sprint steals high-ready for the whole sprint — do not lerp toward ads / ads_cant.
+  const adsT = t * (1 - sprintT);
+  if (adsT < 0.001) return hip;
   const ads = resolve(adsPose(cfg, profile));
-  return blendPoses(hip, ads, t);
+  return blendPoses(hip, ads, adsT);
 }
 function ensurePose(cfg, key) {
   if (!cfg[key]) cfg[key] = emptyPose();
@@ -2776,6 +2789,9 @@ const player = {
   leanAngle: 0,
   leanTarget: 0,
   bobPhase: 0,
+  /** Lagged follow of bobPhase for sprint gun mass (seconds of lag via low-pass). */
+  gunBobPhase: 0,
+  gunBobW: 0,
   eyeHeight: 0.2,
   eyeCurrent: 0.2,
   crouchEyeMul: 0.6,
@@ -8572,10 +8588,26 @@ function applySwayAndRecoil(dt, moving) {
   const crouchDipY = -0.06 * tuck;
   const crouchDipZ = 0.03 * tuck;
 
+  // Sprint gun mass: follow camera bobPhase with ~0.38s lag, heavier down-thud + slight roll.
+  const sprintW = clamp(state.sprintHoldT || 0, 0, 1);
+  player.gunBobW = lerp(player.gunBobW || 0, sprintW, 1 - Math.exp(-7 * dt));
+  if (player.gunBobW < 0.001) player.gunBobW = 0;
+  const gunLag = 1 / 0.38;
+  player.gunBobPhase = lerp(player.gunBobPhase || 0, player.bobPhase, 1 - Math.exp(-gunLag * dt));
+  const gw = player.gunBobW;
+  const gp = player.gunBobPhase;
+  const step = Math.sin(gp);
+  const down = Math.min(0, step);
+  const gunBobX = Math.cos(gp * 0.5) * 0.018 * gw;
+  const gunBobY = (step * 0.018 + down * 0.032) * gw;
+  const gunBobZ = step * 0.007 * gw;
+  const gunBobRx = down * 0.055 * gw;
+  const gunBobRz = step * 0.06 * gw;
+
   swayRig.position.set(
-    sx + player.recoilPunch.x,
-    sy + player.recoilPunch.y + reloadLiftY + crouchDipY,
-    sz + player.recoilPunch.z + crouchDipZ + reloadLiftZ
+    sx + player.recoilPunch.x + gunBobX,
+    sy + player.recoilPunch.y + reloadLiftY + crouchDipY + gunBobY,
+    sz + player.recoilPunch.z + crouchDipZ + reloadLiftZ + gunBobZ
   );
   let boltYaw = 0;
   if (state.boltCycling) {
@@ -8584,9 +8616,9 @@ function applySwayAndRecoil(dt, moving) {
     boltYaw = 0.05 * Math.sin(u * Math.PI); // tiny viewmodel yaw through the cycle
   }
   swayRig.rotation.set(
-    rx + player.recoilRot.x + reloadLiftRx + 0.04 * tuck,
+    rx + player.recoilRot.x + reloadLiftRx + 0.04 * tuck + gunBobRx,
     ry + player.recoilRot.y + boltYaw + reloadLiftRy,
-    rz + player.recoilRot.z + reloadLiftRz,
+    rz + player.recoilRot.z + reloadLiftRz + gunBobRz,
     "XYZ"
   );
 }
@@ -10543,16 +10575,6 @@ function updateVaultPrompt(baseText) {
 }
 
 function updatePlayer(dt) {
-  // ADS factor spring (RMB hold) — also syncs slider via refresh path
-  if (!state.adsPreview) {
-    const adsSpeed = 8;
-    state.adsTarget = input.ads ? 1 : 0;
-    state.adsFactor = lerp(state.adsFactor, state.adsTarget, 1 - Math.exp(-adsSpeed * dt));
-    if (Math.abs(state.adsFactor - state.adsTarget) < 0.001) state.adsFactor = state.adsTarget;
-  } else {
-    state.adsFactor = 1;
-  }
-
   // Analog crouch (C toggle / Z hold / wheel). No Ctrl — browsers steal it.
   // Z hold: press from stand goes to last depth; release stands unless C is latched.
   if (input.crouchHold && state.crouchGrad < 0.04 && !state.vaulting) {
@@ -10563,6 +10585,18 @@ function updatePlayer(dt) {
     // (Z-up handler zeros grad when not C-toggled.)
   }
   const crouchBusy = state.crouchGrad > 0.04 || input.crouchHold || state.crouchToggled || state.sliding;
+  const sprintingNow = input.sprint && !crouchBusy && !state.sliding && !state.vaulting;
+
+  // ADS factor spring (RMB hold). Sprint interrupts — high-ready wins until sprintHoldT dies.
+  if (!state.adsPreview) {
+    const adsSpeed = 8;
+    const sprintBlock = sprintingNow || (state.sprintHoldT || 0) > 0.04;
+    state.adsTarget = (input.ads && !sprintBlock) ? 1 : 0;
+    state.adsFactor = lerp(state.adsFactor, state.adsTarget, 1 - Math.exp(-adsSpeed * dt));
+    if (Math.abs(state.adsFactor - state.adsTarget) < 0.001) state.adsFactor = state.adsTarget;
+  } else {
+    state.adsFactor = 1;
+  }
   let eyeTarget = lerp(standEyeWorld(), sitEyeWorld(), clamp(state.crouchGrad, 0, 1));
   if (state.sliding) eyeTarget -= 0.05 * (1 - clamp(state.slideT / state.slideDur, 0, 1));
 

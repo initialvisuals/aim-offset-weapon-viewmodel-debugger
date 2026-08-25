@@ -115,9 +115,9 @@ const attachments = {
 };
 
 const WEAPON_META = {
-  example_smg: { label: "Example SMG", blurb: "SMG auto, in-line recoil — iron / holo / acog" },
-  example_rifle: { label: "Example Rifle", blurb: "7.62 DMR — iron / holo / acog / sniper" },
-  example_sniper: { label: "Example Sniper", blurb: "Bolt 7.62 — iron / sniper_scope only" },
+  example_smg: { label: "MP9-Z", blurb: "SMG auto, in-line recoil — iron / holo / acog" },
+  example_rifle: { label: "SR-25", blurb: "7.62 DMR — iron / holo / acog / sniper" },
+  example_sniper: { label: "M24 Sniper", blurb: "Bolt 7.62 — iron / sniper_scope only" },
 };
 
 /** Which optic profiles each weapon may equip (iron = native default). */
@@ -135,11 +135,11 @@ const DEFAULT_OPTIC = {
 
 /** Mag catalog. Capacity follows the seated mag, not the optic. Infinite reserve. */
 const MAG_KINDS = {
-  smg_20: { id: "smg_20", weaponId: "example_smg", capacity: 20, shape: "stick", label: "SMG 20" },
-  smg_45: { id: "smg_45", weaponId: "example_smg", capacity: 45, shape: "banana", label: "SMG 45" },
-  smg_60: { id: "smg_60", weaponId: "example_smg", capacity: 60, shape: "drum", label: "SMG 60" },
-  rifle_20: { id: "rifle_20", weaponId: "example_rifle", capacity: 20, shape: "box", label: "Rifle 20" },
-  sniper_5: { id: "sniper_5", weaponId: "example_sniper", capacity: 5, shape: "clip", label: "Sniper 5" },
+  smg_20: { id: "smg_20", weaponId: "example_smg", capacity: 20, shape: "stick", label: "MP9-Z 20" },
+  smg_45: { id: "smg_45", weaponId: "example_smg", capacity: 45, shape: "banana", label: "MP9-Z 45" },
+  smg_60: { id: "smg_60", weaponId: "example_smg", capacity: 60, shape: "drum", label: "MP9-Z 60" },
+  rifle_20: { id: "rifle_20", weaponId: "example_rifle", capacity: 20, shape: "box", label: "SR-25 20" },
+  sniper_5: { id: "sniper_5", weaponId: "example_sniper", capacity: 5, shape: "clip", label: "M24 5" },
 };
 const DEFAULT_MAG = {
   example_smg: "smg_20",
@@ -154,9 +154,9 @@ const MAG_RELOAD_SEC = {
 };
 /** Per-gun suppressor: short SMG can, longer 7.62 rifle can, unique long bolt can. */
 const SUPPRESSOR_SPEC = {
-  example_smg: { label: "SMG suppressor", mount: [0, 0.016, -0.405], tipZ: -0.507, y: 0.016 },
-  example_rifle: { label: "Rifle suppressor", mount: [0, 0.018, -0.805], tipZ: -0.970, y: 0.018 },
-  example_sniper: { label: "Sniper suppressor", mount: [0, 0.014, -0.852], tipZ: -1.052, y: 0.014 },
+  example_smg: { label: ".45 suppressor", mount: [0, 0.016, -0.405], tipZ: -0.507, y: 0.016 },
+  example_rifle: { label: "7.62 suppressor", mount: [0, 0.018, -0.805], tipZ: -0.970, y: 0.018 },
+  example_sniper: { label: "7.62 long suppressor", mount: [0, 0.014, -0.852], tipZ: -1.052, y: 0.014 },
 };
 
 function magsForWeapon(weaponId) {
@@ -6101,9 +6101,9 @@ function buildWeaponsBench() {
   // Honest-meter guns along table length (X); spaced across depth so ~1 m rifles don't overlap.
   const benchY = tableY + 0.03;
   const defs = [
-    { id: "example_smg", label: "Example SMG", z: tableZ + 0.08 },
-    { id: "example_rifle", label: "Example Rifle", z: tableZ - 0.08 },
-    { id: "example_sniper", label: "Example Sniper", z: tableZ - 0.22 },
+    { id: "example_smg", label: "MP9-Z", z: tableZ + 0.08 },
+    { id: "example_rifle", label: "SR-25", z: tableZ - 0.08 },
+    { id: "example_sniper", label: "M24 Sniper", z: tableZ - 0.22 },
   ];
   defs.forEach((d) => {
     const group = new THREE.Group();

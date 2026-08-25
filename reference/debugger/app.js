@@ -2,7 +2,9 @@
 
 import * as THREE from "three";
 
-const POSE_KEYS = ["hip", "ads", "ads_holo", "ads_acog", "ads_sniper_scope"];
+const POSE_KEYS = ["hip", "hip_low", "hip_cant", "sprint_high", "ads", "ads_holo", "ads_acog", "ads_sniper_scope"];
+const HOME_HOLD_KEYS = ["hip", "hip_low", "hip_cant"];
+const HOME_HOLD_LABELS = { hip: "chest", hip_low: "low hip", hip_cant: "canted" };
 const AXIS_DEFS = [
   { id: "x", label: "Pos X", kind: "pos" },
   { id: "y", label: "Pos Y", kind: "pos" },
@@ -64,6 +66,9 @@ const db = {
     schema_version: 1,
     weapon: "example_smg",
     hip: { x: 0.1043, y: -0.1688, z: -0.1953, rotX: 0.0165, rotY: 0, rotZ: 0 },
+    hip_low: { x: 0.1043, y: -0.2788, z: -0.1753, rotX: 0.0765, rotY: 0, rotZ: 0 },
+    hip_cant: { x: 0.1393, y: -0.1938, z: -0.2103, rotX: 0.0365, rotY: 0.04, rotZ: 0.785 },
+    sprint_high: { x: 0.0593, y: -0.0438, z: -0.2253, rotX: 0.2765, rotY: 0.02, rotZ: -0.06 },
     ads: { x: 0.0084, y: -0.1343, z: -0.1887, rotX: 0, rotY: 0, rotZ: 0 },
     ads_holo: { x: 0.0082, y: -0.1478, z: -0.1335, rotX: 0.0115, rotY: 0, rotZ: 0 },
     ads_acog: { x: 0.0083, y: -0.15, z: -0.0724, rotX: 0.014, rotY: 0, rotZ: -0.003 },
@@ -72,6 +77,9 @@ const db = {
     schema_version: 1,
     weapon: "example_rifle",
     hip: { x: 0.12, y: -0.18, z: -0.22, rotX: 0.02, rotY: 0, rotZ: 0 },
+    hip_low: { x: 0.12, y: -0.29, z: -0.20, rotX: 0.08, rotY: 0, rotZ: 0 },
+    hip_cant: { x: 0.155, y: -0.205, z: -0.235, rotX: 0.04, rotY: 0.04, rotZ: 0.785 },
+    sprint_high: { x: 0.075, y: -0.055, z: -0.25, rotX: 0.28, rotY: 0.02, rotZ: -0.06 },
     ads: { x: 0.01, y: -0.14, z: -0.2, rotX: 0, rotY: 0, rotZ: 0 },
     ads_holo: { x: 0.01, y: -0.15, z: -0.15, rotX: 0.0115, rotY: 0, rotZ: 0 },
     ads_acog: { x: 0.01, y: -0.152, z: -0.08, rotX: 0.014, rotY: 0, rotZ: 0 },
@@ -81,6 +89,9 @@ const db = {
     schema_version: 1,
     weapon: "example_sniper",
     hip: { x: 0.125, y: -0.185, z: -0.24, rotX: 0.018, rotY: 0, rotZ: 0 },
+    hip_low: { x: 0.125, y: -0.295, z: -0.22, rotX: 0.078, rotY: 0, rotZ: 0 },
+    hip_cant: { x: 0.16, y: -0.21, z: -0.255, rotX: 0.038, rotY: 0.04, rotZ: 0.785 },
+    sprint_high: { x: 0.08, y: -0.06, z: -0.27, rotX: 0.278, rotY: 0.02, rotZ: -0.06 },
     ads: { x: 0.01, y: -0.14, z: -0.2, rotX: 0, rotY: 0, rotZ: 0 },
     ads_sniper_scope: { x: 0.006, y: -0.158, z: -0.04, rotX: 0.01, rotY: 0, rotZ: 0 },
   },
@@ -238,6 +249,10 @@ const state = {
   mode: "weapon",
   weaponId: "example_smg",
   poseKey: "hip",
+  /** Last U-cycled unaimed hold. Persisted. hip = chest. */
+  homeHold: "hip",
+  /** 0..1 blend onto sprint_high while Shift sprinting. */
+  sprintHoldT: 0,
   optic: "iron",
   step: "fine",
   attStep: "fine",
@@ -417,14 +432,42 @@ function adsPose(cfg, profile) {
   if (profile === "holo") return cfg.ads_holo ?? iron;
   return iron;
 }
-function blendHold(cfg, profile, t) {
+function blendPoses(a, b, t) {
   t = clamp(t, 0, 1);
-  const hip = resolve(cfg.hip);
-  const ads = resolve(adsPose(cfg, profile));
   return {
-    x: lerp(hip.x, ads.x, t), y: lerp(hip.y, ads.y, t), z: lerp(hip.z, ads.z, t),
-    rotX: lerp(hip.rotX, ads.rotX, t), rotY: lerp(hip.rotY, ads.rotY, t), rotZ: lerp(hip.rotZ, ads.rotZ, t),
+    x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), z: lerp(a.z, b.z, t),
+    rotX: lerp(a.rotX, b.rotX, t), rotY: lerp(a.rotY, b.rotY, t), rotZ: lerp(a.rotZ, b.rotZ, t),
   };
+}
+function normalizeHomeHold(key) {
+  return HOME_HOLD_KEYS.includes(key) ? key : "hip";
+}
+function unaimedHoldKey() {
+  if (state.panelOpen && (HOME_HOLD_KEYS.includes(state.poseKey) || state.poseKey === "sprint_high")) {
+    return state.poseKey;
+  }
+  return normalizeHomeHold(state.homeHold);
+}
+function unaimedHoldPose(cfg) {
+  const key = unaimedHoldKey();
+  return resolve(cfg[key] || cfg.hip);
+}
+function cycleHomeHold() {
+  const cur = normalizeHomeHold(state.homeHold);
+  const i = HOME_HOLD_KEYS.indexOf(cur);
+  state.homeHold = HOME_HOLD_KEYS[(i + 1) % HOME_HOLD_KEYS.length];
+  scheduleSaveSettings();
+  showToast("Hold: " + HOME_HOLD_LABELS[state.homeHold]);
+}
+function blendHold(cfg, profile, t, sprintT) {
+  t = clamp(t, 0, 1);
+  if (sprintT == null) sprintT = state.sprintHoldT || 0;
+  let hip = unaimedHoldPose(cfg);
+  if (sprintT > 0.001 && unaimedHoldKey() !== "sprint_high") {
+    hip = blendPoses(hip, resolve(cfg.sprint_high || cfg.hip), clamp(sprintT, 0, 1));
+  }
+  const ads = resolve(adsPose(cfg, profile));
+  return blendPoses(hip, ads, t);
 }
 function ensurePose(cfg, key) {
   if (!cfg[key]) cfg[key] = emptyPose();
@@ -2745,8 +2788,12 @@ const player = {
   wasSprint: false,
   wasCrouched: false,
   crouchSpeedMul: 0.6,
+  velX: 0,
+  velZ: 0,
+  moveAccel: 16,
+  moveFriction: 9,
   moveSpeed: 3.2,
-  sprintMul: 1.65,
+  sprintMul: 1.95,
   lookSens: LOOK_SENS_BASE,
   // Global ADS coefficient on top of FOV scale (1 = hip feel × FOV ratio only).
   adsLookMul: 1,
@@ -2825,6 +2872,7 @@ const SETTINGS_FIELDS = [
   { key: "clouds", src: "state", type: "num" },
   { key: "crouchGrad", src: "state", type: "num" },
   { key: "crouchLastDepth", src: "state", type: "num" },
+  { key: "homeHold", src: "state", type: "str" },
   { key: "lookSens", src: "player", type: "num" },
   { key: "adsLookMul", src: "player", type: "num" },
 ];
@@ -2895,6 +2943,7 @@ function applySettingsBlob(blob) {
   state.concreteVar = clamp(state.concreteVar ?? CONCRETE_VAR_DEFAULT, CONCRETE_VAR_MIN, CONCRETE_VAR_MAX);
   state.casingDraw = Math.round(clamp(state.casingDraw ?? CASING_DRAW_DEFAULT, CASING_DRAW_MIN, CASING_DRAW_MAX));
   state.decalDraw = Math.round(clamp(state.decalDraw ?? DECAL_DRAW_DEFAULT, DECAL_DRAW_MIN, DECAL_DRAW_MAX) / 10) * 10;
+  state.homeHold = normalizeHomeHold(state.homeHold);
 }
 
 function loadPersistedSettings() {
@@ -10342,6 +10391,8 @@ function startVault(cand) {
   state.vaultTo = new THREE.Vector3(cand.landX, landEye, cand.landZ);
   state.vaultSupportTo = cand.landSupport;
   state.sliding = false;
+  player.velX = 0;
+  player.velZ = 0;
   state.spaceHoldT = 0;
   // Stand up through the vault; crouch restores after if Z still held.
   setCrouchGrad(0, { remember: false });
@@ -10406,7 +10457,7 @@ function startSlide() {
   if (!gameplayActive()) return;
   state.sliding = true;
   state.slideT = 0;
-  state.slideDur = 0.68;
+  state.slideDur = 0.88;
   state.slideFx = -Math.sin(player.yaw);
   state.slideFz = -Math.cos(player.yaw);
   if (input.left && !input.right) {
@@ -10422,7 +10473,7 @@ function startSlide() {
   const len = Math.hypot(state.slideFx, state.slideFz) || 1;
   state.slideFx /= len;
   state.slideFz /= len;
-  state.slideSpeed = 7.3;
+  state.slideSpeed = 9.6;
   setCrouchGrad(Math.max(state.crouchGrad, 0.88));
 }
 
@@ -10430,14 +10481,17 @@ function updateSlide(dt) {
   if (!state.sliding) return false;
   state.slideT += dt;
   const u = state.slideT / state.slideDur;
-  state.slideSpeed *= Math.exp(-2.15 * dt);
-  player.pos.x += state.slideFx * state.slideSpeed * dt;
-  player.pos.z += state.slideFz * state.slideSpeed * dt;
+  state.slideSpeed *= Math.exp(-1.2 * dt);
+  player.velX = state.slideFx * state.slideSpeed;
+  player.velZ = state.slideFz * state.slideSpeed;
+  player.pos.x += player.velX * dt;
+  player.pos.z += player.velZ * dt;
   player.pos.x = clamp(player.pos.x, -10, 10);
   player.pos.z = clamp(player.pos.z, rangeZ(412), SPAWN_Z + 1.5);
   player.planarSpeed = state.slideSpeed;
   if (u >= 1 || state.slideSpeed < 1.15) {
     state.sliding = false;
+    // Keep leftover planar vel into walk instead of snapping to 3.2 / 0.
     // Stay crouched if C/Z still want it; else stand.
     if (!input.crouchHold && !state.crouchToggled) setCrouchGrad(0, { remember: true });
   }
@@ -10561,7 +10615,7 @@ function updatePlayer(dt) {
     }
   }
 
-  // Movement on XZ (vault/slide own their translation)
+  // Movement on XZ (vault/slide own their translation). Accel toward wish; friction when no input.
   let mx = 0, mz = 0;
   if (gameplayActive() && !state.vaulting && !state.sliding) {
     if (input.forward) mz -= 1;
@@ -10571,22 +10625,36 @@ function updatePlayer(dt) {
   }
   const moving = Math.abs(mx) + Math.abs(mz) > 0 || state.sliding;
   const sprinting = input.sprint && !crouchBusy && !state.sliding && !state.vaulting;
-  if (gameplayActive() && !state.vaulting && !state.sliding && moving) {
-    const len = Math.hypot(mx, mz) || 1;
-    mx /= len; mz /= len;
-    let speed = player.moveSpeed;
-    if (state.crouchGrad > 0.3 || input.crouchHold) speed *= player.crouchSpeedMul;
-    else if (sprinting) speed *= player.sprintMul;
-    const cy = Math.cos(player.yaw), sy = Math.sin(player.yaw);
-    const dx = (mx * cy + mz * sy) * speed * dt;
-    const dz = (-mx * sy + mz * cy) * speed * dt;
-    player.pos.x += dx;
-    player.pos.z += dz;
+  const sprintPose = sprinting ? 1 : 0;
+  state.sprintHoldT = lerp(state.sprintHoldT || 0, sprintPose, 1 - Math.exp(-9 * dt));
+  if (Math.abs(state.sprintHoldT - sprintPose) < 0.001) state.sprintHoldT = sprintPose;
+  if (!state.vaulting && !state.sliding) {
+    const len = Math.hypot(mx, mz);
+    if (len > 0 && gameplayActive()) {
+      mx /= len; mz /= len;
+      let speed = player.moveSpeed;
+      if (state.crouchGrad > 0.3 || input.crouchHold) speed *= player.crouchSpeedMul;
+      else if (sprinting) speed *= player.sprintMul;
+      const cy = Math.cos(player.yaw), sy = Math.sin(player.yaw);
+      const wishX = (mx * cy + mz * sy) * speed;
+      const wishZ = (-mx * sy + mz * cy) * speed;
+      const a = 1 - Math.exp(-player.moveAccel * dt);
+      player.velX = lerp(player.velX, wishX, a);
+      player.velZ = lerp(player.velZ, wishZ, a);
+    } else {
+      const f = Math.exp(-player.moveFriction * dt);
+      player.velX *= f;
+      player.velZ *= f;
+      if (Math.hypot(player.velX, player.velZ) < 0.05) {
+        player.velX = 0;
+        player.velZ = 0;
+      }
+    }
+    player.pos.x += player.velX * dt;
+    player.pos.z += player.velZ * dt;
     player.pos.x = clamp(player.pos.x, -10, 10);
     player.pos.z = clamp(player.pos.z, rangeZ(412), SPAWN_Z + 1.5);
-    player.planarSpeed = Math.hypot(dx, dz) / Math.max(dt, 1e-4);
-  } else if (!state.sliding && !state.vaulting) {
-    player.planarSpeed = lerp(player.planarSpeed, 0, 1 - Math.exp(-8 * dt));
+    player.planarSpeed = Math.hypot(player.velX, player.velZ);
   }
   if (input.forward && gameplayActive()) player.fwdIntent = Math.min(1.2, player.fwdIntent + dt);
   else player.fwdIntent = Math.max(0, player.fwdIntent - dt * 2.4);
@@ -10845,7 +10913,7 @@ function updateHudHint() {
   } else if (state.panelOpen) {
     hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
   } else {
-    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>F</kbd> bench (gun/optic/mag/can) · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>B</kbd> fire mode · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>U</kbd> cycle hold · <kbd>F</kbd> bench (gun/optic/mag/can) · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>B</kbd> fire mode · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
   }
 }
 
@@ -11077,6 +11145,10 @@ function onKeyDown(e) {
     }
     if (code === "KeyQ") input.leanLeft = true;
     if (code === "KeyE") input.leanRight = true;
+    if ((k === "u" || k === "U") && !e.repeat) {
+      cycleHomeHold();
+      e.preventDefault();
+    }
     if (k === " " || code === "Space") {
       input.spaceDown = true;
       if (isAdsNow() && !state.vaulting) input.holdBreath = true;

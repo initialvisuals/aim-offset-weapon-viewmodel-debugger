@@ -346,21 +346,21 @@
           <input type="range" id="sunSizeSlider" min="0.08" max="8" step="0.01" value="0.45" />
           <code id="sunSizeVal">0.45°</code>
         </label>
-        <label class="slider-row">Sun disc
+        <label class="slider-row">Sun punch
           <input type="range" id="sunPunchSlider" min="0" max="4" step="0.01" value="1.40" />
           <code id="sunPunchVal">1.40</code>
         </label>
-        <p class="note">Mesh sun at sky radius. Size is angular diameter (real sun ≈ 0.5°). Disc is HDR punch into bloom — default just over threshold. Sky shader halo stays. Tune in the bay; Bloom and God rays stay independent.</p>
+        <p class="note">Size is the visual disc + sky halo only (real sun ≈ 0.5°). It does not grow bloom. Punch is how hot the tiny core is — soft-clamped so it never floods. Halo stays dimmer and below the bloom threshold.</p>
         <label class="slider-row">God rays
           <input type="range" id="godRaysSlider" min="0" max="2" step="0.01" value="0.90" />
           <code id="godRaysVal">0.90</code>
         </label>
-        <p class="note">Volumetric sun shafts from the ToD sun (shadow-map ray march). Strongest at low sun looking toward the light; noon is milder; night is off. 0 = skip the pass.</p>
+        <p class="note">Occlusion shafts from the sun shadow map, not a glow ball. Strongest looking toward low sun down the bay; fall off looking aside; noon is milder; night is off. Intensity lengthens / brightens streaks. 0 = skip the pass.</p>
         <label class="slider-row">Bloom
           <input type="range" id="bloomSlider" min="0" max="2" step="0.01" value="0.22" />
           <code id="bloomVal">0.22</code>
         </label>
-        <p class="note">HDR glow on floods, muzzle, sun, hot barrels, and tracers. Walls and floor stay put. Independent of god rays. 0 = skip the pass.</p>
+        <p class="note">HDR glow on floods, muzzle, tracers, hot barrels, and a tiny sun core — not a second sun. Sky halo stays out of the bright-pass. 0 = skip the pass.</p>
         <label class="slider-row">Dither
           <input type="range" id="ditherSlider" min="0" max="0.08" step="0.001" value="0.025" />
           <code id="ditherVal">0.025</code>
@@ -464,7 +464,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/disc + god rays + bloom + dither + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/punch + god rays + bloom + dither + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
         </ul>
       </div>
     </div>
@@ -472,6 +472,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v30"></script>
+    <script type="module" src="app.js?v=20260824v31"></script>
 </body>
 </html>

@@ -189,11 +189,13 @@ const DITHER_DEFAULT = 0.025;
 const DITHER_MAX = 0.08;
 /** Mesh sun angular diameter (degrees). Real sun ~0.53; default a hair smaller. */
 const SUN_SIZE_DEFAULT = 0.45;
-/** HDR mul on ToD sun color for the mesh disc. 1.4 just kisses bloom threshold. */
+/** Core heat of the disc. Soft-clamped so it never floods; halo stays LDR. */
 const SUN_PUNCH_DEFAULT = 1.4;
-/** Bright-pass luminance floor (HDR). Knee is a fraction of this. */
-const BLOOM_THRESHOLD = 1.0;
-const BLOOM_KNEE = 0.22;
+/** Pinpoint HDR seed (degrees). Independent of sun size — does not grow bloom. */
+const SUN_CORE_DEG = 0.10;
+/** Bright-pass luminance floor (HDR). Raised so the sky disc/halo stay out. */
+const BLOOM_THRESHOLD = 1.28;
+const BLOOM_KNEE = 0.14;
 /** Dual-filter pyramid depth (half / quarter / eighth). */
 const BLOOM_MIPS = 3;
 /** Settings default; 0 skips the glow. Multiplies barrel emissive only. */
@@ -338,9 +340,9 @@ const state = {
   adsDofRadius: ADS_DOF_RADIUS,
   /** Barrel heat glow mul (0 = off, 2 = strong). Default 1. */
   barrelHeat: BARREL_HEAT_DEFAULT,
-  /** Mesh sun angular diameter in degrees (real sun ~0.53). */
+  /** Visual disc + sky-shader halo (degrees). Must not enlarge the bloom kernel. */
   sunSize: SUN_SIZE_DEFAULT,
-  /** HDR mul on ToD sun color for the mesh disc. */
+  /** Core brightness of the disc. Soft-clamped; halo stays dimmer. */
   sunPunch: SUN_PUNCH_DEFAULT,
   /** Procedural cloud cover (0 = clear). Stars follow the clock. */
   clouds: CLOUDS_DEFAULT,
@@ -1309,6 +1311,7 @@ function ensureSkyDome() {
       moonColor: { value: new THREE.Color(0xb8c8dc) },
       cloudColor: { value: new THREE.Color(0xd8c8b4) },
       sunHalo: { value: 1 },
+      sunAngular: { value: (SUN_SIZE_DEFAULT * Math.PI / 180) * 0.5 },
       moonHalo: { value: 0 },
       starAmt: { value: 0 },
       cloudAmt: { value: CLOUDS_DEFAULT },
@@ -1338,6 +1341,7 @@ function ensureSkyDome() {
       uniform vec3 moonColor;
       uniform vec3 cloudColor;
       uniform float sunHalo;
+      uniform float sunAngular;
       uniform float moonHalo;
       uniform float starAmt;
       uniform float cloudAmt;
@@ -1421,11 +1425,17 @@ function ensureSkyDome() {
         col = mix(col, fogColor, haze * hazeAmt);
         col = mix(col, fogColor * 0.45, below * 0.85);
 
-        float mu = clamp(dot(dir, normalize(sunDir)), 0.0, 1.0);
-        float glow = pow(mu, 26.0);
-        float scatter = pow(mu, 5.5);
-        float limb = pow(mu, 8.0) * hBand;
-        col += sunColor * sunHalo * (glow * 2.2 + scatter * 0.38 + limb * 0.55);
+        float mu = clamp(dot(dir, normalize(sunDir)), -1.0, 1.0);
+        float ang = acos(mu);
+        float halfA = max(sunAngular, 8e-4);
+        float disc = 1.0 - smoothstep(halfA * 0.78, halfA * 1.06, ang);
+        col += sunColor * sunHalo * disc * 0.82;
+
+        float haloW = halfA * 8.0;
+        float glow = exp(-pow(ang / max(haloW, 1e-4), 2.05));
+        float scatter = exp(-pow(ang / max(haloW * 2.4, 1e-4), 1.25));
+        float limb = exp(-pow(ang / max(haloW * 1.55, 1e-4), 1.8)) * hBand;
+        col += sunColor * sunHalo * (1.0 - disc) * (glow * 0.32 + scatter * 0.09 + limb * 0.14);
 
         float muM = clamp(dot(dir, normalize(moonDir)), 0.0, 1.0);
         col += moonColor * moonHalo * (pow(muM, 48.0) * 0.85 + pow(muM, 10.0) * 0.16);
@@ -1511,6 +1521,7 @@ function syncSkyUniforms(pal, path) {
   u.moonDir.value.copy(_moonDir);
 
   u.sunHalo.value = clamp((elDeg + 5.5) / 11, 0, 1);
+  u.sunAngular.value = sunHalfAngleRad();
   u.moonHalo.value = (pal.moonI > 0.04 && elDeg < 8) ? clamp(pal.moonI * 3.2, 0.2, 1) : 0;
   u.starAmt.value = night * clamp((-elDeg + 2) / 10, 0, 1);
   u.cloudAmt.value = state.clouds ?? CLOUDS_DEFAULT;
@@ -1530,9 +1541,9 @@ function updateSkyDome(dt) {
   const R = skyFollowRadius();
   skyDome.scale.setScalar(Math.max(20, R * 0.55));
   if (skyMat) skyMat.uniforms.skyTime.value += dt;
-  const sizeDeg = state.sunSize ?? SUN_SIZE_DEFAULT;
-  const angRad = (sizeDeg * Math.PI / 180) * 0.5;
-  const sunScale = Math.max(0.06, R * Math.tan(angRad));
+  if (skyMat) skyMat.uniforms.sunAngular.value = sunHalfAngleRad();
+  const coreRad = (SUN_CORE_DEG * Math.PI / 180) * 0.5;
+  const sunScale = Math.max(0.035, R * Math.tan(coreRad));
   if (sunDisc && sunDisc.visible) {
     sunDisc.position.copy(_skyCamPos).addScaledVector(_keySunDir, R);
     sunDisc.scale.setScalar(sunScale);
@@ -1617,7 +1628,7 @@ function applyTimeOfDay() {
     sunDisc.visible = up;
     if (up) {
       sunDisc.material.color.copy(pal.sun);
-      sunDisc.material.color.multiplyScalar(state.sunPunch ?? SUN_PUNCH_DEFAULT);
+      sunDisc.material.color.multiplyScalar(sunPunchGain(state.sunPunch ?? SUN_PUNCH_DEFAULT));
     }
   }
   if (moonDisc) {
@@ -1859,7 +1870,7 @@ function setSunPunch(v, { toast = false } = {}) {
   applyTimeOfDay();
   updateSkyDome(0);
   syncSunPunchUI();
-  if (toast) showToast("Sun disc " + state.sunPunch.toFixed(2));
+  if (toast) showToast("Sun punch " + state.sunPunch.toFixed(2));
   scheduleSaveSettings();
 }
 
@@ -2292,6 +2303,18 @@ let skyMat = null;
 const _skyCamPos = new THREE.Vector3();
 const _moonDir = new THREE.Vector3(0, 1, 0);
 const SKY_DISC_R = 180;
+
+function sunHalfAngleRad() {
+  const sizeDeg = state.sunSize ?? SUN_SIZE_DEFAULT;
+  return Math.max(1e-4, (sizeDeg * Math.PI / 180) * 0.5);
+}
+
+/** Soft shoulder: 1.4 is a hot pin, 4 never washes the frame. */
+function sunPunchGain(punch) {
+  const p = clamp(parseFloat(punch), 0, 4);
+  if (!Number.isFinite(p) || p <= 0) return 0;
+  return (p * 1.45) / (1 + p * 0.28);
+}
 /** Side-bay flood SpotLights (+ fake floor pools) so the long lane reads at night. */
 let floodLights = [];
 /** Fixture records: lamp/head hit, pool meshes, shot-out flag. */
@@ -6383,17 +6406,20 @@ function initGodRays() {
         float dt = marchLen / float(STEPS);
         float T = 1.0;
         vec3 acc = vec3(0.0);
-        float gSun = 0.78;
-        float gFlood = 0.62;
-        float sigmaT = 0.046;
-        float sigmaS = 0.090;
+        float gSun = 0.94;
+        float gFlood = 0.72;
+        float sigmaT = 0.040;
+        float sigmaS = 0.058;
 
         float muSun = clamp(dot(worldDir, sunDir), -1.0, 1.0);
         float phaseSun = hgPhase(muSun, gSun);
+        // Shafts, not a glow ball: kill side-scatter when looking off the sun.
+        float viewGate = smoothstep(0.14, 0.64, muSun);
+        phaseSun *= viewGate;
         // Low sun: longer air mass, stronger shafts. Noon is milder, not off.
         float elev = clamp(sunDir.y, 0.0, 1.0);
         float lowSun = pow(1.0 - elev / 0.86, 1.18);
-        float todPunch = mix(0.38, 1.42, lowSun);
+        float todPunch = mix(0.52, 1.12, lowSun);
 
         for (int i = 0; i < STEPS; i++) {
           float t = (float(i) + dither) * dt;
@@ -6420,9 +6446,9 @@ function initGodRays() {
           }
         }
 
-        // Mild shoulder so 2.0 is strong without a white frame wash.
-        acc *= intensity * 2.15;
-        acc = acc * (acc + 0.22) / (acc + 1.05);
+        // Linear-ish intensity: brighter / longer streaks, not a wider sphere.
+        acc *= intensity * 1.28;
+        acc = acc / (1.0 + acc * 0.38);
 
         vec3 hist = texture2D(tHistory, vUv).rgb;
         vec3 mixed = mix(acc, hist, historyBlend);
@@ -6649,7 +6675,7 @@ function renderGodRays(dest = null) {
   u.cameraPos.value.copy(godRays._camPos);
   u.cameraFar.value = camera.far;
   u.intensity.value = state.godRays;
-  u.volumeMax.value = 82;
+  u.volumeMax.value = 34 + (state.godRays ?? 0) * 62;
   u.frame.value = godRays.frame;
   u.historyBlend.value = godRays.historyValid ? hist : 0;
   u.dustTime.value = (performance.now() * 0.00015) % 256;
@@ -6695,13 +6721,15 @@ function renderGodRays(dest = null) {
   restoreCameraLayers();
 }
 
-/* ---- HDR bloom (Jimenez dual-filter, 3 mips) ----
+/* ---- HDR bloom (3-mip dual-filter, irregular taps) ----
  * UnrealBloomPass fights logarithmicDepthBuffer / ACES and milks LDR.
  * Capture the scene (and ADS composite) to a HalfFloat RT with tone
- * mapping off, bright-pass at threshold ~1, dual-filter pyramid, then
- * add and ACES onto the backbuffer (or the dither capture). God rays
- * still composite after. Slider 0 skips the capture so the direct
- * ACES path stays untouched.
+ * mapping off, bright-pass at threshold ~1.28 (sky disc/halo stay out),
+ * full-res prefilter so thin barrels/muzzle/sun-core do not box-filter,
+ * then a 3-mip pyramid whose taps rotate / offset / weight-jitter per
+ * mip so the halo is round, not a stamped diamond. God rays still
+ * composite after. Slider 0 skips the capture so the direct ACES path
+ * stays untouched. Barrel-heat emissive is left alone — only the halo.
  */
 function makeBloomTarget(withDepth) {
   const rt = new THREE.WebGLRenderTarget(1, 1, {
@@ -6720,8 +6748,15 @@ function bloomWanted() {
   return !!(hdrBloom && (state.bloom ?? 0) >= 0.01);
 }
 
+function setBloomTaps(mat, mip, kind) {
+  const gold = 2.399963229728653;
+  mat.uniforms.rot.value = mip * 0.463647609 + (kind ? 0.29 : 0.16);
+  mat.uniforms.shunt.value = Math.sin(mip * gold + kind * 1.11) * 0.26;
+}
+
 function initHdrBloom() {
   const sceneRT = makeBloomTarget(true);
+  const prefilterRT = makeBloomTarget(false);
   const down = [];
   const up = [];
   for (let i = 0; i < BLOOM_MIPS; i++) down.push(makeBloomTarget(false));
@@ -6771,32 +6806,38 @@ function initHdrBloom() {
     uniforms: {
       tInput: { value: null },
       texel: { value: new THREE.Vector2(1, 1) },
+      rot: { value: 0 },
+      shunt: { value: 0 },
     },
     vertexShader: vs,
     fragmentShader: /* glsl */`
       uniform sampler2D tInput;
       uniform vec2 texel;
+      uniform float rot;
+      uniform float shunt;
       varying vec2 vUv;
       void main() {
-        vec4 A = texture2D(tInput, vUv + texel * vec2(-1.0, -1.0));
-        vec4 B = texture2D(tInput, vUv + texel * vec2( 0.0, -1.0));
-        vec4 C = texture2D(tInput, vUv + texel * vec2( 1.0, -1.0));
-        vec4 D = texture2D(tInput, vUv + texel * vec2(-0.5, -0.5));
-        vec4 E = texture2D(tInput, vUv + texel * vec2( 0.5, -0.5));
-        vec4 F = texture2D(tInput, vUv + texel * vec2(-1.0,  0.0));
-        vec4 G = texture2D(tInput, vUv);
-        vec4 H = texture2D(tInput, vUv + texel * vec2( 1.0,  0.0));
-        vec4 I = texture2D(tInput, vUv + texel * vec2(-0.5,  0.5));
-        vec4 J = texture2D(tInput, vUv + texel * vec2( 0.5,  0.5));
-        vec4 K = texture2D(tInput, vUv + texel * vec2(-1.0,  1.0));
-        vec4 L = texture2D(tInput, vUv + texel * vec2( 0.0,  1.0));
-        vec4 M = texture2D(tInput, vUv + texel * vec2( 1.0,  1.0));
-        vec4 o = (D + E + I + J) * 0.125;
-        o += (A + B + G + F) * 0.03125;
-        o += (B + C + H + G) * 0.03125;
-        o += (F + G + L + K) * 0.03125;
-        o += (G + H + M + L) * 0.03125;
-        gl_FragColor = o;
+        vec3 acc = texture2D(tInput, vUv).rgb * 0.26;
+        float wSum = 0.26;
+        for (int i = 0; i < 8; i++) {
+          float fi = float(i);
+          float a = rot + fi * 0.78539816339 + shunt * 0.33;
+          float radJ = 1.0 + 0.17 * sin(fi * 2.17 + rot * 3.1);
+          vec2 d = vec2(cos(a), sin(a)) * texel * (1.12 * radJ);
+          float w = 0.058 * (1.0 + 0.12 * cos(fi * 1.63 + shunt * 2.0));
+          acc += texture2D(tInput, vUv + d).rgb * w;
+          wSum += w;
+        }
+        for (int i = 0; i < 8; i++) {
+          float fi = float(i);
+          float a = rot + 0.41 + fi * 0.78539816339 + shunt * 0.18;
+          float radJ = 1.0 + 0.14 * cos(fi * 1.81 + rot * 2.4);
+          vec2 d = vec2(cos(a), sin(a)) * texel * (2.08 * radJ);
+          float w = 0.026 * (1.0 + 0.15 * sin(fi * 2.05 + shunt));
+          acc += texture2D(tInput, vUv + d).rgb * w;
+          wSum += w;
+        }
+        gl_FragColor = vec4(acc / max(wSum, 1e-4), 1.0);
       }
     `,
     fog: false,
@@ -6812,6 +6853,8 @@ function initHdrBloom() {
       tHigh: { value: null },
       texel: { value: new THREE.Vector2(1, 1) },
       combine: { value: 1 },
+      rot: { value: 0 },
+      shunt: { value: 0 },
     },
     vertexShader: vs,
     fragmentShader: /* glsl */`
@@ -6819,23 +6862,33 @@ function initHdrBloom() {
       uniform sampler2D tHigh;
       uniform vec2 texel;
       uniform float combine;
+      uniform float rot;
+      uniform float shunt;
       varying vec2 vUv;
       void main() {
-        vec4 A = texture2D(tLow, vUv + texel * vec2(-1.0, -1.0));
-        vec4 B = texture2D(tLow, vUv + texel * vec2( 0.0, -1.0));
-        vec4 C = texture2D(tLow, vUv + texel * vec2( 1.0, -1.0));
-        vec4 D = texture2D(tLow, vUv + texel * vec2(-1.0,  0.0));
-        vec4 E = texture2D(tLow, vUv);
-        vec4 F = texture2D(tLow, vUv + texel * vec2( 1.0,  0.0));
-        vec4 G = texture2D(tLow, vUv + texel * vec2(-1.0,  1.0));
-        vec4 H = texture2D(tLow, vUv + texel * vec2( 0.0,  1.0));
-        vec4 I = texture2D(tLow, vUv + texel * vec2( 1.0,  1.0));
-        vec4 o = E * 4.0;
-        o += (B + D + F + H) * 2.0;
-        o += (A + C + G + I);
-        o *= 0.0625;
-        if (combine > 0.5) o.rgb += texture2D(tHigh, vUv).rgb;
-        gl_FragColor = o;
+        vec3 acc = texture2D(tLow, vUv).rgb * 0.30;
+        float wSum = 0.30;
+        for (int i = 0; i < 8; i++) {
+          float fi = float(i);
+          float a = rot + 0.22 + fi * 0.78539816339 + shunt * 0.27;
+          float radJ = 1.0 + 0.15 * sin(fi * 1.94 + rot * 2.7);
+          vec2 d = vec2(cos(a), sin(a)) * texel * (0.95 * radJ);
+          float w = 0.055 * (1.0 + 0.10 * cos(fi * 1.41 + shunt * 1.7));
+          acc += texture2D(tLow, vUv + d).rgb * w;
+          wSum += w;
+        }
+        for (int i = 0; i < 8; i++) {
+          float fi = float(i);
+          float a = rot + 0.63 + fi * 0.78539816339 - shunt * 0.21;
+          float radJ = 1.0 + 0.12 * cos(fi * 2.33 + rot * 1.9);
+          vec2 d = vec2(cos(a), sin(a)) * texel * (1.85 * radJ);
+          float w = 0.024 * (1.0 + 0.13 * sin(fi * 1.77 + shunt * 2.2));
+          acc += texture2D(tLow, vUv + d).rgb * w;
+          wSum += w;
+        }
+        acc /= max(wSum, 1e-4);
+        if (combine > 0.5) acc += texture2D(tHigh, vUv).rgb;
+        gl_FragColor = vec4(acc, 1.0);
       }
     `,
     fog: false,
@@ -6879,6 +6932,7 @@ function initHdrBloom() {
 
   hdrBloom = {
     sceneRT,
+    prefilterRT,
     down,
     up,
     prefilterMat,
@@ -6903,6 +6957,7 @@ function resizeHdrBloom() {
   const fw = Math.max(1, Math.floor(w * pr));
   const fh = Math.max(1, Math.floor(h * pr));
   hdrBloom.sceneRT.setSize(fw, fh);
+  hdrBloom.prefilterRT.setSize(fw, fh);
   let mw = Math.max(1, Math.floor(fw * 0.5));
   let mh = Math.max(1, Math.floor(fh * 0.5));
   for (let i = 0; i < BLOOM_MIPS; i++) {
@@ -6931,10 +6986,19 @@ function renderBloom(dest = null) {
   hdrBloom.prefilterMat.uniforms.tInput.value = sceneTex;
   hdrBloom.prefilterMat.uniforms.threshold.value = BLOOM_THRESHOLD;
   hdrBloom.prefilterMat.uniforms.knee.value = BLOOM_KNEE;
-  blitBloom(hdrBloom.prefilterMat, hdrBloom.down[0]);
+  blitBloom(hdrBloom.prefilterMat, hdrBloom.prefilterRT);
+
+  setBloomTaps(hdrBloom.downMat, 0, 0);
+  hdrBloom.downMat.uniforms.tInput.value = hdrBloom.prefilterRT.texture;
+  hdrBloom.downMat.uniforms.texel.value.set(
+    1 / Math.max(1, hdrBloom.prefilterRT.width),
+    1 / Math.max(1, hdrBloom.prefilterRT.height)
+  );
+  blitBloom(hdrBloom.downMat, hdrBloom.down[0]);
 
   for (let i = 0; i < BLOOM_MIPS - 1; i++) {
     const src = hdrBloom.down[i];
+    setBloomTaps(hdrBloom.downMat, i + 1, 0);
     hdrBloom.downMat.uniforms.tInput.value = src.texture;
     hdrBloom.downMat.uniforms.texel.value.set(1 / Math.max(1, src.width), 1 / Math.max(1, src.height));
     blitBloom(hdrBloom.downMat, hdrBloom.down[i + 1]);
@@ -6944,6 +7008,7 @@ function renderBloom(dest = null) {
   for (let i = BLOOM_MIPS - 2; i >= 0; i--) {
     const dest = hdrBloom.up[i];
     const high = hdrBloom.down[i];
+    setBloomTaps(hdrBloom.upMat, i, 1);
     hdrBloom.upMat.uniforms.tLow.value = low.texture;
     hdrBloom.upMat.uniforms.tHigh.value = high.texture;
     hdrBloom.upMat.uniforms.texel.value.set(1 / Math.max(1, low.width), 1 / Math.max(1, low.height));

@@ -399,7 +399,15 @@
           <input type="range" id="concreteWearSlider" min="0" max="1" step="0.01" value="0.40" />
           <code id="concreteWearVal">0.40</code>
         </label>
-        <p class="note">Dust, edge wear, and base grime on bay walls, floor, and berm. 0 = clean pour. Default dusty indoor. Benches stay wood.</p>
+        <label class="slider-row">Concrete scale
+          <input type="range" id="concreteScaleSlider" min="0.40" max="1.60" step="0.02" value="1.00" />
+          <code id="concreteScaleVal">1.00</code>
+        </label>
+        <label class="slider-row">Concrete variation
+          <input type="range" id="concreteVarSlider" min="0" max="2" step="0.02" value="1.00" />
+          <code id="concreteVarVal">1.00</code>
+        </label>
+        <p class="note">Wear is dust and edge fade. Scale is grain size (low = finer grit, high = larger blotches). Variation is per-panel hue/value drift. Mid-slider is the authored look — ends are useful, not one-tick. Default already reads as poured panels. Benches stay wood.</p>
       </div>
 
       <div class="settings-section">
@@ -484,7 +492,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/punch + god rays + bloom + dither/scale/offset/type + barrel heat) · Materials (concrete wear) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/punch + god rays + bloom + dither/scale/offset/type + barrel heat) · Materials (concrete wear/scale/variation) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
         </ul>
       </div>
     </div>
@@ -492,6 +500,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v32"></script>
+    <script type="module" src="app.js?v=20260824v33"></script>
 </body>
 </html>

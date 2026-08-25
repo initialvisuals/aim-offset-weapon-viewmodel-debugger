@@ -214,6 +214,16 @@ const CLOUDS_DEFAULT = 0.55;
 /** Dust / edge wear on bay concrete (0 = clean pour). Shared GPU uniform. */
 const CONCRETE_WEAR_DEFAULT = 0.4;
 const uConcreteWear = { value: CONCRETE_WEAR_DEFAULT };
+/** Grain-size mul on authored per-kind scale. Mid-slider = authored look. */
+const CONCRETE_SCALE_DEFAULT = 1;
+const CONCRETE_SCALE_MIN = 0.4;
+const CONCRETE_SCALE_MAX = 1.6;
+const uConcreteScale = { value: CONCRETE_SCALE_DEFAULT };
+/** Panel chroma/value mul on authored variation. Mid-slider = authored look. */
+const CONCRETE_VAR_DEFAULT = 1;
+const CONCRETE_VAR_MIN = 0;
+const CONCRETE_VAR_MAX = 2;
+const uConcreteVar = { value: CONCRETE_VAR_DEFAULT };
 /** Warm HDR lamp glass — pops under threshold without lifting the bay. */
 const FLOOD_LAMP_HDR = [3.15, 2.65, 1.78];
 
@@ -331,6 +341,10 @@ const state = {
   casingCap: 30000,
   /** Dust / edge wear on bay floor, walls, berm (0–1). */
   concreteWear: CONCRETE_WEAR_DEFAULT,
+  /** Grain-size mul (0.4–1.6). 1 = authored grit. */
+  concreteScale: CONCRETE_SCALE_DEFAULT,
+  /** Per-panel chroma/value mul (0–2). 1 = authored drift. */
+  concreteVar: CONCRETE_VAR_DEFAULT,
   /** Seconds after spawn before env/scuff holes despawn. 0 = FIFO only. */
   holeFade: 18,
   /** Seconds after a casing sleeps before despawn. 0 = stay until cap recycles. */
@@ -1985,6 +1999,12 @@ function setClouds(v, { toast = false } = {}) {
   scheduleSaveSettings();
 }
 
+function syncConcreteUniforms() {
+  uConcreteWear.value = state.concreteWear ?? CONCRETE_WEAR_DEFAULT;
+  uConcreteScale.value = state.concreteScale ?? CONCRETE_SCALE_DEFAULT;
+  uConcreteVar.value = state.concreteVar ?? CONCRETE_VAR_DEFAULT;
+}
+
 function syncConcreteWearUI() {
   const n = state.concreteWear ?? CONCRETE_WEAR_DEFAULT;
   const slider = el("concreteWearSlider");
@@ -1996,9 +2016,43 @@ function syncConcreteWearUI() {
 function setConcreteWear(v, { toast = false } = {}) {
   const n = clamp(parseFloat(v), 0, 1);
   state.concreteWear = Number.isFinite(n) ? n : CONCRETE_WEAR_DEFAULT;
-  uConcreteWear.value = state.concreteWear;
+  syncConcreteUniforms();
   syncConcreteWearUI();
   if (toast) showToast(`Concrete wear ${state.concreteWear.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function syncConcreteScaleUI() {
+  const n = state.concreteScale ?? CONCRETE_SCALE_DEFAULT;
+  const slider = el("concreteScaleSlider");
+  const val = el("concreteScaleVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2);
+}
+
+function setConcreteScale(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), CONCRETE_SCALE_MIN, CONCRETE_SCALE_MAX);
+  state.concreteScale = Number.isFinite(n) ? n : CONCRETE_SCALE_DEFAULT;
+  syncConcreteUniforms();
+  syncConcreteScaleUI();
+  if (toast) showToast(`Concrete scale ${state.concreteScale.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function syncConcreteVarUI() {
+  const n = state.concreteVar ?? CONCRETE_VAR_DEFAULT;
+  const slider = el("concreteVarSlider");
+  const val = el("concreteVarVal");
+  if (slider && document.activeElement !== slider) slider.value = String(n);
+  if (val) val.textContent = Number(n).toFixed(2);
+}
+
+function setConcreteVar(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), CONCRETE_VAR_MIN, CONCRETE_VAR_MAX);
+  state.concreteVar = Number.isFinite(n) ? n : CONCRETE_VAR_DEFAULT;
+  syncConcreteUniforms();
+  syncConcreteVarUI();
+  if (toast) showToast(`Concrete variation ${state.concreteVar.toFixed(2)}`);
   scheduleSaveSettings();
 }
 
@@ -2124,6 +2178,8 @@ function syncSettingsUI() {
   syncSunPunchUI();
   syncCloudsUI();
   syncConcreteWearUI();
+  syncConcreteScaleUI();
+  syncConcreteVarUI();
   syncBarrelHeatUI();
   syncFxSettingsUI();
   syncCrouchSlider();
@@ -2624,6 +2680,8 @@ const SETTINGS_FIELDS = [
   { key: "holeCap", src: "state", type: "num" },
   { key: "casingCap", src: "state", type: "num" },
   { key: "concreteWear", src: "state", type: "num" },
+  { key: "concreteScale", src: "state", type: "num" },
+  { key: "concreteVar", src: "state", type: "num" },
   { key: "holeFade", src: "state", type: "num" },
   { key: "casingFade", src: "state", type: "num" },
   { key: "godRays", src: "state", type: "num" },
@@ -2707,6 +2765,9 @@ function applySettingsBlob(blob) {
   state.ditherOffY = clamp(state.ditherOffY ?? 0, DITHER_OFF_MIN, DITHER_OFF_MAX);
   state.ditherType = normalizeDitherType(state.ditherType);
   state.ditherAnimate = !!state.ditherAnimate;
+  state.concreteWear = clamp(state.concreteWear ?? CONCRETE_WEAR_DEFAULT, 0, 1);
+  state.concreteScale = clamp(state.concreteScale ?? CONCRETE_SCALE_DEFAULT, CONCRETE_SCALE_MIN, CONCRETE_SCALE_MAX);
+  state.concreteVar = clamp(state.concreteVar ?? CONCRETE_VAR_DEFAULT, CONCRETE_VAR_MIN, CONCRETE_VAR_MAX);
 }
 
 function loadPersistedSettings() {
@@ -2733,7 +2794,7 @@ function applySettingsSideEffects() {
   if (skyMat && skyMat.uniforms && skyMat.uniforms.cloudAmt) {
     skyMat.uniforms.cloudAmt.value = state.clouds;
   }
-  uConcreteWear.value = state.concreteWear ?? CONCRETE_WEAR_DEFAULT;
+  syncConcreteUniforms();
   applyBarrelHeatVisual();
   setCrouchGrad(state.crouchGrad, { remember: false });
   setPerfOverlay(!!state.showPerf, { toast: false });
@@ -2767,6 +2828,7 @@ function copySettingsJson() {
 }
 
 loadPersistedSettings();
+syncConcreteUniforms();
 
 
 /** Subtle chalk/wood range marker lines on the floor (no floating text). */
@@ -2930,29 +2992,31 @@ function makeCanvasTexture(draw, size = 256, opts = {}) {
 /** World-space procedural concrete — MeshStandard so lights / shadows / fog / log-depth stay. */
 const CONCRETE_KINDS = {
   floor: {
-    scale: 0.90, variation: 0.55, wear: 0.32, grime: 0.48, moisture: 0.16, rust: 0.08,
-    ground: 0.55, groundH: 0.45, grout: 0.38, tile: 1.0, warmth: 0.42, roughness: 0.86, color: 0x8a8680,
+    scale: 0.42, variation: 0.70, wear: 0.32, grime: 0.48, moisture: 0.16, rust: 0.08,
+    ground: 0.55, groundH: 0.45, grout: 0.72, tile: 5.0, warmth: 0.42, roughness: 0.86, color: 0x8a8680,
   },
   lane: {
-    scale: 0.95, variation: 0.50, wear: 0.30, grime: 0.50, moisture: 0.14, rust: 0.06,
-    ground: 0.58, groundH: 0.40, grout: 0.84, tile: 1.0, warmth: 0.50, roughness: 0.88, color: 0x7c7872,
+    scale: 0.45, variation: 0.66, wear: 0.30, grime: 0.50, moisture: 0.14, rust: 0.06,
+    ground: 0.58, groundH: 0.40, grout: 0.88, tile: 5.0, warmth: 0.50, roughness: 0.88, color: 0x7c7872,
   },
   wall: {
-    scale: 1.25, variation: 0.62, wear: 0.48, grime: 0.38, moisture: 0.20, rust: 0.16,
-    ground: 0.72, groundH: 0.85, grout: 0.0, tile: 1.0, warmth: 0.40, roughness: 0.80, color: 0x908c86,
+    scale: 0.52, variation: 0.74, wear: 0.48, grime: 0.38, moisture: 0.20, rust: 0.16,
+    ground: 0.72, groundH: 0.85, grout: 0.62, tile: 5.5, warmth: 0.40, roughness: 0.80, color: 0x908c86,
   },
   berm: {
-    scale: 1.65, variation: 0.64, wear: 0.42, grime: 0.52, moisture: 0.18, rust: 0.12,
-    ground: 0.78, groundH: 1.15, grout: 0.0, tile: 1.0, warmth: 0.55, roughness: 0.90, color: 0x7a7468,
+    scale: 0.72, variation: 0.68, wear: 0.42, grime: 0.52, moisture: 0.18, rust: 0.12,
+    ground: 0.78, groundH: 1.15, grout: 0.0, tile: 5.0, warmth: 0.55, roughness: 0.90, color: 0x7a7468,
   },
   bermDark: {
-    scale: 1.10, variation: 0.58, wear: 0.50, grime: 0.55, moisture: 0.12, rust: 0.18,
-    ground: 0.62, groundH: 0.90, grout: 0.0, tile: 1.0, warmth: 0.48, roughness: 0.88, color: 0x5c584e,
+    scale: 0.50, variation: 0.64, wear: 0.50, grime: 0.55, moisture: 0.12, rust: 0.18,
+    ground: 0.62, groundH: 0.90, grout: 0.0, tile: 5.0, warmth: 0.48, roughness: 0.88, color: 0x5c584e,
   },
 };
 
 const CONCRETE_GLSL_FNS = /* glsl */`
 uniform float uConcreteWear;
+uniform float uConcreteScale;
+uniform float uConcreteVar;
 uniform float uConScale;
 uniform float uConVar;
 uniform float uConWear;
@@ -3078,16 +3142,45 @@ float conGround(vec3 wp, vec3 n, float strength, float falloffH) {
   return clamp((floorMask + wallMask * 0.88) * strength, 0.0, 1.0);
 }
 
+vec2 conPanelCell(vec3 wp, vec3 n) {
+  if (n.y > 0.45) {
+    float ts = max(uConTile, 0.5);
+    return floor(wp.xz / ts);
+  }
+  float run = abs(n.x) > abs(n.z) ? wp.z : wp.x;
+  return floor(vec2(run / 5.5, (wp.y - uConFloorY) / 1.2));
+}
+
 vec2 conGrout(vec3 wp, vec3 n, float tileSize, float groutStr) {
-  if (groutStr < 0.01 || n.y < 0.45) return vec2(0.0);
+  if (groutStr < 0.01) return vec2(0.0);
   float ts = max(tileSize, 0.25);
-  vec2 grid = wp.xz / ts;
+  vec2 grid;
+  float edgeW;
+  if (n.y >= 0.45) {
+    grid = wp.xz / ts;
+    edgeW = 0.018;
+  } else {
+    float run = abs(n.x) > abs(n.z) ? wp.z : wp.x;
+    grid = vec2(run / max(ts, 5.0), (wp.y - uConFloorY) / 1.2);
+    edgeW = 0.014;
+  }
   vec2 cell = floor(grid);
   vec2 f = fract(grid);
   float edge = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
-  float grout = (1.0 - smoothstep(0.0, 0.035, edge)) * groutStr;
+  float grout = (1.0 - smoothstep(0.0, edgeW, edge)) * groutStr;
   float grit = grout * conHash12(cell + vec2(17.3, 9.1)) * 0.55 * groutStr;
   return vec2(grout, grit);
+}
+
+float conFormTies(vec3 wp, vec3 n, float str) {
+  if (n.y > 0.45 || str < 0.01) return 0.0;
+  float run = abs(n.x) > abs(n.z) ? wp.z : wp.x;
+  vec2 g = vec2(run, wp.y - uConFloorY) / 0.82;
+  vec2 cell = floor(g);
+  float alive = step(0.18, conHash12(cell + vec2(4.4, 2.1)));
+  vec2 f = fract(g) - 0.5;
+  float hole = 1.0 - smoothstep(0.026, 0.058, length(f));
+  return hole * alive * str;
 }
 
 float conPourSeam(vec3 wp, vec3 n, float wearK) {
@@ -3102,28 +3195,37 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
   vec3 n = normalize(vConWN);
   vec3 wp = vConWP;
   float dist = length(cameraPosition - wp);
-  rangeConLod = smoothstep(22.0, 150.0, dist);
+  rangeConLod = smoothstep(52.0, 240.0, dist);
 
   float wCtrl = clamp(uConcreteWear, 0.0, 1.0);
   float k = wCtrl / 0.4;
-  float variation = clamp(uConVar, 0.0, 1.0);
+  float scale = max(uConScale * max(uConcreteScale, 0.05), 0.08);
+  float variation = clamp(uConVar * uConcreteVar, 0.0, 1.75);
   float wearStr = clamp(uConWear * k, 0.0, 1.0);
   float grime = clamp(uConGrime * k, 0.0, 1.0);
   float moisture = clamp(uConMoisture * k, 0.0, 1.0);
   float rustStr = clamp(uConRust * k, 0.0, 1.0);
   float groundStr = clamp(uConGround * k, 0.0, 1.0);
-  float groutStr = clamp(uConGrout * mix(0.35, 1.0, wCtrl), 0.0, 1.0);
+  float groutStr = clamp(uConGrout * mix(0.55, 1.0, wCtrl), 0.0, 1.0);
 
-  float micro = conTriplanar(wp, n, uConScale);
-  float mac = conMacro(wp, uConScale);
+  float micro = conTriplanar(wp, n, scale);
+  float mac = conMacro(wp, scale);
   float patch = mix(micro, mac, mix(0.40, 0.78, rangeConLod));
-  float pit = mix(conPitting(wp, uConScale), 0.5, rangeConLod);
+  float pit = mix(conPitting(wp, scale), 0.5, rangeConLod);
   float bay = conBay(wp);
 
   vec3 albedo = diffuseColor.rgb;
   albedo *= mix(0.90, 1.08, patch);
   albedo *= mix(1.0, 0.80, variation * (1.0 - patch) * mix(1.0, 0.35, rangeConLod));
   albedo *= mix(0.93, 1.05, bay);
+
+  vec2 pcell = conPanelCell(wp, n);
+  float pid = conHash12(pcell + vec2(3.1, 8.7));
+  float pid2 = conHash12(pcell + vec2(19.4, 2.6));
+  float vMul = mix(0.84, 1.12, pid);
+  vec3 hue = mix(vec3(1.06, 0.97, 0.88), vec3(0.90, 0.98, 1.08), pid2);
+  float panelAmt = variation * mix(0.82, 0.55, rangeConLod);
+  albedo *= mix(vec3(1.0), hue * vMul, panelAmt);
 
   float ao = conCavity(n, grime);
   albedo *= 1.0 - ao * 0.55;
@@ -3142,11 +3244,15 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
   albedo = mix(albedo, albedo * vec3(1.05, 0.95, 0.84), contact * uConWarmth);
 
   vec2 tileFx = conGrout(wp, n, uConTile, groutStr);
-  albedo *= 1.0 - tileFx.x * 0.40;
-  albedo *= 1.0 - tileFx.y * 0.24;
+  albedo *= 1.0 - tileFx.x * 0.58;
+  albedo *= 1.0 - tileFx.y * 0.30;
 
-  float seam = conPourSeam(wp, n, clamp(k * 0.55, 0.0, 1.0));
-  albedo *= 1.0 - seam * 0.14;
+  float seam = conPourSeam(wp, n, clamp(k * 0.85, 0.0, 1.0));
+  albedo *= 1.0 - seam * 0.22;
+
+  float ties = conFormTies(wp, n, mix(0.35, 1.0, clamp(variation, 0.0, 1.0)) * mix(1.0, 0.4, rangeConLod));
+  albedo *= 1.0 - ties * 0.38;
+  albedo = mix(albedo, albedo * vec3(0.78, 0.74, 0.68), ties * 0.55);
 
   float agg = smoothstep(0.64, 0.80, micro) * variation * (1.0 - rangeConLod);
   albedo *= mix(1.0, 0.91, agg);
@@ -3158,14 +3264,15 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
   rough = mix(rough, rough * 1.05, patch * variation);
   rough = mix(rough, min(rough + 0.12, 1.0), contact);
   rough = mix(rough, min(rough + 0.10, 1.0), tileFx.x);
+  rough = mix(rough, min(rough + 0.08, 1.0), ties);
   rough = mix(rough, rough * (0.94 + pit * 0.10), variation);
   roughnessFactor = clamp(rough, 0.08, 1.0);
 
-  float eps = max(uConScale * 0.04, 0.02);
-  float dx = conTriplanar(wp + vec3(eps, 0.0, 0.0), n, uConScale)
-    - conTriplanar(wp - vec3(eps, 0.0, 0.0), n, uConScale);
-  float dz = conTriplanar(wp + vec3(0.0, 0.0, eps), n, uConScale)
-    - conTriplanar(wp - vec3(0.0, 0.0, eps), n, uConScale);
+  float eps = max(scale * 0.04, 0.02);
+  float dx = conTriplanar(wp + vec3(eps, 0.0, 0.0), n, scale)
+    - conTriplanar(wp - vec3(eps, 0.0, 0.0), n, scale);
+  float dz = conTriplanar(wp + vec3(0.0, 0.0, eps), n, scale)
+    - conTriplanar(wp - vec3(0.0, 0.0, eps), n, scale);
   float nAmt = 0.28 * variation * (1.0 - rangeConLod);
   vec3 pitN = vec3(pit - 0.5, 0.0, pit - 0.5) * (0.16 * variation * (1.0 - rangeConLod));
   rangeConDetailN = normalize(n + vec3(-dx, 0.0, -dz) * nAmt + pitN);
@@ -3219,6 +3326,8 @@ function compileRangeConcrete(shader, cfg) {
   }
 
   shader.uniforms.uConcreteWear = uConcreteWear;
+  shader.uniforms.uConcreteScale = uConcreteScale;
+  shader.uniforms.uConcreteVar = uConcreteVar;
   shader.uniforms.uConScale = { value: cfg.scale };
   shader.uniforms.uConVar = { value: cfg.variation };
   shader.uniforms.uConWear = { value: cfg.wear };
@@ -4655,18 +4764,115 @@ function refreshTableAvailability() {
   });
 }
 
+function pourUnit(i, salt) {
+  const x = Math.sin(i * 127.1 + salt * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** Near-bay pour slabs + cheaper far planes. Same total coverage as one big plane. */
+function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, impact) {
+  const zMin = centerZ - along * 0.5;
+  const zMax = centerZ + along * 0.5;
+  const n0 = Math.max(zMin, nearZ0);
+  const n1 = Math.min(zMax, nearZ1);
+  const nx = Math.max(1, Math.round(across / slab));
+  const slabX = across / nx;
+  const geos = new Map();
+  const geo = (w, d) => {
+    const k = w.toFixed(3) + "x" + d.toFixed(3);
+    let g = geos.get(k);
+    if (!g) {
+      g = new THREE.PlaneGeometry(w, d);
+      geos.set(k, g);
+    }
+    return g;
+  };
+  let row = 0;
+  for (let z = n0; z < n1 - 1e-4; z += slab) {
+    const depth = Math.min(slab, n1 - z);
+    const zc = z + depth * 0.5;
+    for (let xi = 0; xi < nx; xi++) {
+      const xc = -across * 0.5 + (xi + 0.5) * slabX;
+      const mesh = new THREE.Mesh(geo(slabX, depth), mat);
+      const id = row * 17 + xi;
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.rotation.z = (pourUnit(id, 2.3) - 0.5) * 0.004;
+      mesh.position.set(
+        xc + (pourUnit(id, 5.1) - 0.5) * 0.008,
+        y,
+        zc + (pourUnit(id, 9.4) - 0.5) * 0.008
+      );
+      mesh.scale.setScalar(1.006);
+      mesh.receiveShadow = true;
+      if (impact) mesh.userData.impactSurface = impact;
+      scene.add(mesh);
+    }
+    row++;
+  }
+  const cheap = (zA, zB) => {
+    const len = zB - zA;
+    if (len < 0.05) return;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(across, len), mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(0, y, (zA + zB) * 0.5);
+    mesh.receiveShadow = true;
+    if (impact) mesh.userData.impactSurface = impact;
+    scene.add(mesh);
+  };
+  cheap(zMin, n0);
+  cheap(n1, zMax);
+}
+
+function addBayWallPanels(wallMat, rangeCenterZ) {
+  const wallLen = 430;
+  const wallH = 2.4;
+  const wallT = 0.55;
+  const n = Math.round(wallLen / 5.5);
+  const panelLen = wallLen / n;
+  const z0 = rangeCenterZ - wallLen * 0.5;
+  const panelGeo = new THREE.BoxGeometry(wallT, wallH, panelLen);
+  const hullMat = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  for (const side of [-12, 12]) {
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, wallLen), hullMat);
+    hull.position.set(side, -0.2, rangeCenterZ);
+    hull.castShadow = false;
+    hull.receiveShadow = false;
+    hull.userData.impactSurface = "wall";
+    addLeanSolid(hull);
+    for (let i = 0; i < n; i++) {
+      const zc = z0 + (i + 0.5) * panelLen;
+      const panel = new THREE.Mesh(panelGeo, wallMat);
+      panel.position.set(
+        side + (pourUnit(i, side + 9.1) - 0.5) * 0.012,
+        -0.2,
+        zc + (pourUnit(i, side + 17.4) - 0.5) * 0.006
+      );
+      panel.rotation.y = (pourUnit(i, side + 3.2) - 0.5) * 0.006;
+      panel.scale.set(
+        1,
+        1 + (pourUnit(i, side + 21.8) - 0.5) * 0.012,
+        1 + (pourUnit(i, side + 5.6) - 0.5) * 0.008
+      );
+      panel.castShadow = false;
+      panel.receiveShadow = true;
+      panel.userData.impactSurface = "wall";
+      scene.add(panel);
+    }
+  }
+}
+
 function buildRoom() {
   leanSolids = [];
   const floorMat = makeConcreteMaterial("floor");
   // Bay geometry centered on the 200 m mark so spawn→berm (~410 m) stays covered.
   const rangeCenterZ = rangeZ(200);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 460), floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = FLOOR_Y;
-  floor.position.z = rangeCenterZ;
-  floor.receiveShadow = true;
-  floor.userData.impactSurface = "floor";
-  scene.add(floor);
+  const nearZ0 = rangeZ(40);
+  const nearZ1 = SPAWN_Z + 10;
+  addPouredGround(floorMat, 40, 460, rangeCenterZ, FLOOR_Y, nearZ0, nearZ1, 5, "floor");
 
   // Soft reference grid — quiet so world-space concrete can read
   const grid = new THREE.GridHelper(40, 80, 0x2e3848, 0x1c222c);
@@ -4676,15 +4882,8 @@ function buildRoom() {
   grid.material.opacity = 0.16;
   scene.add(grid);
 
-  // Low side walls / bay dividers for scale (outside the ±5.5 rails)
-  const wallMat = makeConcreteMaterial("wall");
-  for (const side of [-12, 12]) {
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 430), wallMat);
-    wall.position.set(side, -0.2, rangeCenterZ);
-    wall.castShadow = false;
-    wall.receiveShadow = true;
-    addLeanSolid(wall);
-  }
+  // Low side walls as ~5.5 m pour panels (outside the ±5.5 rails)
+  addBayWallPanels(makeConcreteMaterial("wall"), rangeCenterZ);
 
   buildOpticsTable();
   buildWeaponsBench();
@@ -5071,14 +5270,17 @@ function buildShootingRange() {
   if (fl) fl.innerHTML = "";
 
   const rangeCenterZ = rangeZ(200);
-  const strip = new THREE.Mesh(
-    new THREE.PlaneGeometry(18, 430),
-    makeConcreteMaterial("lane")
+  addPouredGround(
+    makeConcreteMaterial("lane"),
+    18,
+    430,
+    rangeCenterZ,
+    -1.385,
+    rangeZ(40),
+    SPAWN_Z + 10,
+    5,
+    "floor"
   );
-  strip.rotation.x = -Math.PI / 2;
-  strip.position.set(0, -1.385, rangeCenterZ);
-  strip.receiveShadow = true;
-  scene.add(strip);
 
   for (const side of [-5.5, 5.5]) {
     const rail = makeBox(0.1, 0.14, 410, 0x343c4c, side, -1.3, rangeCenterZ);
@@ -10326,6 +10528,18 @@ function bind() {
     concreteWearSlider.oninput = (e) => setConcreteWear(e.target.value);
   }
   syncConcreteWearUI();
+  const concreteScaleSlider = el("concreteScaleSlider");
+  if (concreteScaleSlider) {
+    concreteScaleSlider.value = String(state.concreteScale);
+    concreteScaleSlider.oninput = (e) => setConcreteScale(e.target.value);
+  }
+  syncConcreteScaleUI();
+  const concreteVarSlider = el("concreteVarSlider");
+  if (concreteVarSlider) {
+    concreteVarSlider.value = String(state.concreteVar);
+    concreteVarSlider.oninput = (e) => setConcreteVar(e.target.value);
+  }
+  syncConcreteVarUI();
 
   Object.keys(LIGHT_MUL_UI).forEach((key) => {
     const meta = LIGHT_MUL_UI[key];

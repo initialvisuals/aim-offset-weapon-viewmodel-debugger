@@ -6436,16 +6436,18 @@ function shootOutFlood(fx, hitPos, normal) {
   if (!fx || fx.shotOut) return;
   fx.shotOut = true;
   if (fx.light) {
+    // Keep the SpotLight in the scene. Hiding it drops NUM_SPOT_LIGHTS and
+    // recompiles every MeshStandard shader (first-shot hitch).
     fx.light.intensity = 0;
-    fx.light.visible = false;
     if (fx.light.userData) fx.light.userData.shotOut = true;
   }
   if (fx.head && fx.head.material) {
     fx.head.material.emissiveIntensity = 0;
     if (fx.head.material.emissive) fx.head.material.emissive.setHex(0x000000);
   }
-  if (fx.lamp && fx.lamp.material && fx.lamp.material.color) {
-    fx.lamp.material.color.setHex(0x1a1612);
+  if (fx.lamp && fx.lamp.material) {
+    if (fx.lamp.material.emissiveIntensity != null) fx.lamp.material.emissiveIntensity = 0;
+    if (fx.lamp.material.color) fx.lamp.material.color.setHex(0x1a1612);
   }
   if (fx.pool) fx.pool.visible = false;
   if (fx.core) fx.core.visible = false;
@@ -6464,7 +6466,6 @@ function restoreFloodlights() {
   for (const fx of floodFixtures) {
     fx.shotOut = false;
     if (fx.light) {
-      fx.light.visible = true;
       if (fx.light.userData) fx.light.userData.shotOut = false;
       const base = (fx.light.userData && fx.light.userData.floodIntBase) || 55;
       fx.light.intensity = base * lightMul;
@@ -6473,8 +6474,9 @@ function restoreFloodlights() {
       if (fx.head.material.emissive) fx.head.material.emissive.setHex(0xffc070);
       fx.head.material.emissiveIntensity = 2.4;
     }
-    if (fx.lamp && fx.lamp.material && fx.lamp.material.color) {
-      fx.lamp.material.color.setRGB(FLOOD_LAMP_HDR[0], FLOOD_LAMP_HDR[1], FLOOD_LAMP_HDR[2]);
+    if (fx.lamp && fx.lamp.material) {
+      if (fx.lamp.material.emissiveIntensity != null) fx.lamp.material.emissiveIntensity = 1;
+      if (fx.lamp.material.color) fx.lamp.material.color.setRGB(FLOOD_LAMP_HDR[0], FLOOD_LAMP_HDR[1], FLOOD_LAMP_HDR[2]);
     }
     if (fx.pool) fx.pool.visible = true;
     if (fx.core) fx.core.visible = true;

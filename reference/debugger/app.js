@@ -698,11 +698,12 @@ const sfx = {
     this.noiseBufs[key] = buf;
     return buf;
   },
-  /** Build glass noise + silently tick the graph so first bulb-pop is not first-use. */
+  /** Build glass + fizzle noise + silently tick the graph so first bulb-pop is not first-use. */
   prewarmGlass() {
     const c = this.ensure();
     if (!c) return;
     this.noiseBuffer(0.08);
+    this.noiseBuffer(0.7);
     if (c.state !== "running") return;
     try {
       const now = c.currentTime;
@@ -714,6 +715,15 @@ const sfx = {
       noise.connect(out);
       noise.start(now);
       noise.stop(now + 0.001);
+      const fizz = c.createBufferSource();
+      fizz.buffer = this.noiseBuffer(0.7);
+      const bp = c.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 1800;
+      fizz.connect(bp);
+      bp.connect(out);
+      fizz.start(now);
+      fizz.stop(now + 0.001);
     } catch (_) {}
   },
   play(kind) {
@@ -891,6 +901,30 @@ const sfx = {
       };
       tinkle(2480, 0, 0.14);
       tinkle(3720, 0.018, 0.12);
+      return;
+    }
+
+    if (kind === "fizzle") {
+      // Dying-filament zzzz — filtered noise, pitch + gain falling.
+      const dur = 0.35 + Math.random() * 0.35;
+      out.gain.setValueAtTime(0.0001, now);
+      out.gain.exponentialRampToValueAtTime(0.14, now + 0.01);
+      out.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+      const noise = c.createBufferSource();
+      noise.buffer = this.noiseBuffer(0.7);
+      noise.loop = true;
+      noise.playbackRate.setValueAtTime(1.15, now);
+      noise.playbackRate.exponentialRampToValueAtTime(0.32, now + dur);
+      const bp = c.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.setValueAtTime(3200, now);
+      bp.frequency.exponentialRampToValueAtTime(420, now + dur);
+      bp.Q.setValueAtTime(7.5, now);
+      bp.Q.linearRampToValueAtTime(2.4, now + dur);
+      noise.connect(bp);
+      bp.connect(out);
+      noise.start(now);
+      noise.stop(now + dur);
       return;
     }
 
@@ -1811,7 +1845,7 @@ function applyDisplayLook() {
     const L = fx.light || fx;
     if (!L) continue;
     if (fx.shotOut || (L.userData && L.userData.shotOut)) {
-      L.intensity = 0;
+      if (!fx.die) L.intensity = 0;
       continue;
     }
     const base = (L.userData && L.userData.floodIntBase) || 55;
@@ -6432,25 +6466,113 @@ function syncFloodLampZones() {
   }
 }
 
+/** lit: 0 = dead glass, 1 = normal on, >1 = HDR pop spike. Never toggles light.visible. */
+function applyFloodDeathLook(fx, lit) {
+  const on = lit > 0.03;
+  if (fx.light) {
+    const base = (fx.light.userData && fx.light.userData.floodIntBase) || 55;
+    const b = clamp(Number(state.brightness) || 1, 0.5, 1.5);
+    fx.light.intensity = on ? base * (0.88 + 0.12 * b) * lit : 0;
+  }
+  if (fx.head && fx.head.material) {
+    if (on) {
+      if (fx.head.material.emissive) fx.head.material.emissive.setHex(0xffc070);
+      fx.head.material.emissiveIntensity = 2.4 * lit;
+    } else {
+      fx.head.material.emissiveIntensity = 0;
+      if (fx.head.material.emissive) fx.head.material.emissive.setHex(0x000000);
+    }
+  }
+  if (fx.lamp && fx.lamp.material) {
+    if (fx.lamp.material.emissiveIntensity != null) {
+      fx.lamp.material.emissiveIntensity = on ? lit : 0;
+    }
+    if (fx.lamp.material.color) {
+      if (on) {
+        fx.lamp.material.color.setRGB(FLOOD_LAMP_HDR[0] * lit, FLOOD_LAMP_HDR[1] * lit, FLOOD_LAMP_HDR[2] * lit);
+      } else {
+        fx.lamp.material.color.setHex(0x1a1612);
+      }
+    }
+  }
+  const poolOp = on ? 0.62 * Math.min(1, lit) : 0;
+  if (fx.pool) {
+    fx.pool.visible = on;
+    if (fx.pool.material) fx.pool.material.opacity = poolOp;
+  }
+  if (fx.core) {
+    fx.core.visible = on;
+    if (fx.core.material) fx.core.material.opacity = poolOp;
+  }
+}
+
+function finishFloodDeath(fx) {
+  fx.die = null;
+  applyFloodDeathLook(fx, 0);
+}
+
+function startFloodDeath(fx) {
+  const flicker = Math.random() < 0.52;
+  const die = { t: 0, flicker };
+  if (flicker) {
+    const span = 0.2 + Math.random() * 0.35;
+    const n = 2 + ((Math.random() * 3) | 0);
+    const segs = [{ at: 0, on: true, spike: true }];
+    let t = 0.028 + Math.random() * 0.03;
+    for (let i = 0; i < n; i++) {
+      segs.push({ at: t, on: false });
+      t += 0.02 + Math.random() * 0.07;
+      segs.push({ at: t, on: true, spike: Math.random() < 0.3 });
+      t += 0.018 + Math.random() * 0.055;
+    }
+    segs.push({ at: t, on: false });
+    const last = Math.max(t, 0.05);
+    const k = span / last;
+    for (const s of segs) s.at *= k;
+    die.segs = segs;
+    die.dur = span;
+  } else {
+    die.dur = 0.15 + Math.random() * 0.2;
+  }
+  fx.die = die;
+  applyFloodDeathLook(fx, 2.2);
+}
+
+function updateFloodDeaths(dt) {
+  for (const fx of floodFixtures) {
+    const die = fx.die;
+    if (!die) continue;
+    die.t += dt;
+    if (die.flicker) {
+      if (die.t >= die.dur) {
+        finishFloodDeath(fx);
+        continue;
+      }
+      let on = false;
+      let spike = false;
+      for (const s of die.segs) {
+        if (die.t >= s.at) {
+          on = s.on;
+          spike = !!s.spike;
+        }
+      }
+      applyFloodDeathLook(fx, on ? (spike ? 2.2 : 1) : 0);
+    } else if (die.t >= die.dur) {
+      finishFloodDeath(fx);
+    } else {
+      const u = 1 - die.t / die.dur;
+      applyFloodDeathLook(fx, 2.2 * u * u);
+    }
+  }
+}
+
 function shootOutFlood(fx, hitPos, normal) {
   if (!fx || fx.shotOut) return;
   fx.shotOut = true;
-  if (fx.light) {
-    // Keep the SpotLight in the scene. Hiding it drops NUM_SPOT_LIGHTS and
-    // recompiles every MeshStandard shader (first-shot hitch).
-    fx.light.intensity = 0;
-    if (fx.light.userData) fx.light.userData.shotOut = true;
-  }
-  if (fx.head && fx.head.material) {
-    fx.head.material.emissiveIntensity = 0;
-    if (fx.head.material.emissive) fx.head.material.emissive.setHex(0x000000);
-  }
-  if (fx.lamp && fx.lamp.material) {
-    if (fx.lamp.material.emissiveIntensity != null) fx.lamp.material.emissiveIntensity = 0;
-    if (fx.lamp.material.color) fx.lamp.material.color.setHex(0x1a1612);
-  }
-  if (fx.pool) fx.pool.visible = false;
-  if (fx.core) fx.core.visible = false;
+  // Keep the SpotLight in the scene. Hiding it drops NUM_SPOT_LIGHTS and
+  // recompiles every MeshStandard shader (first-shot hitch).
+  if (fx.light && fx.light.userData) fx.light.userData.shotOut = true;
+  startFloodDeath(fx);
   const n = normal || new THREE.Vector3(0, 0, 1);
   if (fx.lamp) fx.lamp.getWorldPosition(_bulbSparkOrigin);
   else if (hitPos) _bulbSparkOrigin.copy(hitPos);
@@ -6458,6 +6580,7 @@ function shootOutFlood(fx, hitPos, normal) {
   spawnImpactDecal(_bulbSparkOrigin, n, "punch");
   spawnBulbSparks(_bulbSparkOrigin);
   sfx.play("glass");
+  sfx.play("fizzle");
 }
 
 function restoreFloodlights() {
@@ -6465,6 +6588,7 @@ function restoreFloodlights() {
   const lightMul = 0.88 + 0.12 * b;
   for (const fx of floodFixtures) {
     fx.shotOut = false;
+    fx.die = null;
     if (fx.light) {
       if (fx.light.userData) fx.light.userData.shotOut = false;
       const base = (fx.light.userData && fx.light.userData.floodIntBase) || 55;
@@ -6478,8 +6602,14 @@ function restoreFloodlights() {
       if (fx.lamp.material.emissiveIntensity != null) fx.lamp.material.emissiveIntensity = 1;
       if (fx.lamp.material.color) fx.lamp.material.color.setRGB(FLOOD_LAMP_HDR[0], FLOOD_LAMP_HDR[1], FLOOD_LAMP_HDR[2]);
     }
-    if (fx.pool) fx.pool.visible = true;
-    if (fx.core) fx.core.visible = true;
+    if (fx.pool) {
+      fx.pool.visible = true;
+      if (fx.pool.material) fx.pool.material.opacity = 0.62;
+    }
+    if (fx.core) {
+      fx.core.visible = true;
+      if (fx.core.material) fx.core.material.opacity = 0.62;
+    }
   }
 }
 
@@ -9350,17 +9480,25 @@ function orientSparkCard(mesh, vel) {
   mesh.quaternion.setFromRotationMatrix(_sparkMtx);
 }
 
-/** ~3 stretched white/cyan cards at a dying flood lamp head. */
+/** ~10–16 stretched white/cyan/yellow/orange cards at a dying flood lamp head. */
 function spawnBulbSparks(pos) {
   if (!scene || !pos) return;
-  const n = 3 + ((Math.random() * 3) | 0);
+  const n = 10 + ((Math.random() * 7) | 0);
   const geo = getBulbSparkGeo();
   for (let i = 0; i < n; i++) {
-    const useCyan = i === 0 ? false : i === 1 ? true : Math.random() < 0.5;
-    const life = 0.25 + Math.random() * 0.3;
-    const w = 0.01 + Math.random() * 0.01;
-    const len = 0.08 + Math.random() * 0.08;
+    const roll = Math.random();
+    let useCyan = false;
+    let tint = 0xffffff;
+    if (roll < 0.25) { useCyan = true; tint = 0xb8ffff; }
+    else if (roll < 0.5) { tint = 0xffffff; }
+    else if (roll < 0.75) { tint = 0xffe066; }
+    else { tint = 0xff6a22; }
+    const tail = Math.random() < 0.22;
+    const life = tail ? 0.5 + Math.random() * 0.45 : 0.22 + Math.random() * 0.28;
+    const w = 0.02 + Math.random() * 0.02;
+    const len = 0.16 + Math.random() * 0.16;
     const mat = getBulbSparkMaterial(useCyan).clone();
+    mat.color.setHex(tint);
     mat.opacity = 1;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 8;
@@ -10371,6 +10509,7 @@ function updatePlayer(dt) {
   updateSpentSlugs(dt);
   updateGlassShards(dt);
   updateImpactFX(dt);
+  updateFloodDeaths(dt);
   updateBulbSparks(dt);
   tickBarrelHeat(dt);
   updateSilhouettes(dt);

@@ -224,6 +224,11 @@ const CONCRETE_VAR_DEFAULT = 1;
 const CONCRETE_VAR_MIN = 0;
 const CONCRETE_VAR_MAX = 2;
 const uConcreteVar = { value: CONCRETE_VAR_DEFAULT };
+const concreteMaterials = [];
+const concreteTextures = [];
+const concreteVariantMats = Object.create(null);
+const CONCRETE_TINT_VARIANTS = 8;
+let concreteTexBundle = null;
 /** Warm HDR lamp glass — pops under threshold without lifting the bay. */
 const FLOOD_LAMP_HDR = [3.15, 2.65, 1.78];
 
@@ -2003,6 +2008,7 @@ function syncConcreteUniforms() {
   uConcreteWear.value = state.concreteWear ?? CONCRETE_WEAR_DEFAULT;
   uConcreteScale.value = state.concreteScale ?? CONCRETE_SCALE_DEFAULT;
   uConcreteVar.value = state.concreteVar ?? CONCRETE_VAR_DEFAULT;
+  if (concreteTexBundle) applyConcreteLook();
 }
 
 function syncConcreteWearUI() {
@@ -2982,10 +2988,143 @@ function makeCanvasTexture(draw, size = 256, opts = {}) {
   draw(ctx, size);
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.colorSpace = opts.colorSpace != null ? opts.colorSpace : THREE.SRGBColorSpace;
   tex.anisotropy = 4;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
   if (opts.repeat) tex.repeat.set(opts.repeat[0], opts.repeat[1]);
   return tex;
+}
+
+function conHash11(n) {
+  const x = Math.sin(n * 127.1) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const CONCRETE_DUST = new THREE.Color(0xb8aa94);
+
+function paintConcreteAlbedo(ctx, size, contrast) {
+  const img = ctx.createImageData(size, size);
+  const d = img.data;
+  const k = contrast;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
+      const blotch = conHash11(Math.floor(x / 26) + Math.floor(y / 20) * 9.1 + 2.4);
+      const blotch2 = conHash11(Math.floor(x / 14) + Math.floor(y / 18) * 5.7 + 8.2);
+      const n2 = conHash11(x * 0.17 + y * 0.31 + 1.3);
+      const n3 = conHash11(x * 0.53 + y * 0.19 + 4.2);
+      const n4 = conHash11(x * 1.07 + y * 0.71 + 11.8);
+      let r = 204 + (blotch - 0.5) * 54 * k;
+      let g = 198 + (blotch - 0.42) * 38 * k;
+      let b = 188 + (0.52 - blotch) * 46 * k;
+      r += (blotch2 - 0.5) * 22 * k;
+      g += (blotch2 - 0.5) * 16 * k;
+      b += (0.5 - blotch2) * 20 * k;
+      if (n2 > 0.78) {
+        r -= 62 * k; g -= 56 * k; b -= 48 * k;
+      } else if (n2 > 0.66) {
+        r += 36 * k; g += 22 * k; b += 8 * k;
+      } else if (n3 > 0.84) {
+        r -= 14 * k; g -= 4 * k; b += 22 * k;
+      }
+      if (n4 > 0.93) {
+        r += 18; g += 16; b += 12;
+      } else if (n4 < 0.07) {
+        r -= 28; g -= 26; b -= 22;
+      }
+      const stain = conHash11(Math.floor(x / 40) * 3.7 + Math.floor(y / 36) * 11.2);
+      if (stain > 0.72) {
+        const s = (stain - 0.72) / 0.28 * 0.28 * k;
+        r += 18 * s; g -= 8 * s; b -= 22 * s;
+      } else if (stain < 0.22) {
+        const s = (0.22 - stain) / 0.22 * 0.22 * k;
+        r -= 16 * s; g -= 6 * s; b += 10 * s;
+      }
+      const edge = Math.min(u, 1 - u, v, 1 - v);
+      const groutW = 0.034;
+      if (edge < groutW) {
+        const t = 1 - edge / groutW;
+        const wobble = 0.85 + 0.15 * conHash11(x * 0.4 + y * 0.37);
+        const gt = Math.min(1, t * t * 1.15) * wobble;
+        r = r * (1 - 0.56 * gt) + 68 * 0.56 * gt;
+        g = g * (1 - 0.56 * gt) + 64 * 0.56 * gt;
+        b = b * (1 - 0.56 * gt) + 58 * 0.56 * gt;
+      }
+      const crack = Math.abs(Math.sin((x + y * 0.35) * 0.09 + 1.7));
+      if (crack < 0.018) {
+        const ct = 1 - crack / 0.018;
+        r *= 1 - 0.28 * ct * k;
+        g *= 1 - 0.30 * ct * k;
+        b *= 1 - 0.32 * ct * k;
+      }
+      const i = (y * size + x) * 4;
+      d[i] = Math.max(0, Math.min(255, r));
+      d[i + 1] = Math.max(0, Math.min(255, g));
+      d[i + 2] = Math.max(0, Math.min(255, b));
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function paintConcreteRough(ctx, size) {
+  const img = ctx.createImageData(size, size);
+  const d = img.data;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
+      const n = conHash11(x * 0.21 + y * 0.27 + 3.1);
+      const agg = conHash11(x * 0.63 + y * 0.41 + 6.6);
+      let g = 198 + (n - 0.5) * 36;
+      if (agg > 0.8) g += 28;
+      else if (agg < 0.12) g -= 22;
+      const edge = Math.min(u, 1 - u, v, 1 - v);
+      if (edge < 0.034) g = Math.min(255, g + 42 * (1 - edge / 0.034));
+      const i = (y * size + x) * 4;
+      const v8 = Math.max(0, Math.min(255, g));
+      d[i] = d[i + 1] = d[i + 2] = v8;
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function paintConcreteBump(ctx, size) {
+  const img = ctx.createImageData(size, size);
+  const d = img.data;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
+      const n = conHash11(x * 0.19 + y * 0.29 + 2.2);
+      const agg = conHash11(x * 0.71 + y * 0.47 + 9.4);
+      let h = 150 + (n - 0.5) * 28;
+      if (agg > 0.78) h += 38;
+      else if (agg < 0.1) h -= 18;
+      const edge = Math.min(u, 1 - u, v, 1 - v);
+      if (edge < 0.034) h -= 70 * (1 - edge / 0.034);
+      const i = (y * size + x) * 4;
+      const v8 = Math.max(0, Math.min(255, h));
+      d[i] = d[i + 1] = d[i + 2] = v8;
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function makeConcreteTexture() {
+  if (concreteTexBundle) return concreteTexBundle;
+  const albedo = makeCanvasTexture((ctx, size) => paintConcreteAlbedo(ctx, size, 1), 256);
+  const albedoSoft = makeCanvasTexture((ctx, size) => paintConcreteAlbedo(ctx, size, 0.55), 256);
+  const rough = makeCanvasTexture(paintConcreteRough, 256, { colorSpace: THREE.NoColorSpace });
+  const bump = makeCanvasTexture(paintConcreteBump, 256, { colorSpace: THREE.NoColorSpace });
+  concreteTextures.push(albedo, albedoSoft, rough, bump);
+  concreteTexBundle = { albedo, albedoSoft, rough, bump };
+  return concreteTexBundle;
 }
 
 
@@ -3013,7 +3152,7 @@ const CONCRETE_KINDS = {
   },
 };
 
-const CONCRETE_GLSL_FNS = /* glsl */`
+const CONCRETE_GLSL_UNIFORMS = /* glsl */`
 uniform float uConcreteWear;
 uniform float uConcreteScale;
 uniform float uConcreteVar;
@@ -3036,7 +3175,9 @@ varying vec3 vConWN;
 
 vec3 rangeConDetailN;
 float rangeConLod;
+`;
 
+const CONCRETE_GLSL_FNS = /* glsl */`
 float conHash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -3215,15 +3356,15 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
   float bay = conBay(wp);
 
   vec3 albedo = diffuseColor.rgb;
-  albedo *= mix(0.90, 1.08, patch);
-  albedo *= mix(1.0, 0.80, variation * (1.0 - patch) * mix(1.0, 0.35, rangeConLod));
-  albedo *= mix(0.93, 1.05, bay);
+  albedo *= mix(0.74, 1.20, patch);
+  albedo *= mix(1.0, 0.70, variation * (1.0 - patch) * mix(1.0, 0.40, rangeConLod));
+  albedo *= mix(0.86, 1.10, bay);
 
   vec2 pcell = conPanelCell(wp, n);
   float pid = conHash12(pcell + vec2(3.1, 8.7));
   float pid2 = conHash12(pcell + vec2(19.4, 2.6));
-  float vMul = mix(0.84, 1.12, pid);
-  vec3 hue = mix(vec3(1.06, 0.97, 0.88), vec3(0.90, 0.98, 1.08), pid2);
+  float vMul = mix(0.68, 1.28, pid);
+  vec3 hue = mix(vec3(1.20, 0.92, 0.78), vec3(0.80, 0.98, 1.18), pid2);
   float panelAmt = variation * mix(0.82, 0.55, rangeConLod);
   albedo *= mix(vec3(1.0), hue * vMul, panelAmt);
 
@@ -3244,8 +3385,8 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
   albedo = mix(albedo, albedo * vec3(1.05, 0.95, 0.84), contact * uConWarmth);
 
   vec2 tileFx = conGrout(wp, n, uConTile, groutStr);
-  albedo *= 1.0 - tileFx.x * 0.58;
-  albedo *= 1.0 - tileFx.y * 0.30;
+  albedo *= 1.0 - tileFx.x * 0.72;
+  albedo *= 1.0 - tileFx.y * 0.40;
 
   float seam = conPourSeam(wp, n, clamp(k * 0.85, 0.0, 1.0));
   albedo *= 1.0 - seam * 0.22;
@@ -3292,22 +3433,19 @@ let concreteShaderFailed = false;
 function fallbackConcreteMaterials() {
   if (concreteShaderFailed) return;
   concreteShaderFailed = true;
-  console.warn("[concrete] custom shader failed; falling back to MeshStandardMaterial");
-  if (!scene) return;
-  scene.traverse((obj) => {
-    const list = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
-    for (const m of list) {
-      if (!m || !m.userData || !m.userData.concreteKind) continue;
-      const kind = m.userData.concreteKind;
-      const cfg = CONCRETE_KINDS[kind] || CONCRETE_KINDS.floor;
-      m.onBeforeCompile = () => {};
-      m.customProgramCacheKey = () => "rangeConcreteFallback";
-      if (m.color) m.color.setHex(cfg.color || 0x8a8680);
-      m.roughness = cfg.roughness != null ? cfg.roughness : 0.86;
-      m.metalness = 0.02;
-      m.needsUpdate = true;
-    }
-  });
+  console.warn("[concrete] custom shader failed; grit stays on the albedo map");
+  if (scene) {
+    scene.traverse((obj) => {
+      const list = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
+      for (const m of list) {
+        if (!m || !m.userData || !m.userData.concreteKind) continue;
+        m.onBeforeCompile = () => {};
+        m.customProgramCacheKey = () => "rangeConcreteFallback";
+        m.needsUpdate = true;
+      }
+    });
+  }
+  applyConcreteLook();
 }
 
 function compileRangeConcrete(shader, cfg) {
@@ -3359,7 +3497,11 @@ varying vec3 vConWN;
 
   shader.fragmentShader = shader.fragmentShader.replace(
     "#include <common>",
-    "#include <common>\n" + CONCRETE_GLSL_FNS
+    "#include <common>\n" + CONCRETE_GLSL_UNIFORMS
+  );
+  shader.fragmentShader = shader.fragmentShader.replace(
+    "void main()",
+    CONCRETE_GLSL_FNS + "\nvoid main()"
   );
   shader.fragmentShader = shader.fragmentShader.replace(
     "#include <roughnessmap_fragment>",
@@ -3377,27 +3519,91 @@ varying vec3 vConWN;
   }
 }
 
+function applyConcreteLook() {
+  const scale = state.concreteScale ?? CONCRETE_SCALE_DEFAULT;
+  const variation = state.concreteVar ?? CONCRETE_VAR_DEFAULT;
+  const wear = state.concreteWear ?? CONCRETE_WEAR_DEFAULT;
+  const repeat = 1 / Math.max(scale, 0.08);
+  for (const tex of concreteTextures) tex.repeat.set(repeat, repeat);
+  const bundle = concreteTexBundle || makeConcreteTexture();
+  const amt = clamp(variation, 0, CONCRETE_VAR_MAX);
+  for (const mat of concreteMaterials) {
+    if (!mat || !mat.userData || !mat.userData.concreteKind) continue;
+    const cfg = CONCRETE_KINDS[mat.userData.concreteKind] || CONCRETE_KINDS.floor;
+    const seed = mat.userData.concreteSeed ?? 0.5;
+    mat.map = amt < 0.35 ? bundle.albedoSoft : bundle.albedo;
+    mat.roughnessMap = bundle.rough;
+    mat.bumpMap = bundle.bump;
+    const c = new THREE.Color(cfg.color);
+    const pid2 = conHash11(seed * 17.3 + 2.1);
+    const vMul = 1 + (seed - 0.5) * 0.44 * amt;
+    const warm = (pid2 - 0.5) * amt;
+    c.r = Math.max(0.05, Math.min(1, c.r * vMul * (1 + warm * 0.20)));
+    c.g = Math.max(0.05, Math.min(1, c.g * vMul * (1 + warm * 0.02)));
+    c.b = Math.max(0.05, Math.min(1, c.b * vMul * (1 - warm * 0.18)));
+    c.lerp(CONCRETE_DUST, wear * 0.30);
+    mat.color.copy(c);
+    mat.roughness = clamp((cfg.roughness != null ? cfg.roughness : 0.86) + wear * 0.10, 0.35, 1);
+    mat.bumpScale = (0.18 + wear * 0.12) / Math.max(scale, 0.35);
+    mat.metalness = 0.02;
+  }
+}
+
 function makeConcreteMaterial(kind) {
   const cfg = CONCRETE_KINDS[kind] || CONCRETE_KINDS.floor;
+  const tex = makeConcreteTexture();
   const mat = new THREE.MeshStandardMaterial({
     name: "RangeConcrete_" + kind,
     color: cfg.color,
+    map: tex.albedo,
+    roughnessMap: tex.rough,
+    bumpMap: tex.bump,
+    bumpScale: 0.18,
     roughness: cfg.roughness,
     metalness: 0.02,
     dithering: false,
   });
   mat.userData.concreteKind = kind;
-  if (concreteShaderFailed) return mat;
-  mat.onBeforeCompile = (shader) => {
-    try {
-      compileRangeConcrete(shader, cfg);
-    } catch (err) {
-      console.warn("[concrete] onBeforeCompile failed", err);
-      fallbackConcreteMaterials();
-    }
-  };
-  mat.customProgramCacheKey = () => "rangeConcrete_" + kind;
+  concreteMaterials.push(mat);
+  if (!concreteShaderFailed) {
+    mat.onBeforeCompile = (shader) => {
+      try {
+        compileRangeConcrete(shader, cfg);
+      } catch (err) {
+        console.warn("[concrete] onBeforeCompile failed", err);
+        fallbackConcreteMaterials();
+      }
+    };
+    mat.customProgramCacheKey = () => "rangeConcrete_" + kind;
+  }
+  applyConcreteLook();
   return mat;
+}
+
+function getConcreteVariant(kind, seed) {
+  const k = CONCRETE_KINDS[kind] ? kind : "floor";
+  if (!concreteVariantMats[k]) {
+    let base = concreteMaterials.find((m) => m.userData && m.userData.concreteKind === k && m.userData.concreteSeed == null);
+    if (!base) base = makeConcreteMaterial(k);
+    const list = [];
+    for (let i = 0; i < CONCRETE_TINT_VARIANTS; i++) {
+      const m = i === 0 ? base : base.clone();
+      m.userData.concreteKind = k;
+      m.userData.concreteSeed = (i + 0.37) / CONCRETE_TINT_VARIANTS;
+      if (i > 0) {
+        m.onBeforeCompile = base.onBeforeCompile;
+        m.customProgramCacheKey = base.customProgramCacheKey;
+        concreteMaterials.push(m);
+      }
+      list.push(m);
+    }
+    concreteVariantMats[k] = list;
+    applyConcreteLook();
+  }
+  const list = concreteVariantMats[k];
+  const s = Number.isFinite(seed) ? seed : 0.5;
+  const t = s - Math.floor(s);
+  return list[Math.floor(t * list.length) % list.length];
 }
 
 function makeWoodTexture() {
@@ -4860,7 +5066,39 @@ function pourUnit(i, salt) {
 }
 
 /** Near-bay pour slabs + cheaper far planes. Same total coverage as one big plane. */
+/** Scale existing 0-1 UVs so 1 UV unit is 1 world meter on that face. */
+function applyMeterUVs(geo, uMeters, vMeters) {
+  const uv = geo.getAttribute("uv");
+  if (!uv) return geo;
+  if (uMeters != null && vMeters != null) {
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * uMeters, uv.getY(i) * vMeters);
+    uv.needsUpdate = true;
+    return geo;
+  }
+  const p = geo.parameters || {};
+  if (p.depth != null) {
+    const w = p.width;
+    const h = p.height;
+    const d = p.depth;
+    const faceUV = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+    for (let f = 0; f < 6; f++) {
+      const um = faceUV[f][0];
+      const vm = faceUV[f][1];
+      for (let i = 0; i < 4; i++) {
+        const vi = f * 4 + i;
+        if (vi >= uv.count) break;
+        uv.setXY(vi, uv.getX(vi) * um, uv.getY(vi) * vm);
+      }
+    }
+    uv.needsUpdate = true;
+    return geo;
+  }
+  if (p.width != null && p.height != null) return applyMeterUVs(geo, p.width, p.height);
+  return geo;
+}
+
 function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, impact) {
+  const kind = mat && mat.userData && mat.userData.concreteKind ? mat.userData.concreteKind : "floor";
   const zMin = centerZ - along * 0.5;
   const zMax = centerZ + along * 0.5;
   const n0 = Math.max(zMin, nearZ0);
@@ -4872,7 +5110,7 @@ function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, i
     const k = w.toFixed(3) + "x" + d.toFixed(3);
     let g = geos.get(k);
     if (!g) {
-      g = new THREE.PlaneGeometry(w, d);
+      g = applyMeterUVs(new THREE.PlaneGeometry(w, d), w, d);
       geos.set(k, g);
     }
     return g;
@@ -4883,8 +5121,8 @@ function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, i
     const zc = z + depth * 0.5;
     for (let xi = 0; xi < nx; xi++) {
       const xc = -across * 0.5 + (xi + 0.5) * slabX;
-      const mesh = new THREE.Mesh(geo(slabX, depth), mat);
       const id = row * 17 + xi;
+      const mesh = new THREE.Mesh(geo(slabX, depth), getConcreteVariant(kind, pourUnit(id, 1.7)));
       mesh.rotation.x = -Math.PI / 2;
       mesh.rotation.z = (pourUnit(id, 2.3) - 0.5) * 0.004;
       mesh.position.set(
@@ -4902,7 +5140,10 @@ function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, i
   const cheap = (zA, zB) => {
     const len = zB - zA;
     if (len < 0.05) return;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(across, len), mat);
+    const mesh = new THREE.Mesh(
+      applyMeterUVs(new THREE.PlaneGeometry(across, len), across, len),
+      getConcreteVariant(kind, pourUnit(Math.round(zA + len), 8.8))
+    );
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(0, y, (zA + zB) * 0.5);
     mesh.receiveShadow = true;
@@ -4920,7 +5161,7 @@ function addBayWallPanels(wallMat, rangeCenterZ) {
   const n = Math.round(wallLen / 5.5);
   const panelLen = wallLen / n;
   const z0 = rangeCenterZ - wallLen * 0.5;
-  const panelGeo = new THREE.BoxGeometry(wallT, wallH, panelLen);
+  const panelGeo = applyMeterUVs(new THREE.BoxGeometry(wallT, wallH, panelLen));
   const hullMat = new THREE.MeshBasicMaterial({
     transparent: true,
     opacity: 0,
@@ -4935,7 +5176,7 @@ function addBayWallPanels(wallMat, rangeCenterZ) {
     addLeanSolid(hull);
     for (let i = 0; i < n; i++) {
       const zc = z0 + (i + 0.5) * panelLen;
-      const panel = new THREE.Mesh(panelGeo, wallMat);
+      const panel = new THREE.Mesh(panelGeo, getConcreteVariant(wallMat.userData.concreteKind || "wall", pourUnit(i, side + 1.4)));
       panel.position.set(
         side + (pourUnit(i, side + 9.1) - 0.5) * 0.012,
         -0.2,
@@ -5736,18 +5977,18 @@ function updateBermPopups(dt) {
 
 /** Range backstop berm ~410 m from spawn — procedural concrete mound for distance read. */
 function buildBackBerm() {
-  const dirtMat = makeConcreteMaterial("berm");
-  const darkMat = makeConcreteMaterial("bermDark");
+  makeConcreteMaterial("berm");
+  makeConcreteMaterial("bermDark");
   // Just past the 400 m mark so the end-wall reads as the range backstop.
   const bermZ = rangeZ(410);
   // Main mound
-  const main = new THREE.Mesh(new THREE.BoxGeometry(28, 5.2, 3.2), dirtMat);
+  const main = new THREE.Mesh(applyMeterUVs(new THREE.BoxGeometry(28, 5.2, 3.2)), getConcreteVariant("berm", 0.12));
   main.position.set(0, 0.7, bermZ);
   main.castShadow = false;
   main.receiveShadow = true;
   addLeanSolid(main);
   // Front slope / face toward shooter
-  const face = new THREE.Mesh(new THREE.BoxGeometry(26, 3.6, 2.4), dirtMat.clone());
+  const face = new THREE.Mesh(applyMeterUVs(new THREE.BoxGeometry(26, 3.6, 2.4)), getConcreteVariant("berm", 0.41));
   face.position.set(0, -0.15, bermZ + 2.8);
   face.rotation.x = -0.35;
   face.castShadow = false;
@@ -5755,7 +5996,7 @@ function buildBackBerm() {
   addLeanSolid(face);
   // Crest / uneven top chunks
   for (const [x, y, zOff, w, h, d] of BERM_CREST_CHUNKS) {
-    const chunk = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), darkMat.clone());
+    const chunk = new THREE.Mesh(applyMeterUVs(new THREE.BoxGeometry(w, h, d)), getConcreteVariant("bermDark", pourUnit(Math.round(x + 20), 3.3)));
     chunk.position.set(x, y, bermZ + zOff);
     chunk.rotation.y = (x % 3) * 0.05;
     chunk.castShadow = false;
@@ -5764,7 +6005,7 @@ function buildBackBerm() {
   }
   // Flanking dirt piles
   for (const side of [-14, 14]) {
-    const pile = new THREE.Mesh(new THREE.BoxGeometry(6, 3.2, 4), dirtMat.clone());
+    const pile = new THREE.Mesh(applyMeterUVs(new THREE.BoxGeometry(6, 3.2, 4)), getConcreteVariant("berm", side < 0 ? 0.22 : 0.77));
     pile.position.set(side, 0.1, bermZ + 2);
     pile.castShadow = false;
     pile.receiveShadow = true;

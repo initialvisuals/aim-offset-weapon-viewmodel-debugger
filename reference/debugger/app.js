@@ -4219,8 +4219,8 @@ function makeLensGlass(radius, opacity = 0.2) {
 const GUN_MAT = {
   polymer: { roughness: 0.78, metalness: 0.06 },
   polymerDark: { roughness: 0.82, metalness: 0.04 },
-  metal: { roughness: 0.36, metalness: 0.72 },
-  darkMetal: { roughness: 0.4, metalness: 0.62 },
+  metal: { roughness: 0.42, metalness: 1.0 },
+  darkMetal: { roughness: 0.46, metalness: 1.0 },
   bronze: { roughness: 0.45, metalness: 0.55 },
 };
 
@@ -5754,8 +5754,8 @@ function buildShootingRange() {
   const railY = FLOOR_Y + 0.023; // top ~3.6 cm above floor / ~2 mm under cookie discs
   for (const side of [-5.5, 5.5]) {
     const rail = makeBox(0.1, railH, 410, 0x2a3038, side, railY, rangeCenterZ);
-    rail.material.roughness = 0.76;
-    rail.material.metalness = 0.24;
+    rail.material.roughness = 0.52;
+    rail.material.metalness = 1;
     rail.castShadow = false;
     rail.receiveShadow = true;
     scene.add(rail);

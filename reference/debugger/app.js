@@ -231,6 +231,8 @@ const CONCRETE_TINT_VARIANTS = 8;
 let concreteTexBundle = null;
 /** Warm HDR lamp glass — pops under threshold without lifting the bay. */
 const FLOOD_LAMP_HDR = [3.15, 2.65, 1.78];
+/** Spawn-porch tube cookie — sodium-ish, dimmer/oranger than the bay floods. */
+const TUBE_LAMP_HDR = [2.72, 1.68, 0.52];
 
 const state = {
   mode: "weapon",
@@ -2572,7 +2574,7 @@ function sunPunchGain(punch) {
 }
 /** Side-bay flood SpotLights (+ fake floor pools) so the long lane reads at night. */
 let floodLights = [];
-/** Fixture records: lamp/head hit, pool meshes, shot-out flag. */
+/** Fixture records: lamp/head hit, optional pool, shot-out flag. kind "tube" = spawn strip. */
 let floodFixtures = [];
 const SCENE_BG_BASE = 0x1c2430;
 /** Default clock (18:30) — palettes below are keyed so this hour matches SCENE_BG_BASE. */
@@ -5426,6 +5428,11 @@ function buildRoom() {
   } catch (err) {
     console.error('[flood] buildRangeFloodlights failed', err);
   }
+  try {
+    buildSpawnShelter();
+  } catch (err) {
+    console.error('[shelter] buildSpawnShelter failed', err);
+  }
   buildShootingRange();
 }
 
@@ -6456,13 +6463,173 @@ function buildRangeFloodlights() {
   }
 }
 
+/**
+ * Little firing-line porch over spawn: posts + thin corrugated slab, open toward the berm.
+ * Tables sit just downrange of the front edge so the roof does not bury them.
+ */
+function buildSpawnShelter() {
+  const group = new THREE.Group();
+  const zc = 1.90;
+  group.position.set(0, FLOOR_Y, zc);
+
+  const roofW = 5.6;
+  const roofD = 3.4;
+  const roofH = 2.50;
+  const slabT = 0.07;
+  const halfW = roofW * 0.5;
+  const halfD = roofD * 0.5;
+
+  const steel = new THREE.MeshStandardMaterial({ color: 0x3c4652, roughness: 0.5, metalness: 1 });
+  const steelDark = new THREE.MeshStandardMaterial({ color: 0x2a3138, roughness: 0.48, metalness: 1 });
+  const sheet = new THREE.MeshStandardMaterial({ color: 0x4a545c, roughness: 0.58, metalness: 1 });
+  const timber = new THREE.MeshStandardMaterial({
+    map: makeWoodTexture(),
+    color: 0x6e5030,
+    roughness: 0.9,
+    metalness: 0.03,
+  });
+
+  const postInsetX = halfW - 0.22;
+  const postInsetZ = halfD - 0.18;
+  const posts = [
+    { x: -postInsetX, z: -postInsetZ, wood: false },
+    { x: postInsetX, z: -postInsetZ, wood: false },
+    { x: -postInsetX, z: postInsetZ, wood: true },
+    { x: postInsetX, z: postInsetZ, wood: true },
+  ];
+  for (const p of posts) {
+    const s = p.wood ? 0.12 : 0.10;
+    const mat = p.wood ? timber : steel;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(s, roofH, s), mat);
+    post.position.set(p.x, roofH * 0.5, p.z);
+    post.castShadow = true;
+    post.receiveShadow = true;
+    group.add(post);
+  }
+
+  const beamY = roofH - 0.04;
+  const beamFront = new THREE.Mesh(new THREE.BoxGeometry(roofW - 0.16, 0.09, 0.09), steelDark);
+  beamFront.position.set(0, beamY, -halfD + 0.08);
+  beamFront.castShadow = true;
+  beamFront.receiveShadow = true;
+  const beamBack = beamFront.clone();
+  beamBack.position.z = halfD - 0.08;
+  group.add(beamFront, beamBack);
+  for (const x of [-postInsetX, postInsetX]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, roofD - 0.2), steel);
+    side.position.set(x, beamY, 0);
+    side.castShadow = true;
+    side.receiveShadow = true;
+    group.add(side);
+  }
+
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(roofW, slabT, roofD), sheet);
+  slab.position.set(0, roofH + slabT * 0.5, 0);
+  slab.castShadow = true;
+  slab.receiveShadow = true;
+  group.add(slab);
+
+  const nRibs = 7;
+  for (let i = 0; i < nRibs; i++) {
+    const z = -halfD + 0.28 + i * ((roofD - 0.56) / (nRibs - 1));
+    const rib = new THREE.Mesh(new THREE.BoxGeometry(roofW - 0.12, 0.035, 0.07), steelDark);
+    rib.position.set(0, roofH + slabT + 0.01, z);
+    rib.castShadow = false;
+    rib.receiveShadow = true;
+    group.add(rib);
+  }
+
+  const fx = makeShelterTube(group, roofH);
+  addLeanSolid(group);
+  if (fx) {
+    floodLights.push(fx.light);
+    floodFixtures.push(fx);
+  }
+}
+
+/** 4-foot-class strip under the porch: metal trough + emissive cookie + PointLight. */
+function makeShelterTube(parent, roofH) {
+  const wrap = new THREE.Group();
+  wrap.position.set(0, roofH - 0.10, 0.40);
+  parent.add(wrap);
+
+  const headMat = new THREE.MeshStandardMaterial({
+    color: 0x2a3138,
+    roughness: 0.46,
+    metalness: 1,
+    emissive: 0xffb060,
+    emissiveIntensity: 0.45,
+  });
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.055, 0.15), headMat);
+  head.position.set(0, 0.02, 0);
+  head.castShadow = true;
+  head.receiveShadow = true;
+  wrap.add(head);
+  for (const x of [-0.64, 0.64]) {
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.07, 0.16), headMat);
+    cap.position.set(x, 0.01, 0);
+    cap.castShadow = true;
+    wrap.add(cap);
+  }
+
+  const lamp = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.02, 0.02, 1.18, 10),
+    new THREE.MeshStandardMaterial({
+      color: 0xffe2a8,
+      roughness: 0.28,
+      metalness: 0.04,
+      emissive: 0xffc060,
+      emissiveIntensity: 2.4,
+    })
+  );
+  lamp.material.color.setRGB(TUBE_LAMP_HDR[0], TUBE_LAMP_HDR[1], TUBE_LAMP_HDR[2]);
+  if ("toneMapped" in lamp.material) lamp.material.toneMapped = false;
+  lamp.rotation.z = Math.PI / 2;
+  lamp.position.set(0, -0.042, 0);
+  wrap.add(lamp);
+
+  const intensity = 18;
+  const light = new THREE.PointLight(0xffc070, intensity, 12, 2);
+  light.castShadow = false;
+  light.position.set(0, -0.085, 0);
+  light.userData.floodIntBase = intensity;
+  wrap.add(light);
+
+  const fixture = {
+    kind: "tube",
+    group: wrap,
+    light,
+    head,
+    lamp,
+    pool: null,
+    core: null,
+    shotOut: false,
+    lampHdr: TUBE_LAMP_HDR,
+    lampEmissive: 2.4,
+    headEmissive: 0.45,
+    headEmissiveHex: 0xffb060,
+    zone: {
+      center: new THREE.Vector3(),
+      normal: new THREE.Vector3(0, -1, 0),
+      radius: 0.62,
+    },
+  };
+  head.userData.floodFixture = fixture;
+  lamp.userData.floodFixture = fixture;
+  wrap.traverse((c) => {
+    if (c.isMesh && !c.userData.floodFixture) c.userData.floodFixture = fixture;
+  });
+  return fixture;
+}
+
 function syncFloodLampZones() {
   const wp = new THREE.Vector3();
   for (const fx of floodFixtures) {
     if (!fx.lamp || !fx.zone) continue;
     fx.lamp.getWorldPosition(wp);
     fx.zone.center.copy(wp);
-    fx.zone.normal.set(0, 0, 1);
+    if (fx.kind === "tube") fx.zone.normal.set(0, -1, 0);
+    else fx.zone.normal.set(0, 0, 1);
   }
 }
 
@@ -6474,10 +6641,14 @@ function applyFloodDeathLook(fx, lit) {
     const b = clamp(Number(state.brightness) || 1, 0.5, 1.5);
     fx.light.intensity = on ? base * (0.88 + 0.12 * b) * lit : 0;
   }
+  const hdr = fx.lampHdr || FLOOD_LAMP_HDR;
+  const headEm = fx.headEmissive != null ? fx.headEmissive : 2.4;
+  const headHex = fx.headEmissiveHex != null ? fx.headEmissiveHex : 0xffc070;
+  const lampEm = fx.lampEmissive != null ? fx.lampEmissive : 1;
   if (fx.head && fx.head.material) {
     if (on) {
-      if (fx.head.material.emissive) fx.head.material.emissive.setHex(0xffc070);
-      fx.head.material.emissiveIntensity = 2.4 * lit;
+      if (fx.head.material.emissive) fx.head.material.emissive.setHex(headHex);
+      fx.head.material.emissiveIntensity = headEm * lit;
     } else {
       fx.head.material.emissiveIntensity = 0;
       if (fx.head.material.emissive) fx.head.material.emissive.setHex(0x000000);
@@ -6485,11 +6656,11 @@ function applyFloodDeathLook(fx, lit) {
   }
   if (fx.lamp && fx.lamp.material) {
     if (fx.lamp.material.emissiveIntensity != null) {
-      fx.lamp.material.emissiveIntensity = on ? lit : 0;
+      fx.lamp.material.emissiveIntensity = on ? lampEm * lit : 0;
     }
     if (fx.lamp.material.color) {
       if (on) {
-        fx.lamp.material.color.setRGB(FLOOD_LAMP_HDR[0] * lit, FLOOD_LAMP_HDR[1] * lit, FLOOD_LAMP_HDR[2] * lit);
+        fx.lamp.material.color.setRGB(hdr[0] * lit, hdr[1] * lit, hdr[2] * lit);
       } else {
         fx.lamp.material.color.setHex(0x1a1612);
       }
@@ -6569,7 +6740,7 @@ function updateFloodDeaths(dt) {
 function shootOutFlood(fx, hitPos, normal) {
   if (!fx || fx.shotOut) return;
   fx.shotOut = true;
-  // Keep the SpotLight in the scene. Hiding it drops NUM_SPOT_LIGHTS and
+  // Keep the light in the scene. Hiding it drops NUM_*_LIGHTS and
   // recompiles every MeshStandard shader (first-shot hitch).
   if (fx.light && fx.light.userData) fx.light.userData.shotOut = true;
   startFloodDeath(fx);
@@ -6594,13 +6765,17 @@ function restoreFloodlights() {
       const base = (fx.light.userData && fx.light.userData.floodIntBase) || 55;
       fx.light.intensity = base * lightMul;
     }
+    const hdr = fx.lampHdr || FLOOD_LAMP_HDR;
+    const headEm = fx.headEmissive != null ? fx.headEmissive : 2.4;
+    const headHex = fx.headEmissiveHex != null ? fx.headEmissiveHex : 0xffc070;
+    const lampEm = fx.lampEmissive != null ? fx.lampEmissive : 1;
     if (fx.head && fx.head.material) {
-      if (fx.head.material.emissive) fx.head.material.emissive.setHex(0xffc070);
-      fx.head.material.emissiveIntensity = 2.4;
+      if (fx.head.material.emissive) fx.head.material.emissive.setHex(headHex);
+      fx.head.material.emissiveIntensity = headEm;
     }
     if (fx.lamp && fx.lamp.material) {
-      if (fx.lamp.material.emissiveIntensity != null) fx.lamp.material.emissiveIntensity = 1;
-      if (fx.lamp.material.color) fx.lamp.material.color.setRGB(FLOOD_LAMP_HDR[0], FLOOD_LAMP_HDR[1], FLOOD_LAMP_HDR[2]);
+      if (fx.lamp.material.emissiveIntensity != null) fx.lamp.material.emissiveIntensity = lampEm;
+      if (fx.lamp.material.color) fx.lamp.material.color.setRGB(hdr[0], hdr[1], hdr[2]);
     }
     if (fx.pool) {
       fx.pool.visible = true;
@@ -7526,7 +7701,7 @@ function pickNightFlood() {
   let bx = 0, by = 0, bz = 0;
   for (let i = 0; i < floodFixtures.length; i++) {
     const fx = floodFixtures[i];
-    if (!fx || fx.shotOut || !fx.light) continue;
+    if (!fx || fx.shotOut || !fx.light || !fx.light.isSpotLight) continue;
     fx.light.getWorldPosition(godRays._floodPos);
     const dx = godRays._floodPos.x - godRays._camPos.x;
     const dy = godRays._floodPos.y - godRays._camPos.y;

@@ -3977,7 +3977,7 @@ function makePicRail(width, height, length, x, y, z) {
   return g;
 }
 
-/** Additive cross-blade muzzle flash sprite (position = muzzle tip). */
+/** Additive muzzle flash (position = muzzle tip). HDR core + pooled tongues, reshaped per shot. */
 function makeMuzzleFlashSprite(x, y, z, scale = 1) {
   const g = new THREE.Group();
   g.position.set(x, y, z);
@@ -3991,21 +3991,111 @@ function makeMuzzleFlashSprite(x, y, z, scale = 1) {
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
     });
-  // Readable burst: hotter core + 3 crossed planes, same pose offsets; ~80ms visible.
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.018 * scale, 10, 10), mkMat(0xfffaf0, 1));
   core.material.color.setRGB(4.8, 4.4, 3.6);
-  const long = new THREE.Mesh(new THREE.PlaneGeometry(0.11 * scale, 0.032 * scale), mkMat(0xffcc66, 1));
-  long.material.color.setRGB(3.6, 2.4, 0.75);
-  const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.1 * scale, 0.03 * scale), mkMat(0xfff0b8, 0.98));
-  cross.material.color.setRGB(4.2, 3.5, 2.1);
-  cross.rotation.z = Math.PI / 2;
-  const diag = new THREE.Mesh(new THREE.PlaneGeometry(0.074 * scale, 0.022 * scale), mkMat(0xffa028, 0.95));
-  diag.material.color.setRGB(3.2, 1.6, 0.35);
-  diag.rotation.z = Math.PI / 3;
-  g.add(core, long, cross, diag);
+  g.add(core);
+  const tongueGeo = new THREE.PlaneGeometry(1, 1);
+  const tongues = [];
+  for (let i = 0; i < 6; i++) {
+    const t = new THREE.Mesh(tongueGeo, mkMat(0xffcc66, 1));
+    t.visible = false;
+    g.add(t);
+    tongues.push(t);
+  }
   g.visible = false;
   g.userData.flashScale = scale;
+  g.userData.core = core;
+  g.userData.tongues = tongues;
+  g.userData.shotScale = 1;
+  g.userData.flashMs = MUZZLE_FLASH_MS;
+  g.userData.settleRate = 0;
   return g;
+}
+
+/** Roll a new burst: irregular tongues, bore roll, heat jitter. No continuous spin. */
+function rollMuzzleBurst() {
+  if (!muzzleFlash) return;
+  const ud = muzzleFlash.userData;
+  const tongues = ud.tongues || [];
+  const s = ud.flashScale || 1;
+  const suppressed = suppressorMounted();
+  const smg = state.weaponId === "example_smg";
+  const bolt = isBoltGun();
+
+  let shotScale = 0.75 + Math.random() * 0.6;
+  if (smg) shotScale *= 0.9;
+  else if (bolt) shotScale *= 1.12;
+  ud.shotScale = shotScale;
+
+  muzzleFlash.rotation.set(
+    (Math.random() - 0.5) * 0.06,
+    (Math.random() - 0.5) * 0.06,
+    Math.random() * Math.PI * 2
+  );
+  ud.settleRate = (Math.random() - 0.5) * 1.6;
+
+  let ms = MUZZLE_FLASH_MS + (Math.random() * 18 - 8);
+  if (smg) ms *= 0.86;
+  else if (bolt) ms *= 1.1;
+  if (suppressed) ms *= 0.55;
+  ud.flashMs = clamp(ms, 36, 130);
+  player.flashUntil = performance.now() + ud.flashMs;
+
+  const core = ud.core;
+  if (core) {
+    const heat = 0.88 + Math.random() * 0.28;
+    core.material.color.setRGB(5.0 * heat, 4.4 * heat, 3.3 * heat * (0.75 + Math.random() * 0.4));
+    core.material.opacity = suppressed ? 0.7 : 1;
+    const cr = 0.82 + Math.random() * 0.4;
+    core.scale.set(cr, cr, 0.75 + Math.random() * 0.4);
+  }
+
+  const n = 3 + (Math.random() * 4 | 0);
+  for (let i = 0; i < tongues.length; i++) {
+    const t = tongues[i];
+    if (i >= n) {
+      t.visible = false;
+      continue;
+    }
+    t.visible = true;
+    const kind = Math.random();
+    if (kind < 0.32) {
+      t.material.color.setRGB(4.5 + Math.random() * 0.7, 3.9 + Math.random() * 0.5, 2.5 + Math.random() * 0.7);
+    } else if (kind < 0.7) {
+      t.material.color.setRGB(3.5 + Math.random() * 0.6, 2.1 + Math.random() * 0.55, 0.5 + Math.random() * 0.35);
+    } else {
+      t.material.color.setRGB(2.9 + Math.random() * 0.5, 1.35 + Math.random() * 0.45, 0.2 + Math.random() * 0.22);
+    }
+    t.material.opacity = (suppressed ? 0.68 : 0.9) + Math.random() * 0.1;
+
+    if (i === 0) {
+      const len = (0.15 + Math.random() * 0.07) * s;
+      const wid = (0.016 + Math.random() * 0.016) * s;
+      t.scale.set(wid, len, 1);
+      t.rotation.set(
+        -Math.PI / 2 + (Math.random() - 0.5) * 0.22,
+        (Math.random() - 0.5) * 0.28,
+        (Math.random() - 0.5) * 0.5
+      );
+      t.position.set((Math.random() - 0.5) * 0.01 * s, (Math.random() - 0.5) * 0.01 * s, -len * 0.28);
+    } else {
+      const fat = Math.random() < 0.42;
+      const len = (fat ? 0.05 : 0.078) * (0.65 + Math.random() * 0.75) * s;
+      const wid = (fat ? 0.036 : 0.015) * (0.65 + Math.random() * 0.7) * s;
+      t.scale.set(len, wid, 1);
+      const ang = Math.random() * Math.PI * 2;
+      t.rotation.set(
+        (Math.random() - 0.5) * 0.4,
+        (Math.random() - 0.5) * 0.4,
+        ang
+      );
+      t.position.set(
+        Math.cos(ang) * len * 0.12,
+        Math.sin(ang) * len * 0.12,
+        (Math.random() - 0.5) * 0.012 * s
+      );
+    }
+  }
 }
 
 function makeRingTube(innerR, outerR, length, color, segs = 20, matOpts = null) {
@@ -9626,18 +9716,20 @@ function updatePlayer(dt) {
   // so offset should be local +X (right)
   leanPivot.position.set(-leanRatio * player.leanOffset, 0, 0);
 
-  // Muzzle flash — rotate + short punchy scale pulse
+  // Muzzle flash — per-shot burst; fade/scale only (no rotor spin)
   if (muzzleFlash) {
     const now = performance.now();
     const on = now < player.flashUntil;
     muzzleFlash.visible = on;
     if (on) {
-      muzzleFlash.rotation.z += dt * 36;
-      const remain = Math.max(0, player.flashUntil - now) / MUZZLE_FLASH_MS;
-      const base = muzzleFlash.userData.flashScale || 1;
+      const ud = muzzleFlash.userData;
+      if (ud.settleRate) muzzleFlash.rotation.z += ud.settleRate * dt;
+      const flashMs = ud.flashMs || MUZZLE_FLASH_MS;
+      const remain = Math.max(0, player.flashUntil - now) / flashMs;
+      const base = ud.flashScale || 1;
+      const shot = ud.shotScale || 1;
       const canMul = suppressorMounted() ? 0.42 : 1;
-      // Stronger early peak so the longer flash still reads on screen.
-      const sc = base * canMul * (1.05 + 0.95 * remain);
+      const sc = base * shot * canMul * (1.05 + 0.95 * remain);
       muzzleFlash.scale.setScalar(sc);
     } else {
       muzzleFlash.scale.setScalar(muzzleFlash.userData.flashScale || 1);
@@ -9860,8 +9952,7 @@ function tryEquipLooked() {
 }
 
 function fireFlash() {
-  const ms = suppressorMounted() ? MUZZLE_FLASH_MS * 0.55 : MUZZLE_FLASH_MS;
-  player.flashUntil = performance.now() + ms;
+  rollMuzzleBurst();
 }
 
 

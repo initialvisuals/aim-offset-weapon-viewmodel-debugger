@@ -2824,8 +2824,11 @@ const VAULT_REACH = 1.45;
 const FLOOR_Y = -1.4;
 /** Loose world kits (X-drop + start scatter). Oldest despawns past the cap. */
 const WORLD_DROP_CAP = 8;
-const WORLD_DROP_SCALE = 0.42;
-const WORLD_DROP_REST_Y = FLOOR_Y + 0.05;
+const WORLD_DROP_SCALE = 1.0;
+/** Origin height while bouncing. restDroppedGun bbox-sits the kit on FLOOR_Y. */
+const WORLD_DROP_REST_Y = FLOOR_Y + 0.18;
+/** Weapons-bench table pickups — honest enough to read as guns, under 1.0 so three fit. */
+const WEAPON_BENCH_SCALE = 0.9;
 let worldDrops = [];
 /** Ejected brass casings — FIFO-capped, sleep after bounce, then optional TTL. */
 let casings = [];
@@ -5721,7 +5724,7 @@ function buildOpticsTable() {
   refreshOpticsTableAvailability();
 }
 
-/** Compact world prop reuse of buildBlockGun silhouettes (scaled for bench). */
+/** World/bench silhouette reuse of buildBlockGun (author meters; callers scale). */
 function makeWeaponBenchProp(style) {
   const g = new THREE.Group();
   g.name = "weaponProp_" + style;
@@ -5840,8 +5843,18 @@ function restDroppedGun(mesh, yaw) {
   mesh.rotation.y = yaw != null ? yaw : mesh.rotation.y;
   mesh.rotation.x = 1.12;
   mesh.rotation.z = 0.40;
-  mesh.position.y = WORLD_DROP_REST_Y;
-  mesh.userData.baseY = WORLD_DROP_REST_Y;
+  mesh.updateMatrixWorld(true);
+  const hl = mesh.userData && mesh.userData.highlight;
+  let prop = null;
+  if (mesh.children) {
+    for (let i = 0; i < mesh.children.length; i++) {
+      if (mesh.children[i] !== hl) { prop = mesh.children[i]; break; }
+    }
+  }
+  const box = new THREE.Box3().setFromObject(prop || mesh);
+  if (Number.isFinite(box.min.y)) mesh.position.y += FLOOR_Y - box.min.y;
+  else mesh.position.y = WORLD_DROP_REST_Y;
+  mesh.userData.baseY = mesh.position.y;
 }
 
 function despawnWorldDrop(rec) {
@@ -5867,10 +5880,10 @@ function spawnWorldDrop(loadout, opts = {}) {
   prop.scale.setScalar(WORLD_DROP_SCALE);
   group.add(prop);
   const highlight = new THREE.Mesh(
-    new THREE.BoxGeometry(0.34, 0.02, 0.22),
+    new THREE.BoxGeometry(0.82, 0.04, 0.52),
     new THREE.MeshBasicMaterial({ color: 0x6ea8ff, transparent: true, opacity: 0.0 })
   );
-  highlight.position.y = 0.012;
+  highlight.position.y = 0.02;
   group.add(highlight);
   const meta = WEAPON_META[snap.weaponId] || { label: snap.weaponId };
   group.userData = {
@@ -5923,7 +5936,7 @@ function dropHeldWeapon({ atFeet = false } = {}) {
   const dist = atFeet ? 0.38 : 0.62;
   const x = player.pos.x + _fwd.x * dist;
   const z = player.pos.z + _fwd.z * dist;
-  const y = atFeet ? (FLOOR_Y + 0.16) : (player.eyeCurrent - 0.18);
+  const y = atFeet ? (FLOOR_Y + 0.32) : (player.eyeCurrent - 0.18);
   const vel = new THREE.Vector3();
   if (atFeet) {
     vel.set(_fwd.x * 0.55, 0.55, _fwd.z * 0.55);
@@ -6027,6 +6040,8 @@ function buildWeaponsBench() {
   const tableY = -0.85;
   const tableZ = -0.35;
   const tableX = 2.08; // slightly right so a 3-gun table stays inside walk clamp / clear of optics table
+  const topW = 1.78;
+  const topD = 0.72;
   const woodTex = makeWoodTexture();
   const topMat = new THREE.MeshStandardMaterial({
     map: woodTex,
@@ -6034,18 +6049,21 @@ function buildWeaponsBench() {
     roughness: 0.74,
     metalness: 0.04,
   });
-  const top = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.055, 0.52), topMat);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(topW, 0.055, topD), topMat);
   top.position.set(tableX, tableY, tableZ);
   top.castShadow = true;
   top.receiveShadow = true;
   markVaultable(top);
-  const apron = makeBox(1.66, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ + 0.24);
-  const apronB = makeBox(1.66, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ - 0.24);
+  const apronZ = topD * 0.5 - 0.02;
+  const apron = makeBox(topW + 0.04, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ + apronZ);
+  const apronB = makeBox(topW + 0.04, 0.05, 0.04, 0x3a2e22, tableX, tableY - 0.04, tableZ - apronZ);
   const legMat = 0x2e241c;
-  const legL = makeBox(0.06, 0.55, 0.06, legMat, tableX - 0.72, tableY - 0.3, tableZ - 0.18);
-  const legR = makeBox(0.06, 0.55, 0.06, legMat, tableX + 0.72, tableY - 0.3, tableZ - 0.18);
-  const legL2 = makeBox(0.06, 0.55, 0.06, legMat, tableX - 0.72, tableY - 0.3, tableZ + 0.18);
-  const legR2 = makeBox(0.06, 0.55, 0.06, legMat, tableX + 0.72, tableY - 0.3, tableZ + 0.18);
+  const legX = topW * 0.5 - 0.09;
+  const legZ = topD * 0.5 - 0.12;
+  const legL = makeBox(0.06, 0.55, 0.06, legMat, tableX - legX, tableY - 0.3, tableZ - legZ);
+  const legR = makeBox(0.06, 0.55, 0.06, legMat, tableX + legX, tableY - 0.3, tableZ - legZ);
+  const legL2 = makeBox(0.06, 0.55, 0.06, legMat, tableX - legX, tableY - 0.3, tableZ + legZ);
+  const legR2 = makeBox(0.06, 0.55, 0.06, legMat, tableX + legX, tableY - 0.3, tableZ + legZ);
   scene.add(top, apron, apronB, legL, legR, legL2, legR2);
   registerLeanSolid(top);
   registerLeanSolid(apron);
@@ -6055,30 +6073,35 @@ function buildWeaponsBench() {
   registerLeanSolid(legL2);
   registerLeanSolid(legR2);
 
+  // Honest-meter guns along table length (X); spaced across depth so ~1 m rifles don't overlap.
+  const benchY = tableY + 0.03;
   const defs = [
-    { id: "example_smg", label: "Example SMG", x: tableX - 0.52 },
-    { id: "example_rifle", label: "Example Rifle", x: tableX },
-    { id: "example_sniper", label: "Example Sniper", x: tableX + 0.52 },
+    { id: "example_smg", label: "Example SMG", z: tableZ + 0.08 },
+    { id: "example_rifle", label: "Example Rifle", z: tableZ - 0.08 },
+    { id: "example_sniper", label: "Example Sniper", z: tableZ - 0.22 },
   ];
   defs.forEach((d) => {
     const group = new THREE.Group();
-    group.position.set(d.x, tableY + 0.1, tableZ);
+    group.position.set(tableX, benchY, d.z);
     const prop = makeWeaponBenchProp(d.id);
-    prop.scale.setScalar(0.42);
-    prop.rotation.y = 0.55;
-    prop.rotation.x = -0.08;
+    prop.scale.setScalar(WEAPON_BENCH_SCALE);
+    prop.rotation.order = "YXZ";
+    prop.rotation.y = -Math.PI / 2;
+    prop.rotation.x = -0.05;
+    prop.rotation.z = 0.05;
+    sitOnTable(prop);
     group.add(prop);
     const highlight = new THREE.Mesh(
-      new THREE.BoxGeometry(0.28, 0.02, 0.18),
+      new THREE.BoxGeometry(1.20, 0.03, 0.16),
       new THREE.MeshBasicMaterial({ color: 0x6ea8ff, transparent: true, opacity: 0.0 })
     );
-    highlight.position.y = 0.01;
+    highlight.position.set(0.22, 0.012, 0);
     group.add(highlight);
     group.userData = {
       weaponId: d.id,
       label: d.label,
       highlight,
-      baseY: tableY + 0.1,
+      baseY: benchY,
       allowed: true,
     };
     scene.add(group);
@@ -6211,7 +6234,7 @@ function makeResetLabelTexture() {
 function buildRangeResetButton(tableX, tableY, tableZ) {
   const group = new THREE.Group();
   const y = tableY + 0.05;
-  group.position.set(tableX - 0.68, y, tableZ + 0.205);
+  group.position.set(tableX - 0.68, y, tableZ + 0.28);
   const plate = new THREE.Mesh(
     new THREE.BoxGeometry(0.24, 0.02, 0.17),
     new THREE.MeshStandardMaterial({ color: 0x2a3038, roughness: 0.42, metalness: 0.58 })
@@ -11252,7 +11275,7 @@ function updatePickupHover() {
       if (p.userData.buttonMesh) p.userData.buttonMesh.position.y = active ? 0.03 : 0.042;
     } else {
       p.position.y = p.userData.baseY + (active ? 0.02 : 0);
-      p.rotation.y += active ? 0.02 : 0.005;
+      if (!p.userData.weaponId) p.rotation.y += active ? 0.02 : 0.005;
     }
   });
   state.lookPickup = found;

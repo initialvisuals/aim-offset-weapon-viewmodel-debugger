@@ -75,7 +75,7 @@
     </div>
     <div class="game-style-badge" id="gameStyleBadge" aria-live="polite">SIM</div>
     <div id="floatLabels" class="float-labels" aria-hidden="true"></div>
-    <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>F</kbd> bench pickup · <kbd>R</kbd> reload · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height</div>
+    <div class="hud-hint" id="hudHint">Press <kbd>`</kbd> — Viewmodel Debugger · <kbd>G</kbd> Guns · <kbd>X</kbd> drop kit · <kbd>F</kbd> bench / world kit · <kbd>R</kbd> reload · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height</div>
 
     <aside id="debuggerPanel" class="debugger-panel closed" aria-hidden="true">
       <div class="shell-inner">
@@ -174,10 +174,10 @@
                 <li><kbd>B</kbd> fire mode (semi / auto — SMG only)</li>
                 <li><kbd>-</kbd>/<kbd>=</kbd> cycle optic zero (Sim) · irons locked 100 m</li>
                 <li>LMB fire (semi = click; SMG AUTO = hold; tracers from muzzle; Sim = HoB+zero by default)</li>
-                <li><kbd>R</kbd> reload mag · <kbd>F</kbd> bench pickup / mag / suppressor / table reset</li>
+                <li><kbd>R</kbd> reload mag · <kbd>X</kbd> drop kit · <kbd>F</kbd> bench pickup / world kit / mag / suppressor / table reset</li>
                 <li>Click canvas = mouse look</li>
                 <li>Optics table = <kbd>F</kbd>/click attach (SMG: holo/acog · Rifle: all rail optics · Sniper: iron/sniper · illegal = toast)</li>
-                <li>Weapons bench = <kbd>F</kbd>/click equip Example SMG / Rifle / Sniper · red <strong>RESET TARGETS</strong> button clears paper holes, stands silhouettes, drops berm popups, restores floods</li>
+                <li>Weapons bench = <kbd>F</kbd>/click equip Example SMG / Rifle / Sniper (fresh defaults) · world kits on the floor keep mag ammo / optic / can · red <strong>RESET TARGETS</strong> button clears paper holes, stands silhouettes, drops berm popups, restores floods</li>
                 <li>Kit table (left) = <kbd>F</kbd>/click seat mag (SMG 20 stick / 45 banana / 60 double drum · Rifle 20 · Sniper 5) or mount/unmount that gun's suppressor. Wrong-gun mag/can does not highlight</li>
                 <li><kbd>Insert</kbd> ADS preview · Sway toggle in header</li>
                 <li><kbd>End</kbd> cycle pose</li>
@@ -499,7 +499,7 @@
           <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · <kbd>U</kbd> cycle hold · RMB ADS · LMB fire</li>
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
-          <li><kbd>F</kbd> bench pickup / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
+          <li><kbd>X</kbd> drop held kit · <kbd>F</kbd> bench / world kit / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
           <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade + draw) · Lighting (clock + clouds + intensities + sun size/punch + god rays + bloom + dither/scale/offset/type + barrel heat) · Materials (concrete wear/scale/variation) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
         </ul>
       </div>
@@ -508,6 +508,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v46"></script>
+    <script type="module" src="app.js?v=20260824v47"></script>
 </body>
 </html>

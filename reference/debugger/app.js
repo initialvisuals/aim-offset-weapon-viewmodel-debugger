@@ -159,6 +159,37 @@ const SUPPRESSOR_SPEC = {
   example_sniper: { label: "Sniper suppressor", mount: [0, 0.014, -0.852], tipZ: -1.052, y: 0.014 },
 };
 
+function magsForWeapon(weaponId) {
+  return Object.keys(MAG_KINDS).filter((id) => MAG_KINDS[id].weaponId === weaponId);
+}
+
+/** Per-weapon allow lists. Empty / missing slot = that class cannot go on the gun.
+ *  randomizeLoadout() rolls optic / mag / can only. Grip + stock keys are reserved:
+ *  SMG / rifle are slotty (lists stay empty until items exist); bolt has no grip/stock. */
+const WEAPON_KIT = {
+  example_smg: {
+    optics: WEAPON_OPTICS.example_smg,
+    mags: magsForWeapon("example_smg"),
+    suppressor: !!SUPPRESSOR_SPEC.example_smg,
+    grip: [],
+    stock: [],
+  },
+  example_rifle: {
+    optics: WEAPON_OPTICS.example_rifle,
+    mags: magsForWeapon("example_rifle"),
+    suppressor: !!SUPPRESSOR_SPEC.example_rifle,
+    grip: [],
+    stock: [],
+  },
+  example_sniper: {
+    optics: WEAPON_OPTICS.example_sniper,
+    mags: magsForWeapon("example_sniper"),
+    suppressor: !!SUPPRESSOR_SPEC.example_sniper,
+    grip: [],
+    stock: [],
+  },
+};
+
 /** Bolt-action cycle (example_sniper only). Semi DMR does not use this. */
 const BOLT_CYCLE_SEC = 0.65;
 /** SMG AUTO interval — ~1200 rpm (50 ms). Semi is still one shot per click. */
@@ -270,6 +301,10 @@ const state = {
   settingsOpen: false,
   gunPickId: "example_smg",
   lookPickup: null,
+  /** True after X-drop until a pickup / table / G equip. */
+  handsEmpty: false,
+  /** Instance id of the held kit. Null while empty-handed. */
+  heldInstanceId: null,
   swayEnabled: true,
   holdBreath: false,
   score: 0,
@@ -543,12 +578,15 @@ function isAutoFire() {
 function updateFireModeHud() {
   const node = el("fireModeHud");
   if (!node) return;
+  node.style.visibility = state.handsEmpty ? "hidden" : "";
+  if (state.handsEmpty) return;
   const auto = isAutoFire();
   node.textContent = auto ? "AUTO" : "SEMI";
   node.classList.toggle("auto", auto);
 }
 
 function toggleFireMode() {
+  if (state.handsEmpty) return;
   if (!weaponSupportsAuto()) {
     if (!state.semiOnlyToasted) {
       state.semiOnlyToasted = true;
@@ -633,8 +671,11 @@ function resetMagVisual() {
 }
 
 function updateAmmoHud() {
+  const cluster = el("ammoCluster");
+  if (cluster) cluster.hidden = !!state.handsEmpty;
   const node = el("ammoHud");
   if (!node) return;
+  if (state.handsEmpty) return;
   const cap = magSpecForLoadout().capacity;
   if (state.reloading) {
     node.textContent = `RELOADING… ${state.ammoInMag}/${cap}`;
@@ -648,6 +689,7 @@ function updateAmmoHud() {
 
 function beginReload() {
   if (!gameplayActive()) return;
+  if (state.handsEmpty) return;
   if (state.reloading) return;
   const spec = magSpecForLoadout();
   if (state.ammoInMag >= spec.capacity) return;
@@ -2377,22 +2419,95 @@ function weaponAllowsOptic(optic, weaponId = state.weaponId) {
   return allowedOpticsFor(weaponId).includes(optic);
 }
 
-function equipWeapon(id) {
-  if (!db[id]) return;
-  state.weaponId = id;
+function mintInstanceId() {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch (_) { /* ignore */ }
+  return "w-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+}
+
+function kitSlots(weaponId) {
+  return WEAPON_KIT[weaponId] || {
+    optics: WEAPON_OPTICS[weaponId] || ["iron"],
+    mags: magsForWeapon(weaponId),
+    suppressor: !!SUPPRESSOR_SPEC[weaponId],
+    grip: [],
+    stock: [],
+  };
+}
+
+function pickUniform(list) {
+  if (!list || !list.length) return null;
+  return list[(Math.random() * list.length) | 0];
+}
+
+function cloneLoadout(src) {
+  if (!src) return null;
+  return {
+    id: src.id,
+    weaponId: src.weaponId,
+    optic: src.optic,
+    magId: src.magId,
+    ammoInMag: src.ammoInMag,
+    suppressor: !!src.suppressor,
+    fireMode: src.fireMode,
+  };
+}
+
+/** Uniform roll from WEAPON_KIT slots. No default-mag / iron bias. */
+function randomizeLoadout(weaponId) {
+  const slots = kitSlots(weaponId);
+  const magId = pickUniform(slots.mags) || DEFAULT_MAG[weaponId] || "smg_20";
+  const mag = MAG_KINDS[magId];
+  const cap = mag ? mag.capacity : 20;
+  return {
+    id: mintInstanceId(),
+    weaponId,
+    optic: pickUniform(slots.optics) || DEFAULT_OPTIC[weaponId] || "iron",
+    magId,
+    ammoInMag: 1 + ((Math.random() * cap) | 0),
+    suppressor: slots.suppressor ? Math.random() < 0.5 : false,
+    fireMode: weaponSupportsAuto(weaponId) ? (Math.random() < 0.5 ? "auto" : "semi") : "semi",
+  };
+}
+
+function snapshotHeldLoadout() {
+  return {
+    id: state.heldInstanceId || mintInstanceId(),
+    weaponId: state.weaponId,
+    optic: state.optic,
+    magId: currentMagId(),
+    ammoInMag: state.ammoInMag,
+    suppressor: suppressorMounted(),
+    fireMode: state.fireMode,
+  };
+}
+
+function holdingWeapon() {
+  return !state.handsEmpty;
+}
+
+function setHandsEmpty(empty) {
+  state.handsEmpty = !!empty;
+  if (empty) {
+    state.heldInstanceId = null;
+    state.adsTarget = 0;
+    state.adsFactor = 0;
+    state.reloading = false;
+    state.reloadElapsed = 0;
+    cancelBoltCycle();
+  }
+  if (holdRoot) holdRoot.visible = !empty;
+  updateAmmoHud();
+  updateFireModeHud();
+}
+
+function rebuildHeldGun() {
+  const id = state.weaponId;
   const keys = Object.keys(attachments[id] || { holo_sight: 1 });
   if (!keys.includes(state.attachmentId)) state.attachmentId = keys[0];
-  let opticFellBack = false;
-  if (id === "example_sniper") {
-    // Bolt gun ships with the tube mounted; irons still available from the optics table.
-    if (state.optic !== "sniper_scope") {
-      state.optic = DEFAULT_OPTIC.example_sniper;
-      opticFellBack = true;
-    }
-  } else if (!weaponAllowsOptic(state.optic, id)) {
-    state.optic = DEFAULT_OPTIC[id] || "iron";
-    opticFellBack = true;
-  }
   buildWeaponSelect();
   buildPoseSelect();
   buildAttSelect();
@@ -2400,20 +2515,54 @@ function equipWeapon(id) {
   syncAxisInputsFromPose(true);
   syncAxisInputsFromPose(false);
   if (typeof buildBlockGun === "function" && holdRoot) buildBlockGun(id);
-  syncAmmoForLoadout({ refill: true });
   refreshOpticsTableAvailability();
   refresh();
   state.semiOnlyToasted = false;
   state.recoilPatternIndex = 0;
   state.lastShotMs = 0;
-  player.camRecoilP = 0;
-  player.camRecoilY = 0;
-  updateFireModeHud();
-  showToast("Equipped " + ((WEAPON_META[id] && WEAPON_META[id].label) || id));
-  if (opticFellBack) {
-    const ol = OPTIC_LABELS[state.optic] || state.optic;
-    showToast("Optic: " + ol);
+  if (player) {
+    player.camRecoilP = 0;
+    player.camRecoilY = 0;
   }
+  updateFireModeHud();
+}
+
+/** Restore a world-kit snapshot. Does not refill ammo. Keeps the instance id. */
+function applyLoadout(snap) {
+  if (!snap || !db[snap.weaponId]) return;
+  const id = snap.weaponId;
+  setHandsEmpty(false);
+  state.weaponId = id;
+  state.heldInstanceId = snap.id || mintInstanceId();
+  const slots = kitSlots(id);
+  const magId = slots.mags.includes(snap.magId) ? snap.magId : (slots.mags[0] || DEFAULT_MAG[id]);
+  state.magByWeapon[id] = magId;
+  state.suppressorByWeapon[id] = slots.suppressor && !!snap.suppressor;
+  state.optic = slots.optics.includes(snap.optic) ? snap.optic : (slots.optics[0] || "iron");
+  state.fireMode = snap.fireMode === "auto" && weaponSupportsAuto(id) ? "auto" : "semi";
+  rebuildHeldGun();
+  syncAmmoForLoadout({ refill: false });
+  const cap = magSpecForLoadout().capacity;
+  const ammo = Number(snap.ammoInMag);
+  state.ammoInMag = Number.isFinite(ammo) ? clamp(ammo, 0, cap) : 0;
+  updateAmmoHud();
+  const lab = (WEAPON_META[id] && WEAPON_META[id].label) || id;
+  showToast("Picked up " + lab);
+}
+
+/** Table / G / debugger: mint a NEW instance, fresh defaults, refill. */
+function equipWeapon(id) {
+  if (!db[id]) return;
+  setHandsEmpty(false);
+  state.weaponId = id;
+  state.heldInstanceId = mintInstanceId();
+  state.magByWeapon[id] = DEFAULT_MAG[id] || currentMagId(id);
+  state.suppressorByWeapon[id] = false;
+  state.optic = DEFAULT_OPTIC[id] || "iron";
+  state.fireMode = weaponSupportsAuto(id) ? "auto" : "semi";
+  rebuildHeldGun();
+  syncAmmoForLoadout({ refill: true });
+  showToast("Equipped " + ((WEAPON_META[id] && WEAPON_META[id].label) || id));
 }
 
 function setOptic(profile) {
@@ -2673,6 +2822,11 @@ const VAULT_MIN_H = 0.38;
 const VAULT_MAX_H = 1.18;
 const VAULT_REACH = 1.45;
 const FLOOR_Y = -1.4;
+/** Loose world kits (X-drop + start scatter). Oldest despawns past the cap. */
+const WORLD_DROP_CAP = 8;
+const WORLD_DROP_SCALE = 0.42;
+const WORLD_DROP_REST_Y = FLOOR_Y + 0.05;
+let worldDrops = [];
 /** Ejected brass casings — FIFO-capped, sleep after bounce, then optional TTL. */
 let casings = [];
 const CASING_MAX = 30000;
@@ -5212,6 +5366,9 @@ function updateOpticVisibility() {
 
 function pickupCompatible(p) {
   const ud = (p && p.userData) || {};
+  if (ud.droppedLoadout || ud.resetTargets) return true;
+  if (ud.weaponId) return true;
+  if (state.handsEmpty) return false;
   if (ud.magId) return magAllowedOnWeapon(ud.magId);
   if (ud.suppressorWeaponId) return ud.suppressorWeaponId === state.weaponId;
   if (ud.opticId) return weaponAllowsOptic(ud.opticId);
@@ -5499,6 +5656,7 @@ function buildRoom() {
     console.error('[shelter] buildSpawnShelter failed', err);
   }
   buildShootingRange();
+  scatterStartAreaDrops();
 }
 
 function buildOpticsTable() {
@@ -5612,6 +5770,256 @@ function makeWeaponBenchProp(style) {
     g.add(pistol);
   }
   return g;
+}
+
+function opticRestOnProp(weaponId) {
+  if (weaponId === "example_rifle") return { x: 0, y: 0.052, z: -0.02 };
+  if (weaponId === "example_sniper") return { x: 0, y: 0.052, z: 0.01 };
+  return { x: 0, y: 0.048, z: -0.01 };
+}
+
+function replacePropMag(g, magId) {
+  if (!magId) return;
+  let oldMag = null;
+  g.traverse((o) => {
+    if (!oldMag && o.name && o.name.indexOf("mag_") === 0) oldMag = o;
+  });
+  if (oldMag && oldMag.userData && oldMag.userData.magId === magId) return;
+  const mag = makeMagMesh(magId);
+  if (oldMag) {
+    mag.position.copy(oldMag.position);
+    mag.rotation.copy(oldMag.rotation);
+    const parent = oldMag.parent || g;
+    parent.remove(oldMag);
+    parent.add(mag);
+  } else {
+    mag.position.set(0, -0.048, 0.01);
+    g.add(mag);
+  }
+}
+
+/** World-kit mesh: bench silhouette plus seated mag / optic / can from the snapshot. */
+function makeDroppedKitMesh(loadout) {
+  const weaponId = loadout.weaponId;
+  const g = makeWeaponBenchProp(weaponId);
+  replacePropMag(g, loadout.magId);
+  if (loadout.optic && loadout.optic !== "iron") {
+    const optic = makeOpticMesh(loadout.optic);
+    const rest = opticRestOnProp(weaponId);
+    optic.position.set(rest.x, rest.y, rest.z);
+    g.add(optic);
+  }
+  if (loadout.suppressor) {
+    const can = makeSuppressorMesh(weaponId, { heat: false });
+    const spec = SUPPRESSOR_SPEC[weaponId] || SUPPRESSOR_SPEC.example_smg;
+    can.position.set(spec.mount[0], spec.mount[1], spec.mount[2]);
+    g.add(can);
+  }
+  return g;
+}
+
+function disposeObject3D(root) {
+  if (!root) return;
+  root.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) {
+      if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+      else o.material.dispose();
+    }
+  });
+}
+
+function removePickup(group) {
+  const i = pickups.indexOf(group);
+  if (i >= 0) pickups.splice(i, 1);
+  if (state.lookPickup === group) state.lookPickup = null;
+}
+
+function restDroppedGun(mesh, yaw) {
+  mesh.rotation.order = "YXZ";
+  mesh.rotation.y = yaw != null ? yaw : mesh.rotation.y;
+  mesh.rotation.x = 1.12;
+  mesh.rotation.z = 0.40;
+  mesh.position.y = WORLD_DROP_REST_Y;
+  mesh.userData.baseY = WORLD_DROP_REST_Y;
+}
+
+function despawnWorldDrop(rec) {
+  if (!rec) return;
+  const mesh = rec.mesh;
+  const i = worldDrops.indexOf(rec);
+  if (i >= 0) worldDrops.splice(i, 1);
+  if (mesh) {
+    removePickup(mesh);
+    if (mesh.parent) mesh.parent.remove(mesh);
+    disposeObject3D(mesh);
+  }
+}
+
+function spawnWorldDrop(loadout, opts = {}) {
+  if (!scene || !loadout || !db[loadout.weaponId]) return null;
+  const snap = cloneLoadout(loadout);
+  if (!snap.id) snap.id = mintInstanceId();
+  while (worldDrops.length >= WORLD_DROP_CAP) despawnWorldDrop(worldDrops[0]);
+
+  const group = new THREE.Group();
+  const prop = makeDroppedKitMesh(snap);
+  prop.scale.setScalar(WORLD_DROP_SCALE);
+  group.add(prop);
+  const highlight = new THREE.Mesh(
+    new THREE.BoxGeometry(0.34, 0.02, 0.22),
+    new THREE.MeshBasicMaterial({ color: 0x6ea8ff, transparent: true, opacity: 0.0 })
+  );
+  highlight.position.y = 0.012;
+  group.add(highlight);
+  const meta = WEAPON_META[snap.weaponId] || { label: snap.weaponId };
+  group.userData = {
+    weaponId: snap.weaponId,
+    droppedLoadout: snap,
+    label: meta.label,
+    highlight,
+    baseY: WORLD_DROP_REST_Y,
+    worldDrop: true,
+    allowed: true,
+  };
+
+  const x = opts.x != null ? opts.x : 0;
+  const z = opts.z != null ? opts.z : SPAWN_Z;
+  const y = opts.y != null ? opts.y : WORLD_DROP_REST_Y;
+  group.position.set(x, y, z);
+  group.rotation.order = "YXZ";
+  if (opts.settled) {
+    restDroppedGun(group, opts.yaw || 0);
+  } else {
+    group.rotation.set(
+      (Math.random() - 0.5) * 1.4,
+      opts.yaw != null ? opts.yaw : Math.random() * Math.PI * 2,
+      (Math.random() - 0.5) * 1.4,
+      "YXZ"
+    );
+  }
+
+  const rec = {
+    mesh: group,
+    vel: opts.vel ? opts.vel.clone() : new THREE.Vector3(),
+    angVel: opts.angVel ? opts.angVel.clone() : new THREE.Vector3(),
+    bounced: !!opts.settled,
+    sleeping: !!opts.settled,
+  };
+  scene.add(group);
+  pickups.push(group);
+  worldDrops.push(rec);
+  return rec;
+}
+
+function dropHeldWeapon({ atFeet = false } = {}) {
+  if (state.handsEmpty) return null;
+  if (!camera || !player) return null;
+  const snap = snapshotHeldLoadout();
+  camera.getWorldDirection(_fwd);
+  _fwd.y = 0;
+  if (_fwd.lengthSq() < 1e-8) _fwd.set(0, 0, -1);
+  else _fwd.normalize();
+  const dist = atFeet ? 0.38 : 0.62;
+  const x = player.pos.x + _fwd.x * dist;
+  const z = player.pos.z + _fwd.z * dist;
+  const y = atFeet ? (FLOOR_Y + 0.16) : (player.eyeCurrent - 0.18);
+  const vel = new THREE.Vector3();
+  if (atFeet) {
+    vel.set(_fwd.x * 0.55, 0.55, _fwd.z * 0.55);
+  } else {
+    vel.set(
+      _fwd.x * (2.15 + Math.random() * 0.35),
+      1.45 + Math.random() * 0.35,
+      _fwd.z * (2.15 + Math.random() * 0.35)
+    );
+  }
+  const angVel = new THREE.Vector3(
+    (Math.random() - 0.5) * 8,
+    (Math.random() - 0.5) * 6,
+    (Math.random() - 0.5) * 8
+  );
+  const rec = spawnWorldDrop(snap, {
+    x, y, z,
+    yaw: Math.atan2(_fwd.x, _fwd.z),
+    vel,
+    angVel,
+  });
+  setHandsEmpty(true);
+  const lab = (WEAPON_META[snap.weaponId] && WEAPON_META[snap.weaponId].label) || snap.weaponId;
+  showToast("Dropped " + lab);
+  return rec;
+}
+
+function consumeWorldDrop(group) {
+  if (!group) return;
+  const rec = worldDrops.find((d) => d.mesh === group);
+  if (rec) despawnWorldDrop(rec);
+  else {
+    removePickup(group);
+    if (group.parent) group.parent.remove(group);
+    disposeObject3D(group);
+  }
+}
+
+function pickupWorldDrop(group) {
+  if (!group || !group.userData || !group.userData.droppedLoadout) return;
+  const snap = cloneLoadout(group.userData.droppedLoadout);
+  consumeWorldDrop(group);
+  if (holdingWeapon()) dropHeldWeapon({ atFeet: true });
+  applyLoadout(snap);
+}
+
+function updateWorldDrops(dt) {
+  for (let i = 0; i < worldDrops.length; i++) {
+    const d = worldDrops[i];
+    if (!d || d.sleeping || !d.mesh) continue;
+    d.vel.y -= CASING_GRAVITY * dt;
+    d.mesh.position.addScaledVector(d.vel, dt);
+    d.mesh.rotation.x += d.angVel.x * dt;
+    d.mesh.rotation.y += d.angVel.y * dt;
+    d.mesh.rotation.z += d.angVel.z * dt;
+    if (d.mesh.position.y <= WORLD_DROP_REST_Y) {
+      d.mesh.position.y = WORLD_DROP_REST_Y;
+      if (!d.bounced) {
+        d.bounced = true;
+        d.vel.y = Math.abs(d.vel.y) * 0.28;
+        d.vel.x *= 0.46;
+        d.vel.z *= 0.46;
+        d.angVel.multiplyScalar(0.4);
+        if (d.vel.y < 0.4) d.vel.y = 0.4;
+      } else if (d.vel.y <= 0) {
+        d.vel.set(0, 0, 0);
+        d.angVel.set(0, 0, 0);
+        d.sleeping = true;
+        restDroppedGun(d.mesh, d.mesh.rotation.y);
+      }
+    }
+  }
+}
+
+/** 5 dumped kits around the stall / porch. Mix of the 3 guns; kit from WEAPON_KIT only. */
+function scatterStartAreaDrops() {
+  const spots = [
+    { x: -2.78, z: -0.12, yaw: Math.PI * 0.52 },
+    { x: 2.82, z: -0.28, yaw: -Math.PI * 0.50 },
+    { x: -2.88, z: -3.12, yaw: Math.PI * 0.58 },
+    { x: -2.38, z: 0.55, yaw: Math.PI * 0.18 },
+    { x: 2.92, z: -2.38, yaw: -Math.PI * 0.42 },
+  ];
+  const types = Object.keys(WEAPON_KIT);
+  if (!types.length) return;
+  for (let i = 0; i < spots.length; i++) {
+    const weaponId = types[i % types.length];
+    const loadout = randomizeLoadout(weaponId);
+    spawnWorldDrop(loadout, {
+      x: spots[i].x,
+      z: spots[i].z,
+      y: WORLD_DROP_REST_Y,
+      yaw: spots[i].yaw + (Math.random() - 0.5) * 0.18,
+      settled: true,
+    });
+  }
 }
 
 /** Second table near spawn/optics area with SMG / Rifle / Sniper pickups. */
@@ -9384,6 +9792,7 @@ function fireWeapon({ fromHold = false } = {}) {
     tryEquipLooked();
     return;
   }
+  if (state.handsEmpty) return;
   if (state.reloading) return;
   sfx.resume();
   if (state.ammoInMag <= 0) {
@@ -10591,7 +11000,7 @@ function updatePlayer(dt) {
   if (!state.adsPreview) {
     const adsSpeed = 8;
     const sprintBlock = sprintingNow || (state.sprintHoldT || 0) > 0.04;
-    state.adsTarget = (input.ads && !sprintBlock) ? 1 : 0;
+    state.adsTarget = (input.ads && !sprintBlock && !state.handsEmpty) ? 1 : 0;
     state.adsFactor = lerp(state.adsFactor, state.adsTarget, 1 - Math.exp(-adsSpeed * dt));
     if (Math.abs(state.adsFactor - state.adsTarget) < 0.001) state.adsFactor = state.adsTarget;
   } else {
@@ -10768,7 +11177,7 @@ function updatePlayer(dt) {
   }
 
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
-  if (isAutoFire() && input.shoot && !state.reloading && state.ammoInMag > 0) {
+  if (isAutoFire() && input.shoot && !state.handsEmpty && !state.reloading && state.ammoInMag > 0) {
     fireWeapon({ fromHold: true });
   }
 
@@ -10783,6 +11192,7 @@ function updatePlayer(dt) {
   updateHobReadout();
   updateTracers(dt);
   updateCasings(dt);
+  updateWorldDrops(dt);
   updateSpentSlugs(dt);
   updateGlassShards(dt);
   updateImpactFX(dt);
@@ -10836,6 +11246,7 @@ function updatePickupHover() {
     const hl = p.userData.highlight;
     const active = found === p;
     if (hl) hl.material.opacity = active ? 0.55 : 0.0;
+    if (p.userData.worldDrop) return;
     if (p.userData.resetTargets) {
       p.position.y = p.userData.baseY + (active ? 0.008 : 0);
       if (p.userData.buttonMesh) p.userData.buttonMesh.position.y = active ? 0.03 : 0.042;
@@ -10859,8 +11270,14 @@ function updateEquipPrompt() {
       updateVaultPrompt("[F] Reset targets  ·  click to reset");
       return;
     }
-    if (pu.weaponId) {
-      const equipped = state.weaponId === pu.weaponId;
+    if (pu.droppedLoadout) {
+      if (state.handsEmpty) {
+        updateVaultPrompt(`[F] Pick up ${label}  ·  click to pick up`);
+      } else {
+        updateVaultPrompt(`[F] Swap for ${label}  ·  click to swap`);
+      }
+    } else if (pu.weaponId) {
+      const equipped = !state.handsEmpty && state.weaponId === pu.weaponId;
       if (equipped) {
         updateVaultPrompt(`Looking at ${label} (equipped)`);
       } else {
@@ -10947,7 +11364,7 @@ function updateHudHint() {
   } else if (state.panelOpen) {
     hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
   } else {
-    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>U</kbd> cycle hold · <kbd>F</kbd> bench (gun/optic/mag/can) · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>B</kbd> fire mode · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
+    hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>U</kbd> cycle hold · <kbd>F</kbd> bench / world kit · <kbd>X</kbd> drop kit · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>B</kbd> fire mode · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
   }
 }
 
@@ -10958,14 +11375,19 @@ function tryEquipLooked() {
     resetRangeTargets();
     return;
   }
+  if (pu.droppedLoadout) {
+    pickupWorldDrop(state.lookPickup);
+    return;
+  }
   if (pu.weaponId) {
-    if (state.weaponId === pu.weaponId) {
+    if (!state.handsEmpty && state.weaponId === pu.weaponId) {
       showToast((pu.label || pu.weaponId) + " already equipped");
       return;
     }
     equipWeapon(pu.weaponId);
     return;
   }
+  if (state.handsEmpty) return;
   if (pu.magId) {
     equipMag(pu.magId);
     return;
@@ -11189,9 +11611,13 @@ function onKeyDown(e) {
       else input.holdBreath = false;
       e.preventDefault();
     }
-    // F = bench pickup (weapons + optics + mag + suppressor + reset); E is lean only; G remains gun dialog backup
+    // F = bench + world kit pickup; X = drop held kit; E is lean only; G remains gun dialog backup
     if ((k === "f" || k === "F") && !e.repeat) {
       if (state.lookPickup) tryEquipLooked();
+      e.preventDefault();
+    }
+    if ((k === "x" || k === "X") && !e.repeat) {
+      dropHeldWeapon();
       e.preventDefault();
     }
     if ((k === "r" || k === "R") && !e.repeat) {
@@ -11710,6 +12136,7 @@ function bind() {
   setTab("weapon");
   setPanelOpen(false);
   syncAmmoForLoadout({ refill: true });
+  if (!state.heldInstanceId) state.heldInstanceId = mintInstanceId();
   updateFireModeHud();
   updateHudHint();
   syncSettingsUI();

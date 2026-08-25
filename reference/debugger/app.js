@@ -1347,7 +1347,7 @@ function ensureSkyDiscs() {
     // Tiny HDR seed for bloom. Sky shader already draws the sun halo.
     sunDisc = new THREE.Mesh(
       new THREE.SphereGeometry(1, 16, 12),
-      new THREE.MeshBasicMaterial({ color: 0xffe4b8, fog: false, depthWrite: false, toneMapped: false })
+      new THREE.MeshBasicMaterial({ color: 0xffe4b8, fog: false, depthTest: true, depthWrite: false, toneMapped: false })
     );
     sunDisc.material.color.setRGB(1.6, 1.35, 0.95);
     sunDisc.renderOrder = -10;
@@ -1357,7 +1357,7 @@ function ensureSkyDiscs() {
   if (!moonDisc) {
     moonDisc = new THREE.Mesh(
       new THREE.SphereGeometry(3.2, 12, 10),
-      new THREE.MeshBasicMaterial({ color: 0xc8d4e4, fog: false, depthWrite: false, transparent: true, opacity: 0.55, toneMapped: false })
+      new THREE.MeshBasicMaterial({ color: 0xc8d4e4, fog: false, depthTest: true, depthWrite: false, transparent: true, opacity: 0.55, toneMapped: false })
     );
     moonDisc.renderOrder = -9;
     moonDisc.raycast = () => {};
@@ -1605,6 +1605,12 @@ function skyFollowRadius() {
   return Math.max(28, Math.min(220, far * 0.42));
 }
 
+/** Sun/moon mesh distance: just inside far clip so the disc is sky, not a finite ball in the bay. */
+function skyDiscDistance() {
+  const far = (camera && camera.far) || 2000;
+  return far * 0.92;
+}
+
 function updateSkyDome(dt) {
   if (!skyDome || !camera) return;
   camera.getWorldPosition(_skyCamPos);
@@ -1613,15 +1619,16 @@ function updateSkyDome(dt) {
   skyDome.scale.setScalar(Math.max(20, R * 0.55));
   if (skyMat) skyMat.uniforms.skyTime.value += dt;
   if (skyMat) skyMat.uniforms.sunAngular.value = sunHalfAngleRad();
+  const discR = skyDiscDistance();
   const coreRad = (SUN_CORE_DEG * Math.PI / 180) * 0.5;
-  const sunScale = Math.max(0.035, R * Math.tan(coreRad));
+  const sunScale = Math.max(0.035, discR * Math.tan(coreRad));
   if (sunDisc && sunDisc.visible) {
-    sunDisc.position.copy(_skyCamPos).addScaledVector(_keySunDir, R);
+    sunDisc.position.copy(_skyCamPos).addScaledVector(_keySunDir, discR);
     sunDisc.scale.setScalar(sunScale);
   }
   if (moonDisc && moonDisc.visible) {
-    moonDisc.position.copy(_skyCamPos).addScaledVector(_moonDir, R);
-    moonDisc.scale.setScalar(R / SKY_DISC_R);
+    moonDisc.position.copy(_skyCamPos).addScaledVector(_moonDir, discR);
+    moonDisc.scale.setScalar(discR / SKY_DISC_R);
   }
 }
 
@@ -6185,15 +6192,18 @@ function getFloodPoolTexture(kind = "outer") {
 }
 
 function makeFloodPoolMaterial(map) {
-  // depthTest:false so pools stay visible with renderer logarithmicDepthBuffer + transparent floor;
-  // prefer this over disabling log depth globally. NormalBlending + peach discs under floods.
+  // Floor is opaque MeshStandard now — depth-test so walls/bench/player occlude the spill.
+  // polygonOffset + a few cm above FLOOR_Y keeps the discs on the concrete without z-fight.
   const mat = new THREE.MeshBasicMaterial({
     map,
     color: 0xffd0a0,
     transparent: true,
     opacity: 0.62,
-    depthTest: false,
+    depthTest: true,
     depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
     blending: THREE.NormalBlending,
     side: THREE.DoubleSide,
   });
@@ -6262,7 +6272,7 @@ function makeFloodlight(x, z, opts = {}) {
   group.add(base, post, arm, head, lamp);
 
   // Floor pool under the fixture (visual only — no raycast / lean).
-  // radius ~10–14, y=0.04, inward 4–6; depthTest:false + renderOrder 1000 vs log-depth/transparent fights.
+  // radius ~10–14, y=0.04, inward 4–6; depth-tested, renderOrder after the floor.
   const poolR = opts.poolRadius != null ? opts.poolRadius : 14;
   const poolInward = opts.poolInward != null ? opts.poolInward : 5;
   const poolX = inward * poolInward;
@@ -6290,7 +6300,7 @@ function makeFloodlight(x, z, opts = {}) {
   );
   pool.rotation.x = -Math.PI / 2;
   pool.position.set(poolX, poolY, poolZ);
-  pool.renderOrder = 1000;
+  pool.renderOrder = 1;
   pool.raycast = () => {};
   group.add(pool);
 
@@ -6304,7 +6314,7 @@ function makeFloodlight(x, z, opts = {}) {
     );
     core.rotation.x = -Math.PI / 2;
     core.position.set(poolX, poolY + 0.005, poolZ);
-    core.renderOrder = 1001;
+    core.renderOrder = 2;
     core.raycast = () => {};
     group.add(core);
   }
@@ -6334,7 +6344,7 @@ function buildRangeFloodlights() {
   floodLights = [];
   floodFixtures = [];
   // SpotLight intensity/distance sized to read on MeshStandard; soft peach discs sell the spill.
-  // Pool radii ~10–14 m under fixture; depthTest:false NormalBlending so they stay visible.
+  // Pool radii ~10–14 m under fixture; depth-tested NormalBlending so walls occlude them.
   const posts = [
     { x: -9.2, meters: 25, intensity: 48, distance: 45, poolRadius: 14, poolCoreRadius: 4.5, poolInward: 5.5 },
     { x: 9.4, meters: 80, intensity: 58, distance: 52, poolRadius: 13, poolCoreRadius: 4.2, poolInward: 5.2 },

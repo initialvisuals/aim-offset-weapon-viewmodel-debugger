@@ -354,6 +354,10 @@ const state = {
   holeFade: 18,
   /** Seconds after a casing sleeps before despawn. 0 = stay until cap recycles. */
   casingFade: 12,
+  /** Hide casings/spent slugs beyond this player XZ distance (m). Not despawn. */
+  casingDraw: 55,
+  /** Hide holes/crater plugs beyond this player XZ distance (m). Not despawn. */
+  decalDraw: 900,
   /** Volumetric sun shafts (0 = off, 2 = strong). */
   godRays: GOD_RAYS_DEFAULT,
   /** HDR bloom (0 = off, 2 = strong). Independent of god rays. */
@@ -1158,6 +1162,12 @@ function formatFadeLabel(sec) {
   return `${Math.round(n)}s`;
 }
 
+function formatDrawLabel(m) {
+  const n = Number(m);
+  if (!Number.isFinite(n)) return "0 m";
+  return `${Math.round(n)} m`;
+}
+
 function syncFxSettingsUI() {
   const holeCapSlider = el("holeCapSlider");
   const holeCapVal = el("holeCapVal");
@@ -1175,6 +1185,14 @@ function syncFxSettingsUI() {
   const casingFadeVal = el("casingFadeVal");
   if (casingFadeSlider && document.activeElement !== casingFadeSlider) casingFadeSlider.value = String(state.casingFade);
   if (casingFadeVal) casingFadeVal.textContent = formatFadeLabel(state.casingFade);
+  const casingDrawSlider = el("casingDrawSlider");
+  const casingDrawVal = el("casingDrawVal");
+  if (casingDrawSlider && document.activeElement !== casingDrawSlider) casingDrawSlider.value = String(state.casingDraw);
+  if (casingDrawVal) casingDrawVal.textContent = formatDrawLabel(state.casingDraw);
+  const decalDrawSlider = el("decalDrawSlider");
+  const decalDrawVal = el("decalDrawVal");
+  if (decalDrawSlider && document.activeElement !== decalDrawSlider) decalDrawSlider.value = String(state.decalDraw);
+  if (decalDrawVal) decalDrawVal.textContent = formatDrawLabel(state.decalDraw);
 }
 
 function setHoleCap(v, { toast = false } = {}) {
@@ -1211,6 +1229,24 @@ function setCasingFade(v, { toast = false } = {}) {
   expireCasings();
   syncFxSettingsUI();
   if (toast) showToast(state.casingFade <= 0 ? "Casing fade off (cap)" : `Casing fade ${state.casingFade}s`);
+  scheduleSaveSettings();
+}
+
+function setCasingDraw(v, { toast = false } = {}) {
+  state.casingDraw = Math.round(clamp(parseFloat(v), CASING_DRAW_MIN, CASING_DRAW_MAX));
+  if (!Number.isFinite(state.casingDraw)) state.casingDraw = CASING_DRAW_DEFAULT;
+  applyFxDrawDistances();
+  syncFxSettingsUI();
+  if (toast) showToast(`Casing draw ${state.casingDraw} m`);
+  scheduleSaveSettings();
+}
+
+function setDecalDraw(v, { toast = false } = {}) {
+  state.decalDraw = Math.round(clamp(parseFloat(v), DECAL_DRAW_MIN, DECAL_DRAW_MAX) / 10) * 10;
+  if (!Number.isFinite(state.decalDraw)) state.decalDraw = DECAL_DRAW_DEFAULT;
+  applyFxDrawDistances();
+  syncFxSettingsUI();
+  if (toast) showToast(`Decal draw ${state.decalDraw} m`);
   scheduleSaveSettings();
 }
 
@@ -2522,6 +2558,15 @@ const CASING_CAP_MIN = 10;
 const CASING_CAP_MAX = 30000;
 const CASING_FADE_SEC = 12;
 const CASING_FADE_MAX = 60;
+/** Hide (not despawn) brass / spent slugs beyond this player XZ range. */
+const CASING_DRAW_MIN = 8;
+const CASING_DRAW_MAX = 200;
+const CASING_DRAW_DEFAULT = 55;
+/** Hide (not despawn) holes / crater plugs. Min 50 still covers the bay. */
+const DECAL_DRAW_MIN = 50;
+const DECAL_DRAW_MAX = 2000;
+const DECAL_DRAW_DEFAULT = 900;
+const _fxDrawTmp = new THREE.Vector3();
 const CASING_GRAVITY = 12;
 /** Breakable beer bottles on the 15–25 m side benches. */
 let beerBottles = [];
@@ -2690,6 +2735,8 @@ const SETTINGS_FIELDS = [
   { key: "concreteVar", src: "state", type: "num" },
   { key: "holeFade", src: "state", type: "num" },
   { key: "casingFade", src: "state", type: "num" },
+  { key: "casingDraw", src: "state", type: "num" },
+  { key: "decalDraw", src: "state", type: "num" },
   { key: "godRays", src: "state", type: "num" },
   { key: "bloom", src: "state", type: "num" },
   { key: "dither", src: "state", type: "num" },
@@ -2774,6 +2821,8 @@ function applySettingsBlob(blob) {
   state.concreteWear = clamp(state.concreteWear ?? CONCRETE_WEAR_DEFAULT, 0, 1);
   state.concreteScale = clamp(state.concreteScale ?? CONCRETE_SCALE_DEFAULT, CONCRETE_SCALE_MIN, CONCRETE_SCALE_MAX);
   state.concreteVar = clamp(state.concreteVar ?? CONCRETE_VAR_DEFAULT, CONCRETE_VAR_MIN, CONCRETE_VAR_MAX);
+  state.casingDraw = Math.round(clamp(state.casingDraw ?? CASING_DRAW_DEFAULT, CASING_DRAW_MIN, CASING_DRAW_MAX));
+  state.decalDraw = Math.round(clamp(state.decalDraw ?? DECAL_DRAW_DEFAULT, DECAL_DRAW_MIN, DECAL_DRAW_MAX) / 10) * 10;
 }
 
 function loadPersistedSettings() {
@@ -2809,6 +2858,7 @@ function applySettingsSideEffects() {
   trimCasings();
   trimSpentSlugs();
   expireCasings();
+  applyFxDrawDistances();
   syncSettingsUI();
 }
 
@@ -8408,6 +8458,64 @@ function liveCasingFade() {
   return Number.isFinite(n) ? Math.max(0, n) : CASING_FADE_SEC;
 }
 
+function liveCasingDraw() {
+  const n = Number(state.casingDraw);
+  return Number.isFinite(n) ? clamp(n, CASING_DRAW_MIN, CASING_DRAW_MAX) : CASING_DRAW_DEFAULT;
+}
+
+function liveDecalDraw() {
+  const n = Number(state.decalDraw);
+  return Number.isFinite(n) ? clamp(n, DECAL_DRAW_MIN, DECAL_DRAW_MAX) : DECAL_DRAW_DEFAULT;
+}
+
+function fxWorldXZ(obj) {
+  if (!obj) return null;
+  if (!obj.parent || obj.parent === scene) {
+    _fxDrawTmp.x = obj.position.x;
+    _fxDrawTmp.z = obj.position.z;
+    return _fxDrawTmp;
+  }
+  obj.getWorldPosition(_fxDrawTmp);
+  return _fxDrawTmp;
+}
+
+function setFxVisibleByDist(obj, px, pz, r2) {
+  if (!obj) return false;
+  const p = fxWorldXZ(obj);
+  const dx = p.x - px;
+  const dz = p.z - pz;
+  const vis = (dx * dx + dz * dz) <= r2;
+  obj.visible = vis;
+  return vis;
+}
+
+/** Per-frame draw-distance hide. Does not despawn; walking back shows items again. */
+function applyFxDrawDistances() {
+  if (!player || !player.pos) return;
+  const px = player.pos.x;
+  const pz = player.pos.z;
+  const cR = liveCasingDraw();
+  const dR = liveDecalDraw();
+  const cR2 = cR * cR;
+  const dR2 = dR * dR;
+  for (let i = 0; i < casings.length; i++) {
+    const m = casings[i] && casings[i].mesh;
+    if (m) setFxVisibleByDist(m, px, pz, cR2);
+  }
+  for (let i = 0; i < spentSlugs.length; i++) {
+    const m = spentSlugs[i] && spentSlugs[i].mesh;
+    if (m) setFxVisibleByDist(m, px, pz, cR2);
+  }
+  const visDecal = (mesh) => {
+    if (!mesh) return;
+    const vis = setFxVisibleByDist(mesh, px, pz, dR2);
+    const plug = mesh.userData && mesh.userData.plug;
+    if (plug) plug.visible = vis;
+  };
+  for (let i = 0; i < impactDecals.length; i++) visDecal(impactDecals[i]);
+  for (let i = 0; i < paperDecals.length; i++) visDecal(paperDecals[i]);
+}
+
 /** Oldest third of live casings by spawn time — random pick, never spawn-order walk. */
 function oldestThirdCasingIndices() {
   const n = casings.length;
@@ -10051,6 +10159,7 @@ function updatePlayer(dt) {
   updateSilhouettes(dt);
   updateBermPopups(dt);
   updateScorePopups(dt);
+  applyFxDrawDistances();
 }
 
 function syncAdsSlider() {
@@ -10940,6 +11049,10 @@ function bind() {
   if (holeFadeSlider) holeFadeSlider.oninput = (e) => setHoleFade(e.target.value);
   const casingFadeSlider = el("casingFadeSlider");
   if (casingFadeSlider) casingFadeSlider.oninput = (e) => setCasingFade(e.target.value);
+  const casingDrawSlider = el("casingDrawSlider");
+  if (casingDrawSlider) casingDrawSlider.oninput = (e) => setCasingDraw(e.target.value);
+  const decalDrawSlider = el("decalDrawSlider");
+  if (decalDrawSlider) decalDrawSlider.oninput = (e) => setDecalDraw(e.target.value);
   syncFxSettingsUI();
 
   window.addEventListener("keydown", onKeyDown);

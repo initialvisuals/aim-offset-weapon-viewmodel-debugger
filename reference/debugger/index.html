@@ -300,7 +300,15 @@
           <input type="range" id="casingFadeSlider" min="0" max="60" step="1" value="12" />
           <code id="casingFadeVal">12s</code>
         </label>
-        <p class="note">Env / silhouette holes FIFO-cap and optionally expire. Paper-target holes stay until table reset. Berm popups still clear on hide. Casings sleep, then expire (0 = until the cap recycles). Cap and fade pick at random from the oldest third so brass does not vanish in firing order.</p>
+        <label class="slider-row">Decal draw (m)
+          <input type="range" id="decalDrawSlider" min="50" max="2000" step="10" value="900" />
+          <code id="decalDrawVal">900 m</code>
+        </label>
+        <label class="slider-row">Casing draw (m)
+          <input type="range" id="casingDrawSlider" min="8" max="200" step="1" value="55" />
+          <code id="casingDrawVal">55 m</code>
+        </label>
+        <p class="note">Env / silhouette holes FIFO-cap and optionally expire. Paper-target holes stay until table reset. Berm popups still clear on hide. Casings sleep, then expire (0 = until the cap recycles). Cap and fade pick at random from the oldest third so brass does not vanish in firing order. Draw distance only hides (holes/crater plugs vs casings/spent slugs) — walk back and they reappear. Caps stay.</p>
       </div>
 
       <div class="settings-section">
@@ -492,7 +500,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>F</kbd> bench pickup / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade) · Lighting (clock + clouds + intensities + sun size/punch + god rays + bloom + dither/scale/offset/type + barrel heat) · Materials (concrete wear/scale/variation) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
+          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade + draw) · Lighting (clock + clouds + intensities + sun size/punch + god rays + bloom + dither/scale/offset/type + barrel heat) · Materials (concrete wear/scale/variation) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
         </ul>
       </div>
     </div>
@@ -500,6 +508,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v36"></script>
+    <script type="module" src="app.js?v=20260824v37"></script>
 </body>
 </html>

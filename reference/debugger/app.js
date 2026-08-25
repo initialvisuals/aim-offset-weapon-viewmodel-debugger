@@ -5122,7 +5122,6 @@ function pourUnit(i, salt) {
   return x - Math.floor(x);
 }
 
-/** Near-bay pour slabs + cheaper far planes. Same total coverage as one big plane. */
 /** Scale existing 0-1 UVs so 1 UV unit is 1 world meter on that face. */
 function applyMeterUVs(geo, uMeters, vMeters) {
   const uv = geo.getAttribute("uv");
@@ -5202,6 +5201,43 @@ function pourUvSpin(i, salt) {
   return (pourUnit(i, salt) - 0.5) * (Math.PI / 180) * 2.2;
 }
 
+/** Greedy merge: walk a grid, expand width then height, mark used. Same-key cells become one rect. */
+function greedyMergeRects(nx, nz, keyAt) {
+  const used = new Array(nz);
+  for (let zi = 0; zi < nz; zi++) used[zi] = new Array(nx).fill(false);
+  const rects = [];
+  for (let zi = 0; zi < nz; zi++) {
+    for (let xi = 0; xi < nx; xi++) {
+      if (used[zi][xi]) continue;
+      const key = keyAt(xi, zi);
+      let w = 1;
+      while (xi + w < nx && !used[zi][xi + w] && keyAt(xi + w, zi) === key) w++;
+      let h = 1;
+      expand: while (zi + h < nz) {
+        for (let dx = 0; dx < w; dx++) {
+          if (used[zi + h][xi + dx] || keyAt(xi + dx, zi + h) !== key) break expand;
+        }
+        h++;
+      }
+      for (let dz = 0; dz < h; dz++) {
+        for (let dx = 0; dx < w; dx++) used[zi + dz][xi + dx] = true;
+      }
+      rects.push({ x: xi, z: zi, w, h });
+    }
+  }
+  return rects;
+}
+
+/** World-phase meter UVs on a Y-up plane that will be rotated -PI/2 onto XZ (UV.x = worldX, UV.y = -worldZ). */
+function worldPhaseFloorUVs(geo, xc, zc, width, depth) {
+  return worldPhaseUVs(
+    applyMeterUVs(geo, width, depth),
+    xc - width * 0.5,
+    -(zc + depth * 0.5)
+  );
+}
+
+/** Near-bay pour slabs + cheaper far planes. Same total coverage; greedy-merge coplanar same-material cells. */
 function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, impact) {
   const kind = mat && mat.userData && mat.userData.concreteKind ? mat.userData.concreteKind : "floor";
   const zMin = centerZ - along * 0.5;
@@ -5210,47 +5246,40 @@ function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, i
   const n1 = Math.min(zMax, nearZ1);
   const nx = Math.max(1, Math.round(across / slab));
   const slabX = across / nx;
-  let row = 0;
+  const rows = [];
   for (let z = n0; z < n1 - 1e-4; z += slab) {
     const depth = Math.min(slab, n1 - z);
-    const zc = z + depth * 0.5;
-    for (let xi = 0; xi < nx; xi++) {
-      const xc = -across * 0.5 + (xi + 0.5) * slabX;
-      const id = row * 17 + xi;
-      const g = worldPhaseUVs(
-        applyMeterUVs(new THREE.PlaneGeometry(slabX, depth), slabX, depth),
-        xc,
-        zc,
-        pourUvSpin(id, 11.2)
-      );
-      const mesh = new THREE.Mesh(g, getConcreteVariant(kind, pourUnit(id, 1.7)));
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.rotation.z = (pourUnit(id, 2.3) - 0.5) * 0.004;
-      mesh.position.set(
-        xc + (pourUnit(id, 5.1) - 0.5) * 0.008,
-        y,
-        zc + (pourUnit(id, 9.4) - 0.5) * 0.008
-      );
-      mesh.scale.setScalar(1.006);
-      mesh.receiveShadow = true;
-      if (impact) mesh.userData.impactSurface = impact;
-      scene.add(mesh);
+    rows.push({ z0: z, depth });
+  }
+  const nz = rows.length;
+  const cellMat = (xi, zi) => getConcreteVariant(kind, pourUnit(zi * 17 + xi, 1.7));
+  const keyAt = (xi, zi) => cellMat(xi, zi).uuid + ":" + rows[zi].depth.toFixed(4);
+  const stamp = (width, depth, xc, zc, material) => {
+    const mesh = new THREE.Mesh(
+      worldPhaseFloorUVs(new THREE.PlaneGeometry(width, depth), xc, zc, width, depth),
+      material
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(xc, y, zc);
+    mesh.receiveShadow = true;
+    if (impact) mesh.userData.impactSurface = impact;
+    scene.add(mesh);
+  };
+  if (nz > 0) {
+    for (const r of greedyMergeRects(nx, nz, keyAt)) {
+      const width = r.w * slabX;
+      let depth = 0;
+      for (let dz = 0; dz < r.h; dz++) depth += rows[r.z + dz].depth;
+      const xc = -across * 0.5 + (r.x + r.w * 0.5) * slabX;
+      const zc = rows[r.z].z0 + depth * 0.5;
+      stamp(width, depth, xc, zc, cellMat(r.x, r.z));
     }
-    row++;
   }
   const cheap = (zA, zB) => {
     const len = zB - zA;
     if (len < 0.05) return;
     const zc = (zA + zB) * 0.5;
-    const mesh = new THREE.Mesh(
-      worldPhaseUVs(applyMeterUVs(new THREE.PlaneGeometry(across, len), across, len), 0, zc),
-      getConcreteVariant(kind, pourUnit(Math.round(zA + len), 8.8))
-    );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(0, y, zc);
-    mesh.receiveShadow = true;
-    if (impact) mesh.userData.impactSurface = impact;
-    scene.add(mesh);
+    stamp(across, len, 0, zc, getConcreteVariant(kind, pourUnit(Math.round(zA + len), 8.8)));
   };
   cheap(zMin, n0);
   cheap(n1, zMax);
@@ -5720,10 +5749,15 @@ function buildShootingRange() {
     "floor"
   );
 
+  // Folded into the pour: ~2.5 cm proud, tops just under flood cookies so the orange wash hits them.
+  const railH = 0.026;
+  const railY = FLOOR_Y + 0.023; // top ~3.6 cm above floor / ~2 mm under cookie discs
   for (const side of [-5.5, 5.5]) {
-    const rail = makeBox(0.1, 0.14, 410, 0x343c4c, side, -1.3, rangeCenterZ);
-    rail.material.roughness = 0.8;
-    rail.material.metalness = 0.2;
+    const rail = makeBox(0.1, railH, 410, 0x2a3038, side, railY, rangeCenterZ);
+    rail.material.roughness = 0.76;
+    rail.material.metalness = 0.24;
+    rail.castShadow = false;
+    rail.receiveShadow = true;
     scene.add(rail);
   }
 

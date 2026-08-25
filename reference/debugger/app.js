@@ -5097,6 +5097,54 @@ function applyMeterUVs(geo, uMeters, vMeters) {
   return geo;
 }
 
+/** World-phase meter UVs so same-size slabs don't stamp the same 0-origin tile.
+ *  1 UV unit stays 1 meter. Tiny rotRad (~1-2 deg) breaks lockstep without chaos. */
+function worldPhaseUVs(geo, uOff, vOff, rotRad) {
+  const uv = geo.getAttribute("uv");
+  if (!uv) return geo;
+  const rot = rotRad || 0;
+  const ou = uOff || 0;
+  const ov = vOff || 0;
+  if (rot === 0 && ou === 0 && ov === 0) return geo;
+  let cu = 0;
+  let cv = 0;
+  if (rot !== 0) {
+    let uMin = Infinity;
+    let uMax = -Infinity;
+    let vMin = Infinity;
+    let vMax = -Infinity;
+    for (let i = 0; i < uv.count; i++) {
+      const u = uv.getX(i);
+      const v = uv.getY(i);
+      if (u < uMin) uMin = u;
+      if (u > uMax) uMax = u;
+      if (v < vMin) vMin = v;
+      if (v > vMax) vMax = v;
+    }
+    cu = (uMin + uMax) * 0.5;
+    cv = (vMin + vMax) * 0.5;
+  }
+  const c = Math.cos(rot);
+  const s = Math.sin(rot);
+  for (let i = 0; i < uv.count; i++) {
+    let u = uv.getX(i);
+    let v = uv.getY(i);
+    if (rot !== 0) {
+      const du = u - cu;
+      const dv = v - cv;
+      u = du * c - dv * s + cu;
+      v = du * s + dv * c + cv;
+    }
+    uv.setXY(i, u + ou, v + ov);
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
+function pourUvSpin(i, salt) {
+  return (pourUnit(i, salt) - 0.5) * (Math.PI / 180) * 2.2;
+}
+
 function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, impact) {
   const kind = mat && mat.userData && mat.userData.concreteKind ? mat.userData.concreteKind : "floor";
   const zMin = centerZ - along * 0.5;
@@ -5105,16 +5153,6 @@ function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, i
   const n1 = Math.min(zMax, nearZ1);
   const nx = Math.max(1, Math.round(across / slab));
   const slabX = across / nx;
-  const geos = new Map();
-  const geo = (w, d) => {
-    const k = w.toFixed(3) + "x" + d.toFixed(3);
-    let g = geos.get(k);
-    if (!g) {
-      g = applyMeterUVs(new THREE.PlaneGeometry(w, d), w, d);
-      geos.set(k, g);
-    }
-    return g;
-  };
   let row = 0;
   for (let z = n0; z < n1 - 1e-4; z += slab) {
     const depth = Math.min(slab, n1 - z);
@@ -5122,7 +5160,13 @@ function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, i
     for (let xi = 0; xi < nx; xi++) {
       const xc = -across * 0.5 + (xi + 0.5) * slabX;
       const id = row * 17 + xi;
-      const mesh = new THREE.Mesh(geo(slabX, depth), getConcreteVariant(kind, pourUnit(id, 1.7)));
+      const g = worldPhaseUVs(
+        applyMeterUVs(new THREE.PlaneGeometry(slabX, depth), slabX, depth),
+        xc,
+        zc,
+        pourUvSpin(id, 11.2)
+      );
+      const mesh = new THREE.Mesh(g, getConcreteVariant(kind, pourUnit(id, 1.7)));
       mesh.rotation.x = -Math.PI / 2;
       mesh.rotation.z = (pourUnit(id, 2.3) - 0.5) * 0.004;
       mesh.position.set(
@@ -5140,12 +5184,13 @@ function addPouredGround(mat, across, along, centerZ, y, nearZ0, nearZ1, slab, i
   const cheap = (zA, zB) => {
     const len = zB - zA;
     if (len < 0.05) return;
+    const zc = (zA + zB) * 0.5;
     const mesh = new THREE.Mesh(
-      applyMeterUVs(new THREE.PlaneGeometry(across, len), across, len),
+      worldPhaseUVs(applyMeterUVs(new THREE.PlaneGeometry(across, len), across, len), 0, zc),
       getConcreteVariant(kind, pourUnit(Math.round(zA + len), 8.8))
     );
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(0, y, (zA + zB) * 0.5);
+    mesh.position.set(0, y, zc);
     mesh.receiveShadow = true;
     if (impact) mesh.userData.impactSurface = impact;
     scene.add(mesh);
@@ -5161,7 +5206,6 @@ function addBayWallPanels(wallMat, rangeCenterZ) {
   const n = Math.round(wallLen / 5.5);
   const panelLen = wallLen / n;
   const z0 = rangeCenterZ - wallLen * 0.5;
-  const panelGeo = applyMeterUVs(new THREE.BoxGeometry(wallT, wallH, panelLen));
   const hullMat = new THREE.MeshBasicMaterial({
     transparent: true,
     opacity: 0,
@@ -5176,7 +5220,13 @@ function addBayWallPanels(wallMat, rangeCenterZ) {
     addLeanSolid(hull);
     for (let i = 0; i < n; i++) {
       const zc = z0 + (i + 0.5) * panelLen;
-      const panel = new THREE.Mesh(panelGeo, getConcreteVariant(wallMat.userData.concreteKind || "wall", pourUnit(i, side + 1.4)));
+      const geo = worldPhaseUVs(
+        applyMeterUVs(new THREE.BoxGeometry(wallT, wallH, panelLen)),
+        zc,
+        -0.2,
+        pourUvSpin(i, side + 13.6)
+      );
+      const panel = new THREE.Mesh(geo, getConcreteVariant(wallMat.userData.concreteKind || "wall", pourUnit(i, side + 1.4)));
       panel.position.set(
         side + (pourUnit(i, side + 9.1) - 0.5) * 0.012,
         -0.2,
@@ -5982,13 +6032,13 @@ function buildBackBerm() {
   // Just past the 400 m mark so the end-wall reads as the range backstop.
   const bermZ = rangeZ(410);
   // Main mound
-  const main = new THREE.Mesh(applyMeterUVs(new THREE.BoxGeometry(28, 5.2, 3.2)), getConcreteVariant("berm", 0.12));
+  const main = new THREE.Mesh(worldPhaseUVs(applyMeterUVs(new THREE.BoxGeometry(28, 5.2, 3.2)), 0, bermZ), getConcreteVariant("berm", 0.12));
   main.position.set(0, 0.7, bermZ);
   main.castShadow = false;
   main.receiveShadow = true;
   addLeanSolid(main);
   // Front slope / face toward shooter
-  const face = new THREE.Mesh(applyMeterUVs(new THREE.BoxGeometry(26, 3.6, 2.4)), getConcreteVariant("berm", 0.41));
+  const face = new THREE.Mesh(worldPhaseUVs(applyMeterUVs(new THREE.BoxGeometry(26, 3.6, 2.4)), 0, bermZ + 2.8), getConcreteVariant("berm", 0.41));
   face.position.set(0, -0.15, bermZ + 2.8);
   face.rotation.x = -0.35;
   face.castShadow = false;
@@ -5996,7 +6046,7 @@ function buildBackBerm() {
   addLeanSolid(face);
   // Crest / uneven top chunks
   for (const [x, y, zOff, w, h, d] of BERM_CREST_CHUNKS) {
-    const chunk = new THREE.Mesh(applyMeterUVs(new THREE.BoxGeometry(w, h, d)), getConcreteVariant("bermDark", pourUnit(Math.round(x + 20), 3.3)));
+    const chunk = new THREE.Mesh(worldPhaseUVs(applyMeterUVs(new THREE.BoxGeometry(w, h, d)), x, bermZ + zOff), getConcreteVariant("bermDark", pourUnit(Math.round(x + 20), 3.3)));
     chunk.position.set(x, y, bermZ + zOff);
     chunk.rotation.y = (x % 3) * 0.05;
     chunk.castShadow = false;
@@ -6005,7 +6055,7 @@ function buildBackBerm() {
   }
   // Flanking dirt piles
   for (const side of [-14, 14]) {
-    const pile = new THREE.Mesh(applyMeterUVs(new THREE.BoxGeometry(6, 3.2, 4)), getConcreteVariant("berm", side < 0 ? 0.22 : 0.77));
+    const pile = new THREE.Mesh(worldPhaseUVs(applyMeterUVs(new THREE.BoxGeometry(6, 3.2, 4)), side, bermZ + 2), getConcreteVariant("berm", side < 0 ? 0.22 : 0.77));
     pile.position.set(side, 0.1, bermZ + 2);
     pile.castShadow = false;
     pile.receiveShadow = true;

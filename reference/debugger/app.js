@@ -2825,8 +2825,10 @@ const FLOOR_Y = -1.4;
 /** Loose world kits (X-drop + start scatter). Oldest despawns past the cap. */
 const WORLD_DROP_CAP = 8;
 const WORLD_DROP_SCALE = 1.0;
-/** Origin height while bouncing. restDroppedGun bbox-sits the kit on FLOOR_Y. */
+/** Spawn / fallback origin. Sleep pose bbox-sits the kit on FLOOR_Y. */
 const WORLD_DROP_REST_Y = FLOOR_Y + 0.18;
+const _dropRestBox = new THREE.Box3();
+const _dropHlQ = new THREE.Quaternion();
 /** Weapons-bench table pickups — honest enough to read as guns, under 1.0 so three fit. */
 const WEAPON_BENCH_SCALE = 0.9;
 let worldDrops = [];
@@ -5838,23 +5840,43 @@ function removePickup(group) {
   if (state.lookPickup === group) state.lookPickup = null;
 }
 
+/** World-kit silhouette child — skip the hover pad so AABB is the gun. */
+function droppedGunProp(mesh) {
+  const hl = mesh && mesh.userData && mesh.userData.highlight;
+  if (!mesh || !mesh.children) return mesh;
+  for (let i = 0; i < mesh.children.length; i++) {
+    if (mesh.children[i] !== hl) return mesh.children[i];
+  }
+  return mesh;
+}
+
+/** Thin floor pad under a rested kit. Cancels parent roll so Y stays up. */
+function flattenDropHighlight(mesh) {
+  const hl = mesh.userData && mesh.userData.highlight;
+  if (!hl) return;
+  hl.raycast = () => {};
+  hl.rotation.order = "YXZ";
+  hl.rotation.set(0, 0, -mesh.rotation.z, "YXZ");
+  const lift = FLOOR_Y + 0.014 - mesh.position.y;
+  hl.position.set(0, lift, 0).applyQuaternion(_dropHlQ.copy(mesh.quaternion).invert());
+}
+
 function restDroppedGun(mesh, yaw) {
   mesh.rotation.order = "YXZ";
   mesh.rotation.y = yaw != null ? yaw : mesh.rotation.y;
-  mesh.rotation.x = 1.12;
-  mesh.rotation.z = 0.40;
+  mesh.rotation.x = 0;
+  // Flat on the long side: barrel along local -Z, mag (local -Y) out to the side.
+  const z0 = Math.atan2(Math.sin(mesh.rotation.z), Math.cos(mesh.rotation.z));
+  mesh.rotation.z = (Math.abs(z0) < 1e-3)
+    ? (Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2)
+    : (z0 >= 0 ? Math.PI / 2 : -Math.PI / 2);
   mesh.updateMatrixWorld(true);
-  const hl = mesh.userData && mesh.userData.highlight;
-  let prop = null;
-  if (mesh.children) {
-    for (let i = 0; i < mesh.children.length; i++) {
-      if (mesh.children[i] !== hl) { prop = mesh.children[i]; break; }
-    }
-  }
-  const box = new THREE.Box3().setFromObject(prop || mesh);
+  const prop = droppedGunProp(mesh);
+  const box = _dropRestBox.setFromObject(prop || mesh);
   if (Number.isFinite(box.min.y)) mesh.position.y += FLOOR_Y - box.min.y;
   else mesh.position.y = WORLD_DROP_REST_Y;
   mesh.userData.baseY = mesh.position.y;
+  flattenDropHighlight(mesh);
 }
 
 function despawnWorldDrop(rec) {
@@ -5880,10 +5902,11 @@ function spawnWorldDrop(loadout, opts = {}) {
   prop.scale.setScalar(WORLD_DROP_SCALE);
   group.add(prop);
   const highlight = new THREE.Mesh(
-    new THREE.BoxGeometry(0.82, 0.04, 0.52),
+    new THREE.BoxGeometry(0.16, 0.025, 0.95),
     new THREE.MeshBasicMaterial({ color: 0x6ea8ff, transparent: true, opacity: 0.0 })
   );
-  highlight.position.y = 0.02;
+  highlight.position.y = 0.014;
+  highlight.raycast = () => {};
   group.add(highlight);
   const meta = WEAPON_META[snap.weaponId] || { label: snap.weaponId };
   group.userData = {
@@ -5992,8 +6015,10 @@ function updateWorldDrops(dt) {
     d.mesh.rotation.x += d.angVel.x * dt;
     d.mesh.rotation.y += d.angVel.y * dt;
     d.mesh.rotation.z += d.angVel.z * dt;
-    if (d.mesh.position.y <= WORLD_DROP_REST_Y) {
-      d.mesh.position.y = WORLD_DROP_REST_Y;
+    d.mesh.updateMatrixWorld(true);
+    const box = _dropRestBox.setFromObject(droppedGunProp(d.mesh));
+    if (Number.isFinite(box.min.y) && box.min.y <= FLOOR_Y) {
+      d.mesh.position.y += FLOOR_Y - box.min.y;
       if (!d.bounced) {
         d.bounced = true;
         d.vel.y = Math.abs(d.vel.y) * 0.28;

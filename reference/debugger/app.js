@@ -684,14 +684,37 @@ const sfx = {
     if (c && c.state === "suspended") c.resume().catch(() => {});
     return c;
   },
+  noiseBufs: Object.create(null),
   noiseBuffer(duration = 0.08) {
     const c = this.ensure();
     if (!c) return null;
+    const key = String(duration);
+    const hit = this.noiseBufs[key];
+    if (hit && hit.sampleRate === c.sampleRate) return hit;
     const n = Math.max(1, Math.floor(c.sampleRate * duration));
     const buf = c.createBuffer(1, n, c.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1;
+    this.noiseBufs[key] = buf;
     return buf;
+  },
+  /** Build glass noise + silently tick the graph so first bulb-pop is not first-use. */
+  prewarmGlass() {
+    const c = this.ensure();
+    if (!c) return;
+    this.noiseBuffer(0.08);
+    if (c.state !== "running") return;
+    try {
+      const now = c.currentTime;
+      const out = c.createGain();
+      out.gain.value = 0;
+      out.connect(c.destination);
+      const noise = c.createBufferSource();
+      noise.buffer = this.noiseBuffer(0.08);
+      noise.connect(out);
+      noise.start(now);
+      noise.stop(now + 0.001);
+    } catch (_) {}
   },
   play(kind) {
     const c = this.resume();
@@ -2617,6 +2640,12 @@ let _impactSparkGeo = null;
 let _bulbSparkGeo = null;
 let _bulbSparkTexWhite = null;
 let _bulbSparkTexCyan = null;
+let _bulbSparkMatWhite = null;
+let _bulbSparkMatCyan = null;
+let _impactSparkMatWhite = null;
+let _impactSparkMatYellow = null;
+let _shotFxPrewarmed = false;
+const PREWARM_CACHE = "prewarm-v1";
 const _impactN = new THREE.Vector3();
 const _impactSeg = new THREE.Vector3();
 const _impactUp = new THREE.Vector3(0, 0, 1);
@@ -8077,8 +8106,10 @@ function initThree() {
   applyDisplayLook();
   const ro = new ResizeObserver(() => resize());
   ro.observe(canvas.parentElement || canvas);
-  clock.start();
-  animate();
+  void prewarmShotFx().catch(() => {}).finally(() => {
+    clock.start();
+    animate();
+  });
 }
 
 function resize() {
@@ -9121,6 +9152,39 @@ function orientFlatToNormal(mesh, normal) {
   mesh.quaternion.setFromUnitVectors(_impactUp, _impactN);
 }
 
+function makeAdditiveSparkMat(color, map) {
+  const mat = new THREE.MeshBasicMaterial({
+    map: map || null,
+    color,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+  if ("toneMapped" in mat) mat.toneMapped = false;
+  return mat;
+}
+
+function getImpactSparkMaterial(white) {
+  if (white) {
+    if (!_impactSparkMatWhite) _impactSparkMatWhite = makeAdditiveSparkMat(0xffffff, null);
+    return _impactSparkMatWhite;
+  }
+  if (!_impactSparkMatYellow) _impactSparkMatYellow = makeAdditiveSparkMat(0xffe08a, null);
+  return _impactSparkMatYellow;
+}
+
+function getBulbSparkMaterial(cyan) {
+  const map = getBulbSparkTexture(cyan);
+  if (cyan) {
+    if (!_bulbSparkMatCyan) _bulbSparkMatCyan = makeAdditiveSparkMat(0xa8ffff, map);
+    return _bulbSparkMatCyan;
+  }
+  if (!_bulbSparkMatWhite) _bulbSparkMatWhite = makeAdditiveSparkMat(0xffffff, map);
+  return _bulbSparkMatWhite;
+}
+
 /** Spawn yellow/white streak sparks that fade in ~0.15–0.35s. */
 function spawnImpactSparks(pos, normal) {
   if (!scene || !pos) return;
@@ -9131,14 +9195,9 @@ function spawnImpactSparks(pos, normal) {
   const geo = getImpactSparkGeo();
   for (let i = 0; i < count; i++) {
     const life = 0.15 + Math.random() * 0.2;
-    const mat = new THREE.MeshBasicMaterial({
-      color: Math.random() > 0.35 ? 0xffe08a : 0xffffff,
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-    });
+    const white = Math.random() <= 0.35;
+    const mat = getImpactSparkMaterial(white).clone();
+    mat.opacity = 0.95;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 6;
     const dir = _impactN.clone().add(
@@ -9168,8 +9227,63 @@ function getBulbSparkGeo() {
   return _bulbSparkGeo;
 }
 
+function sparkCardCacheUrl(kind) {
+  return new URL("./prewarm/spark-" + kind + ".png", import.meta.url).href;
+}
+
+function applySparkCardTexSettings(tex) {
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  if ("colorSpace" in tex) tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function persistSparkCardCanvas(kind, canvas) {
+  if (typeof caches === "undefined") return;
+  try {
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      caches.open(PREWARM_CACHE).then((cache) => {
+        cache.put(
+          sparkCardCacheUrl(kind),
+          new Response(blob, { headers: { "Content-Type": "image/png" } })
+        );
+      }).catch(() => {});
+    }, "image/png");
+  } catch (_) {}
+}
+
+async function loadCachedSparkCardTexture(kind) {
+  if (typeof caches === "undefined") return null;
+  try {
+    const cache = await caches.open(PREWARM_CACHE);
+    const hit = await cache.match(sparkCardCacheUrl(kind));
+    if (!hit) return null;
+    const blob = await hit.blob();
+    if (!blob || blob.size < 32) return null;
+    if (typeof createImageBitmap === "function") {
+      const bitmap = await createImageBitmap(blob);
+      return applySparkCardTexSettings(new THREE.Texture(bitmap));
+    }
+    const url = URL.createObjectURL(blob);
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = url;
+    });
+    URL.revokeObjectURL(url);
+    return applySparkCardTexSettings(new THREE.Texture(img));
+  } catch (_) {
+    return null;
+  }
+}
+
 /** Tiny hot-dot card: white or cyan core, transparent rim. 16x16 so 8 is not too crunchy. */
-function makeSparkCardTexture(kind) {
+function drawSparkCardCanvas(kind) {
   const size = 16;
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = size;
@@ -9191,13 +9305,13 @@ function makeSparkCardTexture(kind) {
   }
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearFilter;
-  tex.needsUpdate = true;
-  if ("colorSpace" in tex) tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+  return canvas;
+}
+
+function makeSparkCardTexture(kind) {
+  const canvas = drawSparkCardCanvas(kind);
+  persistSparkCardCanvas(kind, canvas);
+  return applySparkCardTexSettings(new THREE.CanvasTexture(canvas));
 }
 
 function getBulbSparkTexture(cyan) {
@@ -9244,16 +9358,8 @@ function spawnBulbSparks(pos) {
     const life = 0.25 + Math.random() * 0.3;
     const w = 0.01 + Math.random() * 0.01;
     const len = 0.08 + Math.random() * 0.08;
-    const mat = new THREE.MeshBasicMaterial({
-      map: getBulbSparkTexture(useCyan),
-      color: useCyan ? 0xa8ffff : 0xffffff,
-      transparent: true,
-      opacity: 1,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-    });
-    if ("toneMapped" in mat) mat.toneMapped = false;
+    const mat = getBulbSparkMaterial(useCyan).clone();
+    mat.opacity = 1;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 8;
     mesh.position.copy(pos);
@@ -9373,6 +9479,71 @@ function getPlugMat(steel) {
     });
   }
   return _plugBrassMat;
+}
+
+function addPrewarmDummy(geo, mat, disposeMat) {
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.position.set(0, 0, -0.15);
+  mesh.scale.setScalar(0.0001);
+  camera.add(mesh);
+  return { mesh, disposeMat: !!disposeMat };
+}
+
+/**
+ * First flood hit used to hitch on spark-card canvases, punch hole maps,
+ * plug geos, and compiling a unique additive MeshBasic per spark.
+ * Build those once at init and compile hidden dummies — not the full decal path.
+ */
+async function prewarmShotFx() {
+  if (_shotFxPrewarmed || !renderer || !scene || !camera) return;
+  _shotFxPrewarmed = true;
+  try {
+    const cached = await Promise.race([
+      Promise.all([
+        _bulbSparkTexWhite ? Promise.resolve(null) : loadCachedSparkCardTexture("white"),
+        _bulbSparkTexCyan ? Promise.resolve(null) : loadCachedSparkCardTexture("cyan"),
+      ]),
+      new Promise((resolve) => setTimeout(() => resolve(null), 80)),
+    ]);
+    if (cached) {
+      if (cached[0] && !_bulbSparkTexWhite) _bulbSparkTexWhite = cached[0];
+      if (cached[1] && !_bulbSparkTexCyan) _bulbSparkTexCyan = cached[1];
+    }
+  } catch (_) {}
+  getBulbSparkTexture(false);
+  getBulbSparkTexture(true);
+  getImpactHoleTexture(true);
+  getImpactDecalGeo();
+  getImpactSparkGeo();
+  getBulbSparkGeo();
+  getPlugWideGeo();
+  getPlugMidGeo();
+  getPlugNubGeo();
+  getPlugMat(false);
+  getPlugMat(true);
+  getImpactSparkMaterial(true);
+  getImpactSparkMaterial(false);
+  getBulbSparkMaterial(false);
+  getBulbSparkMaterial(true);
+
+  const dummies = [
+    addPrewarmDummy(getBulbSparkGeo(), getBulbSparkMaterial(false), false),
+    addPrewarmDummy(getBulbSparkGeo(), getBulbSparkMaterial(true), false),
+    addPrewarmDummy(getImpactSparkGeo(), getImpactSparkMaterial(true), false),
+    addPrewarmDummy(getImpactDecalGeo(), makeImpactDecalMesh(true).material, true),
+    addPrewarmDummy(getPlugWideGeo(), getPlugMat(false), false),
+    addPrewarmDummy(getPlugWideGeo(), getPlugMat(true), false),
+  ];
+  camera.updateMatrixWorld(true);
+  try {
+    renderer.compile(scene, camera);
+  } catch (_) {}
+  for (const d of dummies) {
+    if (d.mesh.parent) d.mesh.parent.remove(d.mesh);
+    if (d.disposeMat && d.mesh.material) d.mesh.material.dispose();
+  }
+  if (sfx && typeof sfx.prewarmGlass === "function") sfx.prewarmGlass();
 }
 
 /** Flattened stuck slug — stacked squat cylinders, beer-bottle geo, flush in the crater. */

@@ -184,9 +184,16 @@ const GOD_RAYS_STEPS = 48;
 const GOD_RAYS_DEFAULT = 0.9;
 /** Settings default; 0 skips the pass. */
 const BLOOM_DEFAULT = 0.22;
-/** Final-output IGN dither after ACES (luma units). 0 skips the pass. */
-const DITHER_DEFAULT = 0.025;
-const DITHER_MAX = 0.08;
+/** Final-output luma dither after ACES (luma units). 0 skips the pass. */
+const DITHER_DEFAULT = 0.001;
+const DITHER_MAX = 0.008;
+const DITHER_SCALE_DEFAULT = 1;
+const DITHER_SCALE_MIN = 0.25;
+const DITHER_SCALE_MAX = 8;
+const DITHER_OFF_MIN = -32;
+const DITHER_OFF_MAX = 32;
+const DITHER_TYPE_DEFAULT = "hash";
+const DITHER_TYPES = ["hash", "ign", "bayer"];
 /** Mesh sun angular diameter (degrees). Real sun ~0.53; default a hair smaller. */
 const SUN_SIZE_DEFAULT = 0.45;
 /** Core heat of the disc. Soft-clamped so it never floods; halo stays LDR. */
@@ -332,8 +339,17 @@ const state = {
   godRays: GOD_RAYS_DEFAULT,
   /** HDR bloom (0 = off, 2 = strong). Independent of god rays. */
   bloom: BLOOM_DEFAULT,
-  /** Post-tonemap dither / noise floor (0 = off, 0.08 = strong). */
+  /** Post-tonemap luma dither / banding floor (0 = off, 0.008 = strong). */
   dither: DITHER_DEFAULT,
+  /** Pattern frequency (1 = pixel scale). */
+  ditherScale: DITHER_SCALE_DEFAULT,
+  /** Pattern phase in pixels. */
+  ditherOffX: 0,
+  ditherOffY: 0,
+  /** "hash" (default luma TPDF) | "ign" | "bayer". */
+  ditherType: DITHER_TYPE_DEFAULT,
+  /** Frame-crawl the pattern. Off by default — crawl looks digital. */
+  ditherAnimate: false,
   /** ADS viewmodel DOF ring taps (plus center + half-radius inner ring). */
   adsDofTaps: ADS_DOF_TAPS_DEFAULT,
   /** ADS viewmodel DOF disc radius (UV x) at ads=1. */
@@ -1776,19 +1792,96 @@ function setBloom(v, { toast = false } = {}) {
   scheduleSaveSettings();
 }
 
+function ditherAmount() {
+  return clamp(state.dither ?? 0, 0, DITHER_MAX);
+}
+
+function normalizeDitherType(v) {
+  return DITHER_TYPES.includes(v) ? v : DITHER_TYPE_DEFAULT;
+}
+
+function ditherTypeId() {
+  const t = normalizeDitherType(state.ditherType);
+  if (t === "ign") return 1;
+  if (t === "bayer") return 2;
+  return 0;
+}
+
 function syncDitherUI() {
-  const n = state.dither ?? DITHER_DEFAULT;
+  const n = ditherAmount();
   const slider = el("ditherSlider");
   const val = el("ditherVal");
   if (slider && document.activeElement !== slider) slider.value = String(n);
-  if (val) val.textContent = Number(n).toFixed(3);
+  if (val) val.textContent = Number(n).toFixed(4);
+
+  const sc = clamp(state.ditherScale ?? DITHER_SCALE_DEFAULT, DITHER_SCALE_MIN, DITHER_SCALE_MAX);
+  const scSlider = el("ditherScaleSlider");
+  const scVal = el("ditherScaleVal");
+  if (scSlider && document.activeElement !== scSlider) scSlider.value = String(sc);
+  if (scVal) scVal.textContent = Number(sc).toFixed(2);
+
+  const ox = clamp(state.ditherOffX ?? 0, DITHER_OFF_MIN, DITHER_OFF_MAX);
+  const oy = clamp(state.ditherOffY ?? 0, DITHER_OFF_MIN, DITHER_OFF_MAX);
+  const oxSlider = el("ditherOffXSlider");
+  const oxVal = el("ditherOffXVal");
+  if (oxSlider && document.activeElement !== oxSlider) oxSlider.value = String(ox);
+  if (oxVal) oxVal.textContent = Number(ox).toFixed(2);
+  const oySlider = el("ditherOffYSlider");
+  const oyVal = el("ditherOffYVal");
+  if (oySlider && document.activeElement !== oySlider) oySlider.value = String(oy);
+  if (oyVal) oyVal.textContent = Number(oy).toFixed(2);
+
+  const typeSel = el("ditherTypeSelect");
+  const type = normalizeDitherType(state.ditherType);
+  if (typeSel && document.activeElement !== typeSel) typeSel.value = type;
+
+  const chk = el("chkDitherAnimate");
+  if (chk) chk.checked = !!state.ditherAnimate;
 }
 
 function setDither(v, { toast = false } = {}) {
   const n = clamp(parseFloat(v), 0, DITHER_MAX);
   state.dither = Number.isFinite(n) ? n : DITHER_DEFAULT;
   syncDitherUI();
-  if (toast) showToast(`Dither ${state.dither.toFixed(3)}`);
+  if (toast) showToast(`Dither ${state.dither.toFixed(4)}`);
+  scheduleSaveSettings();
+}
+
+function setDitherScale(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), DITHER_SCALE_MIN, DITHER_SCALE_MAX);
+  state.ditherScale = Number.isFinite(n) ? n : DITHER_SCALE_DEFAULT;
+  syncDitherUI();
+  if (toast) showToast(`Dither scale ${state.ditherScale.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function setDitherOffX(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), DITHER_OFF_MIN, DITHER_OFF_MAX);
+  state.ditherOffX = Number.isFinite(n) ? n : 0;
+  syncDitherUI();
+  if (toast) showToast(`Dither offset X ${state.ditherOffX.toFixed(2)} px`);
+  scheduleSaveSettings();
+}
+
+function setDitherOffY(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), DITHER_OFF_MIN, DITHER_OFF_MAX);
+  state.ditherOffY = Number.isFinite(n) ? n : 0;
+  syncDitherUI();
+  if (toast) showToast(`Dither offset Y ${state.ditherOffY.toFixed(2)} px`);
+  scheduleSaveSettings();
+}
+
+function setDitherType(v, { toast = false } = {}) {
+  state.ditherType = normalizeDitherType(v);
+  syncDitherUI();
+  if (toast) showToast(`Dither type ${state.ditherType}`);
+  scheduleSaveSettings();
+}
+
+function setDitherAnimate(on, { toast = false } = {}) {
+  state.ditherAnimate = !!on;
+  syncDitherUI();
+  if (toast) showToast(state.ditherAnimate ? "Dither animate on" : "Dither animate off");
   scheduleSaveSettings();
 }
 
@@ -2291,7 +2384,7 @@ let adsDof = null;
 let godRays = null;
 /** HDR scene RT + 3-mip dual-filter bloom (Jimenez-style). */
 let hdrBloom = null;
-/** Full-res HalfFloat capture for post-ACES IGN dither onto the 8-bit backbuffer. */
+/** Full-res HalfFloat capture for post-ACES luma dither onto the 8-bit backbuffer. */
 let outputDither = null;
 /** Kept so Settings brightness/gamma can nudge intensities + fog. */
 let hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight;
@@ -2536,6 +2629,11 @@ const SETTINGS_FIELDS = [
   { key: "godRays", src: "state", type: "num" },
   { key: "bloom", src: "state", type: "num" },
   { key: "dither", src: "state", type: "num" },
+  { key: "ditherScale", src: "state", type: "num" },
+  { key: "ditherOffX", src: "state", type: "num" },
+  { key: "ditherOffY", src: "state", type: "num" },
+  { key: "ditherType", src: "state", type: "str" },
+  { key: "ditherAnimate", src: "state", type: "bool" },
   { key: "adsDofTaps", src: "state", type: "num" },
   { key: "adsDofRadius", src: "state", type: "num" },
   { key: "barrelHeat", src: "state", type: "num" },
@@ -2592,6 +2690,9 @@ function applySettingsBlob(blob) {
     if (f.type === "bool") {
       if (typeof raw !== "boolean") continue;
       settingsHost(f.src)[f.key] = raw;
+    } else if (f.type === "str") {
+      if (typeof raw !== "string") continue;
+      settingsHost(f.src)[f.key] = raw;
     } else {
       const n = typeof raw === "number" ? raw : Number(raw);
       if (!Number.isFinite(n)) continue;
@@ -2600,6 +2701,12 @@ function applySettingsBlob(blob) {
   }
   if (state.crouchGrad > 0.04) state.crouchToggled = true;
   else if (state.crouchGrad < 0.02) state.crouchToggled = false;
+  state.dither = clamp(state.dither ?? DITHER_DEFAULT, 0, DITHER_MAX);
+  state.ditherScale = clamp(state.ditherScale ?? DITHER_SCALE_DEFAULT, DITHER_SCALE_MIN, DITHER_SCALE_MAX);
+  state.ditherOffX = clamp(state.ditherOffX ?? 0, DITHER_OFF_MIN, DITHER_OFF_MAX);
+  state.ditherOffY = clamp(state.ditherOffY ?? 0, DITHER_OFF_MIN, DITHER_OFF_MAX);
+  state.ditherType = normalizeDitherType(state.ditherType);
+  state.ditherAnimate = !!state.ditherAnimate;
 }
 
 function loadPersistedSettings() {
@@ -7026,14 +7133,14 @@ function renderBloom(dest = null) {
   renderer.autoClear = prevAutoClear;
 }
 
-/* ---- Final-output IGN dither ----
+/* ---- Final-output luma dither ----
  * After ACES (and bloom / shafts), capture in HalfFloat so the noise
- * floor hits before 8-bit quantization. Animated IGN, not grain.
- * Night: slightly stronger dither + a tiny toe on residual scene luma;
- * true-black sky stays black.
+ * floor hits before 8-bit quantization. Default is cheap hash + TPDF
+ * on luma (not a pixel-grid IGN). Night: a hair more dither + a tiny
+ * toe on residual scene luma; true-black sky stays black.
  */
 function ditherWanted() {
-  return !!(outputDither && (state.dither ?? 0) > 1e-4);
+  return !!(outputDither && ditherAmount() >= 1e-4);
 }
 
 function ditherNightAmt() {
@@ -7062,6 +7169,10 @@ function initOutputDither() {
       amount: { value: DITHER_DEFAULT },
       nightAmt: { value: 0 },
       frame: { value: 0 },
+      scale: { value: DITHER_SCALE_DEFAULT },
+      offset: { value: new THREE.Vector2(0, 0) },
+      typeId: { value: 0 },
+      animate: { value: 0 },
     },
     vertexShader: /* glsl */`
       varying vec2 vUv;
@@ -7075,10 +7186,54 @@ function initOutputDither() {
       uniform float amount;
       uniform float nightAmt;
       uniform float frame;
+      uniform float scale;
+      uniform vec2 offset;
+      uniform float typeId;
+      uniform float animate;
       varying vec2 vUv;
 
       float ign(vec2 p) {
         return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+      }
+
+      float hash12(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+      }
+
+      float bayer8(vec2 p) {
+        float x = mod(floor(p.x), 8.0);
+        float y = mod(floor(p.y), 8.0);
+        float v = 0.0;
+        v += mod(x, 2.0) * 32.0;
+        v += mod(y, 2.0) * 16.0;
+        v += mod(floor(x * 0.5), 2.0) * 8.0;
+        v += mod(floor(y * 0.5), 2.0) * 4.0;
+        v += mod(floor(x * 0.25), 2.0) * 2.0;
+        v += mod(floor(y * 0.25), 2.0) * 1.0;
+        return (v + 0.5) / 64.0;
+      }
+
+      float ditherNoise(vec2 p) {
+        float u1;
+        float u2;
+        if (typeId > 1.5) {
+          if (animate > 0.5) p += vec2(frame, frame * 0.37);
+          return bayer8(p) * 2.0 - 1.0;
+        }
+        if (typeId < 0.5) {
+          u1 = hash12(p);
+          u2 = hash12(p + vec2(17.13, 91.7));
+        } else {
+          u1 = ign(p);
+          u2 = ign(p + vec2(19.19, 47.47));
+        }
+        if (animate > 0.5) {
+          u1 = fract(u1 + frame * 0.61803398875);
+          u2 = fract(u2 + frame * 0.38196601125);
+        }
+        return u1 + u2 - 1.0;
       }
 
       void main() {
@@ -7091,14 +7246,13 @@ function initOutputDither() {
         toe *= (1.0 - smoothstep(0.10, 0.38, luma));
         c += vec3(toe * gate);
 
-        float n = ign(gl_FragCoord.xy);
-        n = fract(n + frame * 0.61803398875);
-        float n2 = ign(gl_FragCoord.xy + vec2(19.19, 47.47));
-        n2 = fract(n2 + frame * 0.38196601125);
-        float tri = n + n2 - 1.0;
+        vec2 p = gl_FragCoord.xy * max(scale, 0.001) + offset;
+        float tri = ditherNoise(p);
 
-        float amp = amount * (1.0 + nightAmt * 0.45);
+        // Hair lift at night — 0.001 must not read like the old 0.025 IGN.
+        float amp = amount * (1.0 + nightAmt * 0.20);
         amp *= 1.0 - 0.30 * smoothstep(0.45, 0.95, luma);
+        // Monochrome residual: same add on RGB, no color sparkle.
         c += vec3(tri * amp);
 
         gl_FragColor = vec4(c, 1.0);
@@ -7135,14 +7289,22 @@ function resizeOutputDither() {
 
 function renderOutputDither() {
   if (!outputDither || !renderer) return;
-  const amt = state.dither ?? 0;
-  if (amt <= 1e-4) return;
+  const amt = ditherAmount();
+  if (amt < 1e-4) return;
   const u = outputDither.material.uniforms;
   u.tInput.value = outputDither.rt.texture;
   u.amount.value = amt;
   u.nightAmt.value = ditherNightAmt();
-  outputDither.frame = (outputDither.frame + 1) % 4096;
-  u.frame.value = outputDither.frame;
+  u.scale.value = clamp(state.ditherScale ?? DITHER_SCALE_DEFAULT, DITHER_SCALE_MIN, DITHER_SCALE_MAX);
+  u.offset.value.set(
+    clamp(state.ditherOffX ?? 0, DITHER_OFF_MIN, DITHER_OFF_MAX),
+    clamp(state.ditherOffY ?? 0, DITHER_OFF_MIN, DITHER_OFF_MAX)
+  );
+  u.typeId.value = ditherTypeId();
+  const anim = !!state.ditherAnimate;
+  u.animate.value = anim ? 1 : 0;
+  if (anim) outputDither.frame = (outputDither.frame + 1) % 4096;
+  u.frame.value = anim ? outputDither.frame : 0;
   const prevAutoClear = renderer.autoClear;
   renderer.autoClear = true;
   renderer.setRenderTarget(null);
@@ -10106,8 +10268,28 @@ function bind() {
   syncBloomUI();
   const ditherSlider = el("ditherSlider");
   if (ditherSlider) {
-    ditherSlider.value = String(state.dither);
+    ditherSlider.value = String(ditherAmount());
     ditherSlider.oninput = (e) => setDither(e.target.value);
+  }
+  const ditherScaleSlider = el("ditherScaleSlider");
+  if (ditherScaleSlider) {
+    ditherScaleSlider.oninput = (e) => setDitherScale(e.target.value);
+  }
+  const ditherOffXSlider = el("ditherOffXSlider");
+  if (ditherOffXSlider) {
+    ditherOffXSlider.oninput = (e) => setDitherOffX(e.target.value);
+  }
+  const ditherOffYSlider = el("ditherOffYSlider");
+  if (ditherOffYSlider) {
+    ditherOffYSlider.oninput = (e) => setDitherOffY(e.target.value);
+  }
+  const ditherTypeSelect = el("ditherTypeSelect");
+  if (ditherTypeSelect) {
+    ditherTypeSelect.onchange = (e) => setDitherType(e.target.value, { toast: true });
+  }
+  const chkDitherAnimate = el("chkDitherAnimate");
+  if (chkDitherAnimate) {
+    chkDitherAnimate.onchange = (e) => setDitherAnimate(e.target.checked, { toast: true });
   }
   syncDitherUI();
   const barrelHeatSlider = el("barrelHeatSlider");

@@ -207,16 +207,16 @@ const BARREL_HEAT_SPEC = {
 const barrelHeatAmt = { example_smg: 0, example_rifle: 0, example_sniper: 0 };
 let barrelHeatClock = 0;
 let barrelHeatEmissiveMap = null;
-let groundHeatHazeMat = null;
-let groundHeatRoot = null;
 let heatHazeDummyTex = null;
+let heatHazeGrabRT = null;
+let heatHazePost = null;
 let barrelHeatHazeLive = false;
 /** Recoil pattern index resets after this gap of not firing. */
 const RECOIL_RESET_MS = 200;
 
 /** Viewmodel isolation — ADS near-blur without smearing the range / HUD. */
 const VIEWMODEL_LAYER = 1;
-/** Heat-haze cards — drawn after the scene grab so they can sample tScene. */
+/** Barrel heat-haze cards — drawn after the scene grab so they can sample tScene. */
 const HEAT_HAZE_LAYER = 2;
 /** Disc radius (UV x) at ads=1 on the half-res viewmodel RT. Hint, not milk. */
 const ADS_DOF_RADIUS = 0.0028;
@@ -268,8 +268,6 @@ const HEAT_HAZE_SIZE_MIN = 0.35;
 const HEAT_HAZE_SIZE_MAX = 2;
 const GROUND_HAZE_H = 0.46;
 const BARREL_HAZE_H = 0.11;
-/** Extra Y so a noisy height-fog band is not a razor slab. */
-const GROUND_HAZE_HEIGHT_PAD = 2.15;
 /** Settings default cloud cover (0 = clear). */
 const CLOUDS_DEFAULT = 0.55;
 /** Dust / edge wear on bay concrete (0 = clean pour). Shared GPU uniform. */
@@ -5039,7 +5037,7 @@ function makeHeatHazeMaterial(opts = {}) {
         vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
         vec2 off = (nxy - 0.5) * mask * uStrength * 0.022;
         vec3 grabbed = texture2D(tScene, clamp(suv + off, 0.0, 1.0)).rgb;
-        gl_FragColor = vec4(grabbed, clamp(mask * 0.92, 0.0, 1.0));
+        gl_FragColor = vec4(grabbed, clamp(mask, 0.0, 1.0));
       }
     `,
   });
@@ -5145,80 +5143,15 @@ function groundHeatAmount() {
 }
 
 function tickGroundHeatHaze() {
-  if (!groundHeatHazeMat) return;
+  if (!heatHazePost || !heatHazePost.hazeMat) return;
   const h = groundHeatAmount();
-  const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
-  groundHeatHazeMat.uniforms.uTime.value = barrelHeatClock;
-  groundHeatHazeMat.uniforms.uHeat.value = h;
+  heatHazePost.hazeMat.uniforms.uTime.value = barrelHeatClock;
+  heatHazePost.hazeMat.uniforms.uHeat.value = h;
   applyHeatHazeUniforms();
-  if (groundHeatRoot) groundHeatRoot.visible = h > 0.035 && str >= 0.01;
-}
-
-/** Tiled height-fog volumes over the pour (~40 x 460). Authored band ~0.46 m,
- * noisy/spread — displacement mask, not a white sheet. Sun-weighted.
- */
-function addGroundHeatHaze() {
-  if (groundHeatRoot && groundHeatRoot.parent) {
-    groundHeatRoot.parent.remove(groundHeatRoot);
-    groundHeatRoot.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
-    });
-  }
-  if (groundHeatHazeMat) {
-    groundHeatHazeMat.dispose();
-    groundHeatHazeMat = null;
-  }
-  groundHeatHazeMat = makeHeatHazeMaterial({
-    name: "groundHeatHaze",
-    rise: 0.16,
-    warp: 0.20,
-    nx: 0.55,
-    ny: 4.2,
-    amp: 0.11,
-    disp: 0.032,
-    bandH: GROUND_HAZE_H,
-    heightFog: true,
-  });
-  const root = new THREE.Group();
-  root.name = "groundHeatHaze";
-  const hazeH = GROUND_HAZE_H;
-  const across = 40;
-  const along = 460;
-  const rangeCenterZ = rangeZ(200);
-  const zMin = rangeCenterZ - along * 0.5;
-  const zMax = rangeCenterZ + along * 0.5;
-  const tileAlong = 40;
-  const stamp = (mesh) => {
-    mesh.renderOrder = 3;
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    mesh.frustumCulled = true;
-    mesh.raycast = () => {};
-    mesh.userData.groundHeatHaze = true;
-    mesh.layers.set(HEAT_HAZE_LAYER);
-    root.add(mesh);
-  };
-  for (let z = zMin; z < zMax - 1e-3; z += tileAlong) {
-    const depth = Math.min(tileAlong, zMax - z);
-    const zc = z + depth * 0.5;
-    const curtain = new THREE.Mesh(new THREE.PlaneGeometry(across, hazeH, 24, 12), groundHeatHazeMat);
-    curtain.position.set(0, FLOOR_Y + hazeH * 0.48, zc);
-    curtain.userData.hazeH0 = hazeH;
-    stamp(curtain);
-    const side = new THREE.Mesh(new THREE.PlaneGeometry(depth, hazeH, 24, 12), groundHeatHazeMat);
-    side.position.set(0, FLOOR_Y + hazeH * 0.48, zc);
-    side.rotation.y = Math.PI / 2;
-    side.userData.hazeH0 = hazeH;
-    stamp(side);
-  }
-  groundHeatRoot = root;
-  scene.add(root);
-  syncHeatHazeMeshScales();
-  tickGroundHeatHaze();
 }
 
 function eachHeatHazeMat(fn) {
-  if (groundHeatHazeMat) fn(groundHeatHazeMat);
+  if (heatHazePost && heatHazePost.hazeMat) fn(heatHazePost.hazeMat);
   if (!gunRoot) return;
   const seen = new Set();
   gunRoot.traverse((o) => {
@@ -5241,43 +5174,189 @@ function applyHeatHazeUniforms() {
 
 function syncHeatHazeMeshScales() {
   const sz = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
-  if (groundHeatRoot) {
-    groundHeatRoot.traverse((o) => {
-      if (!o.userData.groundHeatHaze) return;
-      const h0 = o.userData.hazeH0 || GROUND_HAZE_H;
-      const sy = sz * GROUND_HAZE_HEIGHT_PAD;
-      o.scale.y = sy;
-      o.position.y = FLOOR_Y + h0 * sy * 0.48;
-    });
-  }
-  if (gunRoot) {
-    gunRoot.traverse((o) => {
-      if (!o.userData.barrelHeatShimmer) return;
-      const h0 = o.userData.hazeH0 || BARREL_HAZE_H;
-      o.scale.y = sz;
-      o.position.y = h0 * 0.46 * sz;
-    });
-  }
+  if (!gunRoot) return;
+  gunRoot.traverse((o) => {
+    if (!o.userData.barrelHeatShimmer) return;
+    const h0 = o.userData.hazeH0 || BARREL_HAZE_H;
+    o.scale.y = sz;
+    o.position.y = h0 * 0.46 * sz;
+  });
 }
 
 function heatHazePassWanted() {
   const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
   if (str < 0.01) return false;
-  if (groundHeatRoot && groundHeatRoot.visible) return true;
+  if (groundHeatAmount() > 0.035) return true;
   return !!barrelHeatHazeLive;
 }
 
-function copyRtColor(srcRT, dstRT) {
-  if (!srcRT || !dstRT || !renderer || !srcRT.texture || !dstRT.texture) return false;
-  if (srcRT.width !== dstRT.width || srcRT.height !== dstRT.height) return false;
-  if (srcRT.width < 1 || srcRT.height < 1) return false;
-  try {
-    if (typeof renderer.initRenderTarget === "function") {
-      renderer.initRenderTarget(dstRT);
+function initHeatHazePost() {
+  if (heatHazePost) return;
+  heatHazeGrabRT = new THREE.WebGLRenderTarget(1, 1, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    type: THREE.HalfFloatType,
+    format: THREE.RGBAFormat,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+  heatHazeGrabRT.texture.colorSpace = THREE.LinearSRGBColorSpace;
+
+  const vs = /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = vec4(position.xy, 0.0, 1.0);
     }
-    renderer.copyTextureToTexture(srcRT.texture, dstRT.texture);
+  `;
+
+  const copyMat = new THREE.ShaderMaterial({
+    name: "heatHazeCopy",
+    uniforms: {
+      tColor: { value: null },
+      tDepth: { value: getHeatHazeDummyTex() },
+      uHasDepth: { value: 0 },
+    },
+    vertexShader: vs,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tColor;
+      uniform sampler2D tDepth;
+      uniform float uHasDepth;
+      varying vec2 vUv;
+      void main() {
+        vec3 c = texture2D(tColor, vUv).rgb;
+        float d = uHasDepth > 0.5 ? texture2D(tDepth, vUv).r : 1.0;
+        gl_FragColor = vec4(c, d);
+      }
+    `,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+    fog: false,
+    lights: false,
+  });
+
+  const hazeMat = new THREE.ShaderMaterial({
+    name: "heatHazeHeightFog",
+    uniforms: {
+      uTime: { value: 0 },
+      uHeat: { value: 0 },
+      uRise: { value: 0.16 },
+      uWarp: { value: 0.20 },
+      uNScale: { value: new THREE.Vector2(0.55, 4.2) },
+      uStrength: { value: HEAT_HAZE_STRENGTH_DEFAULT },
+      uSize: { value: HEAT_HAZE_SIZE_DEFAULT },
+      uHeightFog: { value: 1 },
+      uFloorY: { value: FLOOR_Y },
+      uBandH: { value: GROUND_HAZE_H },
+      tScene: { value: getHeatHazeDummyTex() },
+      uHasScene: { value: 0 },
+      uHasDepth: { value: 0 },
+      uResolution: { value: new THREE.Vector2(1, 1) },
+      projInverse: { value: new THREE.Matrix4() },
+      viewInverse: { value: new THREE.Matrix4() },
+      cameraFar: { value: 2000 },
+    },
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.NormalBlending,
+    toneMapped: false,
+    fog: false,
+    lights: false,
+    vertexShader: vs,
+    fragmentShader: /* glsl */`
+      uniform float uTime;
+      uniform float uHeat;
+      uniform float uRise;
+      uniform float uWarp;
+      uniform vec2 uNScale;
+      uniform float uStrength;
+      uniform float uSize;
+      uniform float uHeightFog;
+      uniform float uFloorY;
+      uniform float uBandH;
+      uniform sampler2D tScene;
+      uniform float uHasScene;
+      uniform float uHasDepth;
+      uniform vec2 uResolution;
+      uniform mat4 projInverse;
+      uniform mat4 viewInverse;
+      uniform float cameraFar;
+      varying vec2 vUv;
+` + HEAT_HAZE_NOISE_GLSL + /* glsl */`
+      void main() {
+        if (uHeat < 0.01 || uStrength < 0.01 || uHasScene < 0.5 || uHasDepth < 0.5) discard;
+        float packed = texture2D(tScene, vUv).a;
+        if (packed >= 0.999 || packed <= 1e-5) discard;
+        vec4 clip = vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+        vec4 viewH = projInverse * clip;
+        vec3 viewDir = normalize(viewH.xyz / max(viewH.w, 1e-6));
+        float clipW = exp2(packed * log2(cameraFar + 1.0)) - 1.0;
+        float rayLen = clipW / max(1e-4, abs(viewDir.z));
+        vec3 viewPos = viewDir * rayLen;
+        vec3 wp = (viewInverse * vec4(viewPos, 1.0)).xyz;
+        float mask = 0.0;
+        vec2 nxy = vec2(0.0);
+        float haze = 0.0;
+        heatField(wp, vec2(0.5), mask, nxy, haze);
+        mask *= uHeat;
+        if (mask < 0.003) discard;
+        vec2 off = (nxy - 0.5) * mask * uStrength * 0.022;
+        vec3 grabbed = texture2D(tScene, clamp(vUv + off, 0.0, 1.0)).rgb;
+        gl_FragColor = vec4(grabbed, clamp(mask, 0.0, 1.0));
+      }
+    `,
+  });
+  if ("forceSinglePass" in copyMat) copyMat.forceSinglePass = true;
+  if ("forceSinglePass" in hazeMat) hazeMat.forceSinglePass = true;
+
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copyMat);
+  quad.frustumCulled = false;
+  const fsScene = new THREE.Scene();
+  fsScene.add(quad);
+  const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  heatHazePost = { copyMat, hazeMat, quad, fsScene, fsCam };
+}
+
+function resizeHeatHazeGrab(w, h) {
+  if (!heatHazeGrabRT) return;
+  const tw = Math.max(1, w | 0);
+  const th = Math.max(1, h | 0);
+  if (heatHazeGrabRT.width !== tw || heatHazeGrabRT.height !== th) {
+    heatHazeGrabRT.setSize(tw, th);
+  }
+}
+
+function blitHeatHaze(mat, target) {
+  heatHazePost.quad.material = mat;
+  renderer.setRenderTarget(target);
+  renderer.render(heatHazePost.fsScene, heatHazePost.fsCam);
+}
+
+/** Copy dest color (+ packed depth in A) into the dedicated grab. Never bloom/dither. */
+function grabHeatHazeScene(dest) {
+  if (!heatHazePost || !heatHazeGrabRT || !dest || !dest.texture) return false;
+  if (dest.width < 1 || dest.height < 1) return false;
+  if (dest === heatHazeGrabRT) return false;
+  resizeHeatHazeGrab(dest.width, dest.height);
+  if (heatHazeGrabRT.width !== dest.width || heatHazeGrabRT.height !== dest.height) return false;
+  const depthTex = dest.depthTexture || null;
+  const u = heatHazePost.copyMat.uniforms;
+  u.tColor.value = dest.texture;
+  u.tDepth.value = depthTex || getHeatHazeDummyTex();
+  u.uHasDepth.value = depthTex ? 1 : 0;
+  try {
+    const prevAutoClear = renderer.autoClear;
+    renderer.autoClear = true;
+    blitHeatHaze(heatHazePost.copyMat, heatHazeGrabRT);
+    renderer.autoClear = prevAutoClear;
+    u.tColor.value = null;
+    u.tDepth.value = getHeatHazeDummyTex();
     return true;
   } catch (err) {
+    u.tColor.value = null;
+    u.tDepth.value = getHeatHazeDummyTex();
     return false;
   }
 }
@@ -5287,39 +5366,62 @@ function bindHeatHazeGrab(tex, resx, resy) {
   const has = tex ? 1 : 0;
   applyHeatHazeUniforms();
   eachHeatHazeMat((mat) => {
+    if (!mat.uniforms.tScene) return;
     mat.uniforms.tScene.value = tex || dummy;
     mat.uniforms.uHasScene.value = has;
-    mat.uniforms.uResolution.value.set(resx, resy);
+    if (mat.uniforms.uResolution) mat.uniforms.uResolution.value.set(resx, resy);
   });
 }
 
-/** After the world (and ADS) land in dest, grab that RT and draw haze cards. Same renderer. */
+/** After the world (and ADS) land in dest, grab that RT. Height-fog is a
+ * fullscreen UV warp from dest depth; barrel cards stay local to the tube.
+ */
 function renderHeatHaze(dest) {
   if (!camera || !scene || !renderer || !heatHazePassWanted()) return;
   if (!dest || !dest.texture || dest.width < 1) return;
-  let grabTex = null;
+  if (!heatHazePost) initHeatHazePost();
+  if (!grabHeatHazeScene(dest)) return;
+
   const resx = dest.width;
   const resy = dest.height;
-  const grabRT = hdrBloom && hdrBloom.prefilterRT;
-  if (grabRT && dest !== grabRT && copyRtColor(dest, grabRT)) {
-    grabTex = grabRT.texture;
-  } else if (hdrBloom && dest !== hdrBloom.sceneRT && hdrBloom.sceneRT && hdrBloom.sceneRT.texture) {
-    grabTex = hdrBloom.sceneRT.texture;
-  } else if (outputDither && dest !== outputDither.rt && outputDither.rt && outputDither.rt.texture) {
-    grabTex = outputDither.rt.texture;
-  }
+  const grabTex = heatHazeGrabRT.texture;
+  const hasDepth = !!(dest.depthTexture);
   bindHeatHazeGrab(grabTex, resx, resy);
 
   const prevAutoClear = renderer.autoClear;
   const prevShadowAuto = renderer.shadowMap.autoUpdate;
   renderer.autoClear = false;
   renderer.shadowMap.autoUpdate = false;
-  camera.layers.set(HEAT_HAZE_LAYER);
-  renderer.setRenderTarget(dest);
-  renderer.render(scene, camera);
+
+  const h = groundHeatAmount();
+  const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
+  if (h > 0.035 && str >= 0.01 && hasDepth) {
+    camera.updateMatrixWorld();
+    const u = heatHazePost.hazeMat.uniforms;
+    u.tScene.value = grabTex;
+    u.uHasScene.value = 1;
+    u.uHasDepth.value = 1;
+    u.uHeat.value = h;
+    u.uTime.value = barrelHeatClock;
+    u.uStrength.value = clamp(str, 0, HEAT_HAZE_STRENGTH_MAX);
+    u.uSize.value = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+    u.uFloorY.value = FLOOR_Y;
+    u.uResolution.value.set(resx, resy);
+    u.projInverse.value.copy(camera.projectionMatrixInverse);
+    u.viewInverse.value.copy(camera.matrixWorld);
+    u.cameraFar.value = camera.far;
+    blitHeatHaze(heatHazePost.hazeMat, dest);
+  }
+
+  if (barrelHeatHazeLive) {
+    camera.layers.set(HEAT_HAZE_LAYER);
+    renderer.setRenderTarget(dest);
+    renderer.render(scene, camera);
+    restoreCameraLayers();
+  }
+
   renderer.autoClear = prevAutoClear;
   renderer.shadowMap.autoUpdate = prevShadowAuto;
-  restoreCameraLayers();
   bindHeatHazeGrab(null, resx, resy);
 }
 
@@ -6027,7 +6129,6 @@ function buildRoom() {
   const nearZ0 = rangeZ(40);
   const nearZ1 = SPAWN_Z + 10;
   addPouredGround(floorMat, 40, 460, rangeCenterZ, FLOOR_Y, nearZ0, nearZ1, 5, "floor");
-  addGroundHeatHaze();
 
   // Soft reference grid — quiet so world-space concrete can read
   const grid = new THREE.GridHelper(40, 80, 0x2e3848, 0x1c222c);
@@ -8067,7 +8168,7 @@ function clearInputFlags() {
 function stampViewmodelLayer(root) {
   if (!root) return;
   root.traverse((o) => {
-    if (o.userData.barrelHeatShimmer || o.userData.groundHeatHaze) return;
+    if (o.userData.barrelHeatShimmer) return;
     o.layers.set(VIEWMODEL_LAYER);
   });
 }
@@ -8782,6 +8883,11 @@ function makeBloomTarget(withDepth) {
     depthBuffer: !!withDepth,
     stencilBuffer: false,
   });
+  if (withDepth) {
+    rt.depthTexture = new THREE.DepthTexture(1, 1);
+    rt.depthTexture.format = THREE.DepthFormat;
+    rt.depthTexture.type = THREE.UnsignedIntType;
+  }
   rt.texture.colorSpace = THREE.LinearSRGBColorSpace;
   return rt;
 }
@@ -9095,6 +9201,9 @@ function initOutputDither() {
     depthBuffer: true,
     stencilBuffer: false,
   });
+  rt.depthTexture = new THREE.DepthTexture(1, 1);
+  rt.depthTexture.format = THREE.DepthFormat;
+  rt.depthTexture.type = THREE.UnsignedIntType;
   rt.texture.colorSpace = THREE.LinearSRGBColorSpace;
 
   const material = new THREE.ShaderMaterial({
@@ -9331,6 +9440,7 @@ function initThree() {
   initGodRays();
   initHdrBloom();
   initOutputDither();
+  initHeatHazePost();
   resize();
   applyDisplayLook();
   const ro = new ResizeObserver(() => resize());
@@ -9353,6 +9463,7 @@ function resize() {
   resizeGodRays();
   resizeHdrBloom();
   resizeOutputDither();
+  if (hdrBloom) resizeHeatHazeGrab(hdrBloom.sceneRT.width, hdrBloom.sceneRT.height);
 }
 
 function applyAttachmentOffsets() {

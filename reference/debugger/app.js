@@ -207,7 +207,8 @@ const BARREL_HEAT_SPEC = {
 const barrelHeatAmt = { example_smg: 0, example_rifle: 0, example_sniper: 0 };
 let barrelHeatClock = 0;
 let barrelHeatEmissiveMap = null;
-let barrelHeatShimmerMap = null;
+let groundHeatHazeMat = null;
+let groundHeatRoot = null;
 /** Recoil pattern index resets after this gap of not firing. */
 const RECOIL_RESET_MS = 200;
 
@@ -403,7 +404,7 @@ const state = {
   concreteWear: CONCRETE_WEAR_DEFAULT,
   /** Grain-size mul (0.4–1.6). 1 = authored grit. */
   concreteScale: CONCRETE_SCALE_DEFAULT,
-  /** Per-panel chroma/value mul (0–2). 1 = authored drift. */
+  /** Per-panel value mul (0–2). 1 = authored pour drift (no hue swing). */
   concreteVar: CONCRETE_VAR_DEFAULT,
   /** Seconds after spawn before env/scuff holes despawn. 0 = FIFO only. */
   holeFade: 18,
@@ -3710,7 +3711,7 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
   float pid = conHash12(pcell + vec2(3.1, 8.7));
   float pid2 = conHash12(pcell + vec2(19.4, 2.6));
   float vMul = mix(0.68, 1.28, pid);
-  vec3 hue = mix(vec3(1.20, 0.92, 0.78), vec3(0.80, 0.98, 1.18), pid2);
+  vec3 hue = mix(vec3(1.03, 1.00, 0.97), vec3(0.97, 0.99, 1.01), pid2);
   float panelAmt = variation * mix(0.82, 0.55, rangeConLod);
   albedo *= mix(vec3(1.0), hue * vMul, panelAmt);
 
@@ -3881,12 +3882,10 @@ function applyConcreteLook() {
     mat.roughnessMap = bundle.rough;
     mat.bumpMap = bundle.bump;
     const c = new THREE.Color(cfg.color);
-    const pid2 = conHash11(seed * 17.3 + 2.1);
     const vMul = 1 + (seed - 0.5) * 0.44 * amt;
-    const warm = (pid2 - 0.5) * amt;
-    c.r = Math.max(0.05, Math.min(1, c.r * vMul * (1 + warm * 0.20)));
-    c.g = Math.max(0.05, Math.min(1, c.g * vMul * (1 + warm * 0.02)));
-    c.b = Math.max(0.05, Math.min(1, c.b * vMul * (1 - warm * 0.18)));
+    c.r = Math.max(0.05, Math.min(1, c.r * vMul));
+    c.g = Math.max(0.05, Math.min(1, c.g * vMul));
+    c.b = Math.max(0.05, Math.min(1, c.b * vMul));
     c.lerp(CONCRETE_DUST, wear * 0.30);
     mat.color.copy(c);
     mat.roughness = clamp((cfg.roughness != null ? cfg.roughness : 0.86) + wear * 0.10, 0.35, 1);
@@ -4757,8 +4756,9 @@ function makeOpticMesh(profile) {
 
 /* ---- Barrel heat (rounds-through, exponential cool) ----
  * Per-weapon 0–1 stored heat. Each shot adds energy/mass; cool is e^{-t/τ}
- * (τ ≈ 4–8 s), not a linear snap. Visual is orange/amber emissive on the
- * barrel + muzzle device only (not receiver / optic). Bloom already in stack.
+ * (τ ≈ 4–8 s), not a linear snap. Heat *color* is orange/amber emissive on
+ * the barrel + muzzle device only (not receiver / optic). Air above the
+ * tube is a colorless rising haze (luma/warp, not additive orange). Bloom already in stack.
  */
 function getBarrelHeatSpec(weaponId = state.weaponId) {
   return BARREL_HEAT_SPEC[weaponId] || BARREL_HEAT_SPEC.example_smg;
@@ -4811,30 +4811,94 @@ function getBarrelHeatEmissiveMap() {
   return tex;
 }
 
-function getBarrelHeatShimmerMap() {
-  if (barrelHeatShimmerMap) return barrelHeatShimmerMap;
-  const s = 64;
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = s;
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, s, s);
-  for (let i = 0; i < 16; i++) {
-    const x = (i * 17 + 9) % s;
-    const ww = 2 + (i % 4);
-    const grd = ctx.createLinearGradient(0, 0, 0, s);
-    grd.addColorStop(0, "rgba(255,200,90,0)");
-    grd.addColorStop(0.35, "rgba(255,140,40,0.5)");
-    grd.addColorStop(1, "rgba(255,80,20,0)");
-    ctx.fillStyle = grd;
-    ctx.globalAlpha = 0.22 + (i % 5) * 0.08;
-    ctx.fillRect(x, 0, ww, s);
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.LinearSRGBColorSpace;
-  tex.repeat.set(1, 1.4);
-  barrelHeatShimmerMap = tex;
-  return tex;
+function makeHeatHazeMaterial(opts = {}) {
+  const mat = new THREE.ShaderMaterial({
+    name: opts.name || "heatHaze",
+    uniforms: {
+      uTime: { value: 0 },
+      uHeat: { value: 0 },
+      uRise: { value: opts.rise != null ? opts.rise : 0.38 },
+      uWarp: { value: opts.warp != null ? opts.warp : 0.18 },
+      uNScale: { value: new THREE.Vector2(opts.nx != null ? opts.nx : 8, opts.ny != null ? opts.ny : 6) },
+      uAmp: { value: opts.amp != null ? opts.amp : 0.14 },
+    },
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    blending: THREE.NormalBlending,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+    fog: false,
+    lights: false,
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform float uTime;
+      uniform float uHeat;
+      uniform float uRise;
+      uniform float uWarp;
+      uniform vec2 uNScale;
+      uniform float uAmp;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+          mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+          f.y
+        );
+      }
+      float fbm(vec2 p) {
+        float s = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 4; i++) {
+          s += a * noise(p);
+          p = p * 2.11 + vec2(1.7, 9.2);
+          a *= 0.5;
+        }
+        return s;
+      }
+      void main() {
+        #include <logdepthbuf_fragment>
+        if (uHeat < 0.01) discard;
+        vec2 field = vec2(vWorldPos.x, vWorldPos.z) * uNScale.x;
+        float y = vWorldPos.y * uNScale.y - uTime * uRise;
+        vec2 uv = vec2(field.x, y);
+        float n1 = fbm(uv);
+        float n2 = fbm(uv * 1.63 + vec2(5.1, -uTime * 0.22));
+        vec2 warped = uv + (vec2(n1, n2) - 0.5) * uWarp;
+        float haze = fbm(warped);
+        float wiggle = abs(n1 - n2);
+        float body = smoothstep(0.22, 0.68, haze) * (0.55 + 0.45 * wiggle);
+        float edgeX = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x);
+        float edgeY = smoothstep(0.0, 0.08, vUv.y) * smoothstep(1.0, 0.34, vUv.y);
+        float a = body * edgeX * edgeY * uHeat * uAmp;
+        if (a < 0.003) discard;
+        gl_FragColor = vec4(vec3(0.90, 0.91, 0.92), a);
+      }
+    `,
+  });
+  if ("forceSinglePass" in mat) mat.forceSinglePass = true;
+  return mat;
 }
 
 function tagBarrelHeatMesh(mesh, role) {
@@ -4849,38 +4913,34 @@ function tagBarrelHeatMesh(mesh, role) {
 }
 
 function addBarrelHeatShimmer(x, y, z, length) {
-  const tex = getBarrelHeatShimmerMap();
-  const mat = new THREE.MeshBasicMaterial({
-    map: tex,
-    color: new THREE.Color(1.25, 0.52, 0.12),
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-    toneMapped: false,
-    fog: false,
-  });
   const len = Math.max(0.1, length);
-  // Flat card just above the barrel (look-down hip/ADS reads the top of the tube).
-  const flat = new THREE.Mesh(new THREE.PlaneGeometry(0.036, len), mat);
-  flat.position.set(x, y, z);
-  flat.rotation.x = -Math.PI / 2;
-  flat.renderOrder = 6;
-  flat.visible = false;
-  flat.name = "barrelHeatShimmer";
-  flat.userData.barrelHeatShimmer = true;
-  flat.frustumCulled = false;
-  // Thin vertical ribbon for a bit of rising volume without a world-wide warp.
-  const vert = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.034), mat);
-  vert.position.set(x, y - 0.004, z);
-  vert.rotation.y = Math.PI / 2;
-  vert.renderOrder = 6;
-  vert.visible = false;
-  vert.name = "barrelHeatShimmerV";
-  vert.userData.barrelHeatShimmer = true;
-  vert.frustumCulled = false;
-  gunRoot.add(flat, vert);
+  const hazeH = 0.11;
+  const mat = makeHeatHazeMaterial({
+    name: "barrelHeatHaze",
+    rise: 0.55,
+    warp: 0.28,
+    nx: 22,
+    ny: 28,
+    amp: 0.20,
+  });
+  const group = new THREE.Group();
+  group.name = "barrelHeatHaze";
+  group.position.set(x, y, z);
+  group.rotation.y = Math.PI / 2;
+  const rolls = [0.34, -0.34];
+  for (let i = 0; i < rolls.length; i++) {
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(len, hazeH), mat);
+    card.position.y = hazeH * 0.46;
+    card.rotation.x = rolls[i];
+    card.renderOrder = 6;
+    card.visible = false;
+    card.name = i === 0 ? "barrelHeatShimmer" : "barrelHeatShimmerV";
+    card.userData.barrelHeatShimmer = true;
+    card.frustumCulled = false;
+    card.raycast = () => {};
+    group.add(card);
+  }
+  gunRoot.add(group);
 }
 
 function applyBarrelHeatVisual() {
@@ -4900,10 +4960,11 @@ function applyBarrelHeatVisual() {
       o.material.emissive.setRGB(r, g * (role === "tip" || role === "can" ? 1.05 : 1), b);
       o.material.emissiveIntensity = punch * tip;
     }
-    if (o.userData.barrelHeatShimmer && o.material) {
+    if (o.userData.barrelHeatShimmer && o.material && o.material.uniforms) {
       const show = h > 0.38 && mul >= 0.01;
       o.visible = show;
-      o.material.opacity = show ? clamp((h - 0.38) * 0.55 * mul, 0, 0.42) : 0;
+      o.material.uniforms.uHeat.value = show ? clamp((h - 0.38) * 1.2 * mul, 0, 1) : 0;
+      o.material.uniforms.uTime.value = barrelHeatClock;
     }
   });
 }
@@ -4911,12 +4972,81 @@ function applyBarrelHeatVisual() {
 function tickBarrelHeat(dt) {
   barrelHeatClock += dt;
   coolBarrelHeat(dt);
-  if (barrelHeatShimmerMap && (barrelHeatAmt[state.weaponId] || 0) > 0.3) {
-    const h = barrelHeatAmt[state.weaponId] || 0;
-    barrelHeatShimmerMap.offset.y = (barrelHeatClock * (0.28 + 0.55 * h)) % 1;
-    barrelHeatShimmerMap.offset.x = Math.sin(barrelHeatClock * 3.1) * 0.04;
-  }
   applyBarrelHeatVisual();
+  tickGroundHeatHaze();
+}
+
+/** Sun-weighted bake on the pour. Key-up is hot; true night is gone. */
+function groundHeatAmount() {
+  const path = sunPath(state.timeOfDay);
+  const pal = sampleTod(state.timeOfDay);
+  const elev = path.elevDeg;
+  if (elev < 1.5) return 0;
+  const elevAmt = clamp((elev - 2) / 32, 0, 1);
+  const keyAmt = clamp((pal.sunI || 0) * (state.lightKeyMul ?? 1), 0, 1.3);
+  return clamp(elevAmt * (0.22 + 0.78 * Math.min(1, keyAmt / 0.85)), 0, 1);
+}
+
+function tickGroundHeatHaze() {
+  if (!groundHeatHazeMat) return;
+  const h = groundHeatAmount();
+  groundHeatHazeMat.uniforms.uTime.value = barrelHeatClock;
+  groundHeatHazeMat.uniforms.uHeat.value = h;
+  if (groundHeatRoot) groundHeatRoot.visible = h > 0.035;
+}
+
+/** Cheap tiled volumes over the whole bay pour (~40 x 460). Height ~0.45 m. */
+function addGroundHeatHaze() {
+  if (groundHeatRoot && groundHeatRoot.parent) {
+    groundHeatRoot.parent.remove(groundHeatRoot);
+    groundHeatRoot.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+    });
+  }
+  if (groundHeatHazeMat) {
+    groundHeatHazeMat.dispose();
+    groundHeatHazeMat = null;
+  }
+  groundHeatHazeMat = makeHeatHazeMaterial({
+    name: "groundHeatHaze",
+    rise: 0.16,
+    warp: 0.20,
+    nx: 0.55,
+    ny: 4.2,
+    amp: 0.11,
+  });
+  const root = new THREE.Group();
+  root.name = "groundHeatHaze";
+  const hazeH = 0.46;
+  const across = 40;
+  const along = 460;
+  const rangeCenterZ = rangeZ(200);
+  const zMin = rangeCenterZ - along * 0.5;
+  const zMax = rangeCenterZ + along * 0.5;
+  const tileAlong = 40;
+  const stamp = (mesh) => {
+    mesh.renderOrder = 3;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = true;
+    mesh.raycast = () => {};
+    mesh.userData.groundHeatHaze = true;
+    root.add(mesh);
+  };
+  for (let z = zMin; z < zMax - 1e-3; z += tileAlong) {
+    const depth = Math.min(tileAlong, zMax - z);
+    const zc = z + depth * 0.5;
+    const curtain = new THREE.Mesh(new THREE.PlaneGeometry(across, hazeH), groundHeatHazeMat);
+    curtain.position.set(0, FLOOR_Y + hazeH * 0.48, zc);
+    stamp(curtain);
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(depth, hazeH), groundHeatHazeMat);
+    side.position.set(0, FLOOR_Y + hazeH * 0.48, zc);
+    side.rotation.y = Math.PI / 2;
+    stamp(side);
+  }
+  groundHeatRoot = root;
+  scene.add(root);
+  tickGroundHeatHaze();
 }
 
 
@@ -5446,7 +5576,7 @@ function applyMeterUVs(geo, uMeters, vMeters) {
 }
 
 /** World-phase meter UVs so same-size slabs don't stamp the same 0-origin tile.
- *  1 UV unit stays 1 meter. Tiny rotRad (~1-2 deg) breaks lockstep without chaos. */
+ *  1 UV unit stays 1 meter. Walls pass rotRad = 0 so seams stay square. */
 function worldPhaseUVs(geo, uOff, vOff, rotRad) {
   const uv = geo.getAttribute("uv");
   if (!uv) return geo;
@@ -5602,20 +5732,10 @@ function addBayWallPanels(wallMat, rangeCenterZ) {
         applyMeterUVs(new THREE.BoxGeometry(wallT, wallH, panelLen)),
         zc,
         -0.2,
-        pourUvSpin(i, side + 13.6)
+        0
       );
       const panel = new THREE.Mesh(geo, getConcreteVariant(wallMat.userData.concreteKind || "wall", pourUnit(i, side + 1.4)));
-      panel.position.set(
-        side + (pourUnit(i, side + 9.1) - 0.5) * 0.012,
-        -0.2,
-        zc + (pourUnit(i, side + 17.4) - 0.5) * 0.006
-      );
-      panel.rotation.y = (pourUnit(i, side + 3.2) - 0.5) * 0.006;
-      panel.scale.set(
-        1,
-        1 + (pourUnit(i, side + 21.8) - 0.5) * 0.012,
-        1 + (pourUnit(i, side + 5.6) - 0.5) * 0.008
-      );
+      panel.position.set(side, -0.2, zc);
       panel.castShadow = false;
       panel.receiveShadow = true;
       panel.userData.impactSurface = "wall";
@@ -5632,6 +5752,7 @@ function buildRoom() {
   const nearZ0 = rangeZ(40);
   const nearZ1 = SPAWN_Z + 10;
   addPouredGround(floorMat, 40, 460, rangeCenterZ, FLOOR_Y, nearZ0, nearZ1, 5, "floor");
+  addGroundHeatHaze();
 
   // Soft reference grid — quiet so world-space concrete can read
   const grid = new THREE.GridHelper(40, 80, 0x2e3848, 0x1c222c);

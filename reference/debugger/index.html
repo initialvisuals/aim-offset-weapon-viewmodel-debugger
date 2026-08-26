@@ -399,6 +399,15 @@
           <code id="barrelHeatVal">1.00</code>
         </label>
         <p class="note">Orange/amber barrel glow from rounds through the tube. A mounted suppressor takes some of that heat on the can. SMG auto dumps cook fast; rifle warms on rapid fire; bolt barely ticks. Cools over a few seconds. 0 = off.</p>
+        <label class="slider-row">Heat haze strength
+          <input type="range" id="heatHazeStrengthSlider" min="0" max="2" step="0.01" value="1.00" />
+          <code id="heatHazeStrengthVal">1.00</code>
+        </label>
+        <label class="slider-row">Heat haze size
+          <input type="range" id="heatHazeSizeSlider" min="0.35" max="2" step="0.01" value="1.00" />
+          <code id="heatHazeSizeVal">1.00</code>
+        </label>
+        <p class="note">Colorless warp — a displacement mask, not a white sheet. Strength is how hard the air bends (0 = off). Size scales noise cells and the height-fog band (mid = authored ~0.46&nbsp;m ground / ~11&nbsp;cm barrel; low = tighter/shorter, high = bigger/taller). Ground/height layer follows the sun; barrel cards follow tube heat. The barrel heat slider above stays the orange on the steel.</p>
       </div>
 
       <div class="settings-section">
@@ -415,7 +424,7 @@
           <input type="range" id="concreteVarSlider" min="0" max="2" step="0.02" value="1.00" />
           <code id="concreteVarVal">1.00</code>
         </label>
-        <p class="note">Wear is dust and edge fade. Scale is grain size (low = finer grit, high = larger blotches). Variation is per-panel hue/value drift. Mid-slider is the authored look — ends are useful, not one-tick. Default already reads as poured panels. Benches stay wood.</p>
+        <p class="note">Wear is dust and edge fade. Scale is grain size (low = finer grit, high = larger blotches). Variation is per-panel value drift (no hue swing). Mid-slider is the authored look — ends are useful, not one-tick. Default already reads as poured panels. Benches stay wood.</p>
       </div>
 
       <div class="settings-section">
@@ -429,7 +438,7 @@
           <input type="range" id="fogFarSlider" min="200" max="650" step="1" value="520" />
           <code id="fogFarVal">520</code>
         </label>
-        <p class="note">Linear distance fog (<code>THREE.Fog</code>). Color tracks clear/background. Density (<code>FogExp2</code>) not exposed yet.</p>
+        <p class="note">Linear distance fog (<code>THREE.Fog</code>). Color tracks clear/background. Density (<code>FogExp2</code>) not exposed yet. Floor-height shimmer is the Heat haze sliders (noisy band, not this far fade).</p>
       </div>
 
       <div class="settings-section">
@@ -508,6 +517,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v51"></script>
+    <script type="module" src="app.js?v=20260824v52"></script>
 </body>
 </html>

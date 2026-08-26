@@ -209,11 +209,15 @@ let barrelHeatClock = 0;
 let barrelHeatEmissiveMap = null;
 let groundHeatHazeMat = null;
 let groundHeatRoot = null;
+let heatHazeDummyTex = null;
+let barrelHeatHazeLive = false;
 /** Recoil pattern index resets after this gap of not firing. */
 const RECOIL_RESET_MS = 200;
 
 /** Viewmodel isolation — ADS near-blur without smearing the range / HUD. */
 const VIEWMODEL_LAYER = 1;
+/** Heat-haze cards — drawn after the scene grab so they can sample tScene. */
+const HEAT_HAZE_LAYER = 2;
 /** Disc radius (UV x) at ads=1 on the half-res viewmodel RT. Hint, not milk. */
 const ADS_DOF_RADIUS = 0.0028;
 const ADS_DOF_RADIUS_MIN = 0;
@@ -255,6 +259,17 @@ const BLOOM_MIPS = 3;
 const BARREL_HEAT_DEFAULT = 1;
 /** Settings max (0–2). */
 const BARREL_HEAT_MUL_MAX = 2;
+/** Colorless heat-haze warp / vert displace (0 = off). Mid-slider is the authored look. */
+const HEAT_HAZE_STRENGTH_DEFAULT = 1;
+const HEAT_HAZE_STRENGTH_MAX = 2;
+/** Noise-cell / volume-height mul. 1 = authored (~0.46 m ground, ~11 cm barrel). */
+const HEAT_HAZE_SIZE_DEFAULT = 1;
+const HEAT_HAZE_SIZE_MIN = 0.35;
+const HEAT_HAZE_SIZE_MAX = 2;
+const GROUND_HAZE_H = 0.46;
+const BARREL_HAZE_H = 0.11;
+/** Extra Y so a noisy height-fog band is not a razor slab. */
+const GROUND_HAZE_HEIGHT_PAD = 2.15;
 /** Settings default cloud cover (0 = clear). */
 const CLOUDS_DEFAULT = 0.55;
 /** Dust / edge wear on bay concrete (0 = clean pour). Shared GPU uniform. */
@@ -265,7 +280,7 @@ const CONCRETE_SCALE_DEFAULT = 1;
 const CONCRETE_SCALE_MIN = 0.4;
 const CONCRETE_SCALE_MAX = 1.6;
 const uConcreteScale = { value: CONCRETE_SCALE_DEFAULT };
-/** Panel chroma/value mul on authored variation. Mid-slider = authored look. */
+/** Panel value mul on authored variation (no hue swing). Mid-slider = authored look. */
 const CONCRETE_VAR_DEFAULT = 1;
 const CONCRETE_VAR_MIN = 0;
 const CONCRETE_VAR_MAX = 2;
@@ -435,6 +450,10 @@ const state = {
   adsDofRadius: ADS_DOF_RADIUS,
   /** Barrel heat glow mul (0 = off, 2 = strong). Default 1. */
   barrelHeat: BARREL_HEAT_DEFAULT,
+  /** Colorless haze warp / displace (0 = off). Independent of barrel emissive. */
+  heatHazeStrength: HEAT_HAZE_STRENGTH_DEFAULT,
+  /** Noise scale + height-fog band mul. 1 = authored. */
+  heatHazeSize: HEAT_HAZE_SIZE_DEFAULT,
   /** Visual disc + sky-shader halo (degrees). Must not enlarge the bloom kernel. */
   sunSize: SUN_SIZE_DEFAULT,
   /** Core brightness of the disc. Soft-clamped; halo stays dimmer. */
@@ -2152,6 +2171,38 @@ function setBarrelHeat(v, { toast = false } = {}) {
   scheduleSaveSettings();
 }
 
+function syncHeatHazeUI() {
+  const st = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
+  const sz = state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT;
+  const stSlider = el("heatHazeStrengthSlider");
+  const stVal = el("heatHazeStrengthVal");
+  if (stSlider && document.activeElement !== stSlider) stSlider.value = String(st);
+  if (stVal) stVal.textContent = Number(st).toFixed(2);
+  const szSlider = el("heatHazeSizeSlider");
+  const szVal = el("heatHazeSizeVal");
+  if (szSlider && document.activeElement !== szSlider) szSlider.value = String(sz);
+  if (szVal) szVal.textContent = Number(sz).toFixed(2);
+}
+
+function setHeatHazeStrength(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, HEAT_HAZE_STRENGTH_MAX);
+  state.heatHazeStrength = Number.isFinite(n) ? n : HEAT_HAZE_STRENGTH_DEFAULT;
+  applyHeatHazeUniforms();
+  syncHeatHazeUI();
+  if (toast) showToast(`Heat haze ${state.heatHazeStrength.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function setHeatHazeSize(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+  state.heatHazeSize = Number.isFinite(n) ? n : HEAT_HAZE_SIZE_DEFAULT;
+  applyHeatHazeUniforms();
+  syncHeatHazeMeshScales();
+  syncHeatHazeUI();
+  if (toast) showToast(`Heat haze size ${state.heatHazeSize.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
 function syncSunSizeUI() {
   const n = state.sunSize ?? SUN_SIZE_DEFAULT;
   const slider = el("sunSizeSlider");
@@ -2388,6 +2439,7 @@ function syncSettingsUI() {
   syncConcreteScaleUI();
   syncConcreteVarUI();
   syncBarrelHeatUI();
+  syncHeatHazeUI();
   syncFxSettingsUI();
   syncCrouchSlider();
 }
@@ -3043,6 +3095,8 @@ const SETTINGS_FIELDS = [
   { key: "adsDofTaps", src: "state", type: "num" },
   { key: "adsDofRadius", src: "state", type: "num" },
   { key: "barrelHeat", src: "state", type: "num" },
+  { key: "heatHazeStrength", src: "state", type: "num" },
+  { key: "heatHazeSize", src: "state", type: "num" },
   { key: "sunSize", src: "state", type: "num" },
   { key: "sunPunch", src: "state", type: "num" },
   { key: "clouds", src: "state", type: "num" },
@@ -3117,6 +3171,8 @@ function applySettingsBlob(blob) {
   state.concreteWear = clamp(state.concreteWear ?? CONCRETE_WEAR_DEFAULT, 0, 1);
   state.concreteScale = clamp(state.concreteScale ?? CONCRETE_SCALE_DEFAULT, CONCRETE_SCALE_MIN, CONCRETE_SCALE_MAX);
   state.concreteVar = clamp(state.concreteVar ?? CONCRETE_VAR_DEFAULT, CONCRETE_VAR_MIN, CONCRETE_VAR_MAX);
+  state.heatHazeStrength = clamp(state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
+  state.heatHazeSize = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
   state.casingDraw = Math.round(clamp(state.casingDraw ?? CASING_DRAW_DEFAULT, CASING_DRAW_MIN, CASING_DRAW_MAX));
   state.decalDraw = Math.round(clamp(state.decalDraw ?? DECAL_DRAW_DEFAULT, DECAL_DRAW_MIN, DECAL_DRAW_MAX) / 10) * 10;
   state.homeHold = normalizeHomeHold(state.homeHold);
@@ -3148,6 +3204,8 @@ function applySettingsSideEffects() {
   }
   syncConcreteUniforms();
   applyBarrelHeatVisual();
+  applyHeatHazeUniforms();
+  syncHeatHazeMeshScales();
   setCrouchGrad(state.crouchGrad, { remember: false });
   setPerfOverlay(!!state.showPerf, { toast: false });
   trimImpactDecals();
@@ -4758,7 +4816,7 @@ function makeOpticMesh(profile) {
  * Per-weapon 0–1 stored heat. Each shot adds energy/mass; cool is e^{-t/τ}
  * (τ ≈ 4–8 s), not a linear snap. Heat *color* is orange/amber emissive on
  * the barrel + muzzle device only (not receiver / optic). Air above the
- * tube is a colorless rising haze (luma/warp, not additive orange). Bloom already in stack.
+ * tube is a colorless rising haze (displacement mask / warp, not a white sheet). Bloom already in stack.
  */
 function getBarrelHeatSpec(weaponId = state.weaponId) {
   return BARREL_HEAT_SPEC[weaponId] || BARREL_HEAT_SPEC.example_smg;
@@ -4811,49 +4869,16 @@ function getBarrelHeatEmissiveMap() {
   return tex;
 }
 
-function makeHeatHazeMaterial(opts = {}) {
-  const mat = new THREE.ShaderMaterial({
-    name: opts.name || "heatHaze",
-    uniforms: {
-      uTime: { value: 0 },
-      uHeat: { value: 0 },
-      uRise: { value: opts.rise != null ? opts.rise : 0.38 },
-      uWarp: { value: opts.warp != null ? opts.warp : 0.18 },
-      uNScale: { value: new THREE.Vector2(opts.nx != null ? opts.nx : 8, opts.ny != null ? opts.ny : 6) },
-      uAmp: { value: opts.amp != null ? opts.amp : 0.14 },
-    },
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    blending: THREE.NormalBlending,
-    side: THREE.DoubleSide,
-    toneMapped: false,
-    fog: false,
-    lights: false,
-    vertexShader: /* glsl */`
-      varying vec2 vUv;
-      varying vec3 vWorldPos;
-      #include <common>
-      #include <logdepthbuf_pars_vertex>
-      void main() {
-        vUv = uv;
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorldPos = wp.xyz;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        #include <logdepthbuf_vertex>
-      }
-    `,
-    fragmentShader: /* glsl */`
-      uniform float uTime;
-      uniform float uHeat;
-      uniform float uRise;
-      uniform float uWarp;
-      uniform vec2 uNScale;
-      uniform float uAmp;
-      varying vec2 vUv;
-      varying vec3 vWorldPos;
-      #include <common>
-      #include <logdepthbuf_pars_fragment>
+function getHeatHazeDummyTex() {
+  if (heatHazeDummyTex) return heatHazeDummyTex;
+  const data = new Uint8Array([0, 0, 0, 0]);
+  const tex = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+  tex.needsUpdate = true;
+  heatHazeDummyTex = tex;
+  return tex;
+}
+
+const HEAT_HAZE_NOISE_GLSL = /* glsl */`
       float hash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
       }
@@ -4877,23 +4902,144 @@ function makeHeatHazeMaterial(opts = {}) {
         }
         return s;
       }
-      void main() {
-        #include <logdepthbuf_fragment>
-        if (uHeat < 0.01) discard;
-        vec2 field = vec2(vWorldPos.x, vWorldPos.z) * uNScale.x;
-        float y = vWorldPos.y * uNScale.y - uTime * uRise;
+      void heatField(vec3 wp, vec2 vu, out float mask, out vec2 nxy, out float haze) {
+        vec2 ns = uNScale / max(uSize, 0.2);
+        vec2 field = vec2(wp.x, wp.z) * ns.x;
+        float y = wp.y * ns.y - uTime * uRise;
         vec2 uv = vec2(field.x, y);
         float n1 = fbm(uv);
         float n2 = fbm(uv * 1.63 + vec2(5.1, -uTime * 0.22));
         vec2 warped = uv + (vec2(n1, n2) - 0.5) * uWarp;
-        float haze = fbm(warped);
+        haze = fbm(warped);
         float wiggle = abs(n1 - n2);
         float body = smoothstep(0.22, 0.68, haze) * (0.55 + 0.45 * wiggle);
-        float edgeX = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x);
-        float edgeY = smoothstep(0.0, 0.08, vUv.y) * smoothstep(1.0, 0.34, vUv.y);
-        float a = body * edgeX * edgeY * uHeat * uAmp;
-        if (a < 0.003) discard;
-        gl_FragColor = vec4(vec3(0.90, 0.91, 0.92), a);
+        float edgeX = smoothstep(0.0, 0.12, vu.x) * smoothstep(1.0, 0.88, vu.x);
+        float edgeY;
+        float height = 1.0;
+        if (uHeightFog > 0.5) {
+          edgeY = smoothstep(0.0, 0.04, vu.y) * smoothstep(1.0, 0.92, vu.y);
+          float hAbove = wp.y - uFloorY;
+          float fogN = fbm(vec2(wp.x, wp.z) * (0.09 / max(uSize, 0.2)) + vec2(uTime * 0.04, 3.1));
+          float band = uBandH * uSize * (0.48 + 1.35 * fogN);
+          height = (1.0 - smoothstep(band * 0.12, band, hAbove)) * smoothstep(-0.05, 0.04, hAbove);
+          body = max(body, height * (0.40 + 0.60 * haze));
+          mask = body * edgeX * edgeY * height;
+        } else {
+          edgeY = smoothstep(0.0, 0.08, vu.y) * smoothstep(1.0, 0.34, vu.y);
+          mask = body * edgeX * edgeY;
+        }
+        nxy = vec2(n1, n2);
+      }
+`;
+
+function makeHeatHazeMaterial(opts = {}) {
+  const mat = new THREE.ShaderMaterial({
+    name: opts.name || "heatHaze",
+    uniforms: {
+      uTime: { value: 0 },
+      uHeat: { value: 0 },
+      uRise: { value: opts.rise != null ? opts.rise : 0.38 },
+      uWarp: { value: opts.warp != null ? opts.warp : 0.18 },
+      uNScale: { value: new THREE.Vector2(opts.nx != null ? opts.nx : 8, opts.ny != null ? opts.ny : 6) },
+      uAmp: { value: opts.amp != null ? opts.amp : 0.14 },
+      uStrength: { value: HEAT_HAZE_STRENGTH_DEFAULT },
+      uSize: { value: HEAT_HAZE_SIZE_DEFAULT },
+      uDisp: { value: opts.disp != null ? opts.disp : 0.02 },
+      uHeightFog: { value: opts.heightFog ? 1 : 0 },
+      uFloorY: { value: FLOOR_Y },
+      uBandH: { value: opts.bandH != null ? opts.bandH : GROUND_HAZE_H },
+      tScene: { value: getHeatHazeDummyTex() },
+      uHasScene: { value: 0 },
+      uResolution: { value: new THREE.Vector2(1, 1) },
+    },
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    blending: THREE.NormalBlending,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+    fog: false,
+    lights: false,
+    vertexShader: /* glsl */`
+      uniform float uTime;
+      uniform float uHeat;
+      uniform float uRise;
+      uniform float uWarp;
+      uniform vec2 uNScale;
+      uniform float uAmp;
+      uniform float uStrength;
+      uniform float uSize;
+      uniform float uDisp;
+      uniform float uHeightFog;
+      uniform float uFloorY;
+      uniform float uBandH;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      varying vec2 vNxy;
+      varying float vMask;
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+` + HEAT_HAZE_NOISE_GLSL + /* glsl */`
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        float mask = 0.0;
+        vec2 nxy = vec2(0.0);
+        float haze = 0.0;
+        heatField(wp.xyz, uv, mask, nxy, haze);
+        mask *= uHeat;
+        if (uStrength > 0.01 && mask > 0.002) {
+          vec3 up = vec3(0.0, 1.0, 0.0);
+          vec3 toCam = cameraPosition - wp.xyz;
+          vec3 viewTan = normalize(cross(up, normalize(toCam + vec3(1e-5, 0.0, 0.0))));
+          float disp = (haze - 0.5) * mask * uStrength * uDisp;
+          wp.xyz += up * disp;
+          wp.xyz += viewTan * (nxy.x - 0.5) * mask * uStrength * uDisp * 0.55;
+        }
+        vWorldPos = wp.xyz;
+        vNxy = nxy;
+        vMask = mask;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform float uTime;
+      uniform float uHeat;
+      uniform float uRise;
+      uniform float uWarp;
+      uniform vec2 uNScale;
+      uniform float uAmp;
+      uniform float uStrength;
+      uniform float uSize;
+      uniform float uDisp;
+      uniform float uHeightFog;
+      uniform float uFloorY;
+      uniform float uBandH;
+      uniform sampler2D tScene;
+      uniform float uHasScene;
+      uniform vec2 uResolution;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      varying vec2 vNxy;
+      varying float vMask;
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+` + HEAT_HAZE_NOISE_GLSL + /* glsl */`
+      void main() {
+        #include <logdepthbuf_fragment>
+        if (uHeat < 0.01 || uStrength < 0.01) discard;
+        float mask = 0.0;
+        vec2 nxy = vec2(0.0);
+        float haze = 0.0;
+        heatField(vWorldPos, vUv, mask, nxy, haze);
+        mask *= uHeat;
+        if (mask < 0.003) discard;
+        if (uHasScene < 0.5) discard;
+        vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
+        vec2 off = (nxy - 0.5) * mask * uStrength * 0.022;
+        vec3 grabbed = texture2D(tScene, clamp(suv + off, 0.0, 1.0)).rgb;
+        gl_FragColor = vec4(grabbed, clamp(mask * 0.92, 0.0, 1.0));
       }
     `,
   });
@@ -4914,7 +5060,7 @@ function tagBarrelHeatMesh(mesh, role) {
 
 function addBarrelHeatShimmer(x, y, z, length) {
   const len = Math.max(0.1, length);
-  const hazeH = 0.11;
+  const hazeH = BARREL_HAZE_H;
   const mat = makeHeatHazeMaterial({
     name: "barrelHeatHaze",
     rise: 0.55,
@@ -4922,20 +5068,27 @@ function addBarrelHeatShimmer(x, y, z, length) {
     nx: 22,
     ny: 28,
     amp: 0.20,
+    disp: 0.01,
+    bandH: hazeH,
+    heightFog: false,
   });
   const group = new THREE.Group();
   group.name = "barrelHeatHaze";
   group.position.set(x, y, z);
   group.rotation.y = Math.PI / 2;
   const rolls = [0.34, -0.34];
+  const sz = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
   for (let i = 0; i < rolls.length; i++) {
-    const card = new THREE.Mesh(new THREE.PlaneGeometry(len, hazeH), mat);
-    card.position.y = hazeH * 0.46;
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(len, hazeH, 24, 12), mat);
+    card.position.y = hazeH * 0.46 * sz;
+    card.scale.y = sz;
     card.rotation.x = rolls[i];
     card.renderOrder = 6;
     card.visible = false;
     card.name = i === 0 ? "barrelHeatShimmer" : "barrelHeatShimmerV";
     card.userData.barrelHeatShimmer = true;
+    card.userData.hazeH0 = hazeH;
+    card.layers.set(HEAT_HAZE_LAYER);
     card.frustumCulled = false;
     card.raycast = () => {};
     group.add(card);
@@ -4945,6 +5098,7 @@ function addBarrelHeatShimmer(x, y, z, length) {
 
 function applyBarrelHeatVisual() {
   if (!gunRoot) return;
+  barrelHeatHazeLive = false;
   const mul = state.barrelHeat ?? BARREL_HEAT_DEFAULT;
   const raw = barrelHeatAmt[state.weaponId] || 0;
   const h = mul < 0.01 ? 0 : raw;
@@ -4961,12 +5115,15 @@ function applyBarrelHeatVisual() {
       o.material.emissiveIntensity = punch * tip;
     }
     if (o.userData.barrelHeatShimmer && o.material && o.material.uniforms) {
-      const show = h > 0.38 && mul >= 0.01;
+      const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
+      const show = h > 0.38 && mul >= 0.01 && str >= 0.01;
       o.visible = show;
       o.material.uniforms.uHeat.value = show ? clamp((h - 0.38) * 1.2 * mul, 0, 1) : 0;
       o.material.uniforms.uTime.value = barrelHeatClock;
+      if (show) barrelHeatHazeLive = true;
     }
   });
+  applyHeatHazeUniforms();
 }
 
 function tickBarrelHeat(dt) {
@@ -4990,12 +5147,16 @@ function groundHeatAmount() {
 function tickGroundHeatHaze() {
   if (!groundHeatHazeMat) return;
   const h = groundHeatAmount();
+  const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
   groundHeatHazeMat.uniforms.uTime.value = barrelHeatClock;
   groundHeatHazeMat.uniforms.uHeat.value = h;
-  if (groundHeatRoot) groundHeatRoot.visible = h > 0.035;
+  applyHeatHazeUniforms();
+  if (groundHeatRoot) groundHeatRoot.visible = h > 0.035 && str >= 0.01;
 }
 
-/** Cheap tiled volumes over the whole bay pour (~40 x 460). Height ~0.45 m. */
+/** Tiled height-fog volumes over the pour (~40 x 460). Authored band ~0.46 m,
+ * noisy/spread — displacement mask, not a white sheet. Sun-weighted.
+ */
 function addGroundHeatHaze() {
   if (groundHeatRoot && groundHeatRoot.parent) {
     groundHeatRoot.parent.remove(groundHeatRoot);
@@ -5014,10 +5175,13 @@ function addGroundHeatHaze() {
     nx: 0.55,
     ny: 4.2,
     amp: 0.11,
+    disp: 0.032,
+    bandH: GROUND_HAZE_H,
+    heightFog: true,
   });
   const root = new THREE.Group();
   root.name = "groundHeatHaze";
-  const hazeH = 0.46;
+  const hazeH = GROUND_HAZE_H;
   const across = 40;
   const along = 460;
   const rangeCenterZ = rangeZ(200);
@@ -5031,23 +5195,134 @@ function addGroundHeatHaze() {
     mesh.frustumCulled = true;
     mesh.raycast = () => {};
     mesh.userData.groundHeatHaze = true;
+    mesh.layers.set(HEAT_HAZE_LAYER);
     root.add(mesh);
   };
   for (let z = zMin; z < zMax - 1e-3; z += tileAlong) {
     const depth = Math.min(tileAlong, zMax - z);
     const zc = z + depth * 0.5;
-    const curtain = new THREE.Mesh(new THREE.PlaneGeometry(across, hazeH), groundHeatHazeMat);
+    const curtain = new THREE.Mesh(new THREE.PlaneGeometry(across, hazeH, 24, 12), groundHeatHazeMat);
     curtain.position.set(0, FLOOR_Y + hazeH * 0.48, zc);
+    curtain.userData.hazeH0 = hazeH;
     stamp(curtain);
-    const side = new THREE.Mesh(new THREE.PlaneGeometry(depth, hazeH), groundHeatHazeMat);
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(depth, hazeH, 24, 12), groundHeatHazeMat);
     side.position.set(0, FLOOR_Y + hazeH * 0.48, zc);
     side.rotation.y = Math.PI / 2;
+    side.userData.hazeH0 = hazeH;
     stamp(side);
   }
   groundHeatRoot = root;
   scene.add(root);
+  syncHeatHazeMeshScales();
   tickGroundHeatHaze();
 }
+
+function eachHeatHazeMat(fn) {
+  if (groundHeatHazeMat) fn(groundHeatHazeMat);
+  if (!gunRoot) return;
+  const seen = new Set();
+  gunRoot.traverse((o) => {
+    if (!o.userData.barrelHeatShimmer || !o.material || !o.material.uniforms) return;
+    if (seen.has(o.material)) return;
+    seen.add(o.material);
+    fn(o.material);
+  });
+}
+
+function applyHeatHazeUniforms() {
+  const str = clamp(state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
+  const sz = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+  eachHeatHazeMat((mat) => {
+    mat.uniforms.uStrength.value = str;
+    mat.uniforms.uSize.value = sz;
+    if (mat.uniforms.uFloorY) mat.uniforms.uFloorY.value = FLOOR_Y;
+  });
+}
+
+function syncHeatHazeMeshScales() {
+  const sz = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+  if (groundHeatRoot) {
+    groundHeatRoot.traverse((o) => {
+      if (!o.userData.groundHeatHaze) return;
+      const h0 = o.userData.hazeH0 || GROUND_HAZE_H;
+      const sy = sz * GROUND_HAZE_HEIGHT_PAD;
+      o.scale.y = sy;
+      o.position.y = FLOOR_Y + h0 * sy * 0.48;
+    });
+  }
+  if (gunRoot) {
+    gunRoot.traverse((o) => {
+      if (!o.userData.barrelHeatShimmer) return;
+      const h0 = o.userData.hazeH0 || BARREL_HAZE_H;
+      o.scale.y = sz;
+      o.position.y = h0 * 0.46 * sz;
+    });
+  }
+}
+
+function heatHazePassWanted() {
+  const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
+  if (str < 0.01) return false;
+  if (groundHeatRoot && groundHeatRoot.visible) return true;
+  return !!barrelHeatHazeLive;
+}
+
+function copyRtColor(srcRT, dstRT) {
+  if (!srcRT || !dstRT || !renderer || !srcRT.texture || !dstRT.texture) return false;
+  if (srcRT.width !== dstRT.width || srcRT.height !== dstRT.height) return false;
+  if (srcRT.width < 1 || srcRT.height < 1) return false;
+  try {
+    if (typeof renderer.initRenderTarget === "function") {
+      renderer.initRenderTarget(dstRT);
+    }
+    renderer.copyTextureToTexture(srcRT.texture, dstRT.texture);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function bindHeatHazeGrab(tex, resx, resy) {
+  const dummy = getHeatHazeDummyTex();
+  const has = tex ? 1 : 0;
+  applyHeatHazeUniforms();
+  eachHeatHazeMat((mat) => {
+    mat.uniforms.tScene.value = tex || dummy;
+    mat.uniforms.uHasScene.value = has;
+    mat.uniforms.uResolution.value.set(resx, resy);
+  });
+}
+
+/** After the world (and ADS) land in dest, grab that RT and draw haze cards. Same renderer. */
+function renderHeatHaze(dest) {
+  if (!camera || !scene || !renderer || !heatHazePassWanted()) return;
+  if (!dest || !dest.texture || dest.width < 1) return;
+  let grabTex = null;
+  const resx = dest.width;
+  const resy = dest.height;
+  const grabRT = hdrBloom && hdrBloom.prefilterRT;
+  if (grabRT && dest !== grabRT && copyRtColor(dest, grabRT)) {
+    grabTex = grabRT.texture;
+  } else if (hdrBloom && dest !== hdrBloom.sceneRT && hdrBloom.sceneRT && hdrBloom.sceneRT.texture) {
+    grabTex = hdrBloom.sceneRT.texture;
+  } else if (outputDither && dest !== outputDither.rt && outputDither.rt && outputDither.rt.texture) {
+    grabTex = outputDither.rt.texture;
+  }
+  bindHeatHazeGrab(grabTex, resx, resy);
+
+  const prevAutoClear = renderer.autoClear;
+  const prevShadowAuto = renderer.shadowMap.autoUpdate;
+  renderer.autoClear = false;
+  renderer.shadowMap.autoUpdate = false;
+  camera.layers.set(HEAT_HAZE_LAYER);
+  renderer.setRenderTarget(dest);
+  renderer.render(scene, camera);
+  renderer.autoClear = prevAutoClear;
+  renderer.shadowMap.autoUpdate = prevShadowAuto;
+  restoreCameraLayers();
+  bindHeatHazeGrab(null, resx, resy);
+}
+
 
 
 /* ---- Mag + suppressor meshes (table pickups + viewmodel) ----
@@ -7791,7 +8066,10 @@ function clearInputFlags() {
  */
 function stampViewmodelLayer(root) {
   if (!root) return;
-  root.traverse((o) => { o.layers.set(VIEWMODEL_LAYER); });
+  root.traverse((o) => {
+    if (o.userData.barrelHeatShimmer || o.userData.groundHeatHaze) return;
+    o.layers.set(VIEWMODEL_LAYER);
+  });
 }
 
 function enableViewmodelLighting() {
@@ -7965,6 +8243,8 @@ function renderScene() {
     renderer.autoClear = prevAutoClear;
     restoreCameraLayers();
   }
+
+  renderHeatHaze(dest);
 
   const out = ditherOn ? outputDither.rt : null;
   if (bloomOn) {
@@ -12223,6 +12503,17 @@ function bind() {
     barrelHeatSlider.oninput = (e) => setBarrelHeat(e.target.value);
   }
   syncBarrelHeatUI();
+  const heatHazeStrengthSlider = el("heatHazeStrengthSlider");
+  if (heatHazeStrengthSlider) {
+    heatHazeStrengthSlider.value = String(state.heatHazeStrength);
+    heatHazeStrengthSlider.oninput = (e) => setHeatHazeStrength(e.target.value);
+  }
+  const heatHazeSizeSlider = el("heatHazeSizeSlider");
+  if (heatHazeSizeSlider) {
+    heatHazeSizeSlider.value = String(state.heatHazeSize);
+    heatHazeSizeSlider.oninput = (e) => setHeatHazeSize(e.target.value);
+  }
+  syncHeatHazeUI();
   const sunSizeSlider = el("sunSizeSlider");
   if (sunSizeSlider) {
     sunSizeSlider.value = String(state.sunSize);

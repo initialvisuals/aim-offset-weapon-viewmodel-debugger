@@ -8,11 +8,7 @@ Live-tune first-person **weapon hold poses** (hip, ADS, optics, attachments) so 
 
 This repo is a knowledge-share plus a live Three.js shooting-range demo for proving viewmodel poses, ballistics (height-over-bore / zero), and common FPS feel — lean vs walls, reload, crouch, vault, lights. It is **not** a shipped multiplayer game.
 
-Static HTML/JS, Three.js from CDN, no bundler. From [`reference/debugger/`](reference/debugger/):
-
-    python3 -m http.server 8765
-
-Open http://127.0.0.1:8765/ and click the canvas for mouse look (pointer lock).
+Static HTML/JS, Three.js from CDN, no bundler — no compile step. Full run + Windows kiosk steps are in [How to run](#how-to-run). Short version: from [`reference/debugger/`](reference/debugger/) serve with `python3 -m http.server 8765`, open http://127.0.0.1:8765/, click the canvas for mouse look (pointer lock).
 
 ![Hip fire on the dusk range — bay, gun, default evening](docs/screenshots/range-hip.png)
 
@@ -135,6 +131,7 @@ Whatever you choose, **document it**, then use aim-offset tuning so the **visibl
 
 | Path | What |
 |------|------|
+| [`docs/`](docs/) | Knowledge share — overview, data model, tuner UX, frame pipeline, engine glue, contracts, math |
 | [`docs/01-overview.md`](docs/01-overview.md) | Problem, philosophy, usage in depth |
 | [`docs/02-data-model.md`](docs/02-data-model.md) | Pose + weapon + attachment schemas |
 | [`docs/03-tuner-ux.md`](docs/03-tuner-ux.md) | Recommended hotkey / panel contract |
@@ -142,19 +139,80 @@ Whatever you choose, **document it**, then use aim-offset tuning so the **visibl
 | [`docs/05-engine-glue.md`](docs/05-engine-glue.md) | Unity / Unreal / custom checklists |
 | [`docs/06-contracts-and-gotchas.md`](docs/06-contracts-and-gotchas.md) | Axes, defaults, retune hazards |
 | [`docs/07-math.md`](docs/07-math.md) | Shared formulas (lerp, slerp, optic select, aim vs muzzle) |
-| [`reference/`](reference/) | Math module + [two-tab debugger UI](reference/debugger/) |
-| [`schemas/`](schemas/) | JSON Schema |
-| [`examples/`](examples/) | Generic TOML/JSON samples |
+| [`schemas/`](schemas/) | JSON Schema (`weapon-offset-config.schema.json`) |
+| [`examples/`](examples/) | Sample JSON/TOML (+ range screenshots) |
+| [`reference/viewmodel_math.ts`](reference/viewmodel_math.ts) | Portable math module — port freely |
+| [`reference/debugger/`](reference/debugger/) | Live Three.js range + tuner |
+| [`reference/debugger/index.html`](reference/debugger/index.html) | Page shell |
+| [`reference/debugger/app.js`](reference/debugger/app.js) | Demo + tuner logic |
+| [`reference/debugger/styles.css`](reference/debugger/styles.css) | UI chrome |
+| [`reference/debugger/StartServer.bat`](reference/debugger/StartServer.bat) | Windows kiosk launcher (Firefox) |
 
 ## Quick start
 
-1. Read [overview](docs/01-overview.md) + [data model](docs/02-data-model.md).
-2. Copy [`examples/example_smg.toml`](examples/example_smg.toml) into your content pipeline.
-3. Implement the [frame pipeline](docs/04-frame-pipeline.md) in your engine.
-4. Add the [tuner UX](docs/03-tuner-ux.md) (IMGUI, egui, UMG, Editor window — your call).
-5. Keep [contracts](docs/06-contracts-and-gotchas.md) taped above your monitor.
-6. Implement against [math](docs/07-math.md) / [`reference/viewmodel_math.ts`](reference/viewmodel_math.ts).
-7. Open the [reference debugger](reference/debugger/index.html) to see the two-tab tool structure.
+1. [How to run](#how-to-run) the live range (local serve or Windows kiosk).
+2. Skim the [platform / format chart](#platform--format-outputs) for what you can ship from this repo today.
+3. Read [overview](docs/01-overview.md) + [data model](docs/02-data-model.md).
+4. Copy [`examples/example_smg.toml`](examples/example_smg.toml) into your content pipeline.
+5. Implement the [frame pipeline](docs/04-frame-pipeline.md) in your engine; use [engine glue](docs/05-engine-glue.md) checklists.
+6. Add the [tuner UX](docs/03-tuner-ux.md) (IMGUI, egui, UMG, Editor window — your call).
+7. Keep [contracts](docs/06-contracts-and-gotchas.md) taped above your monitor.
+8. Implement against [math](docs/07-math.md) / [`reference/viewmodel_math.ts`](reference/viewmodel_math.ts).
+
+## How to run
+
+Honest setup: **no compile step**. The demo is static HTML/JS with Three.js from a CDN.
+
+### Dev loop
+
+From [`reference/debugger/`](reference/debugger/):
+
+```bash
+python3 -m http.server 8765
+```
+
+Open http://127.0.0.1:8765/ and click the canvas for mouse look (pointer lock). When `app.js` changes (cache-bust query like `app.js?v=`), hard-refresh the page so you are not fighting an old script.
+
+### Kiosk (Windows)
+
+[`reference/debugger/StartServer.bat`](reference/debugger/StartServer.bat):
+
+- Serves `127.0.0.1:8765` from the debugger folder
+- Waits until the server answers, then launches Firefox `-kiosk` with a dedicated profile under `%LOCALAPPDATA%\aim-offset-kiosk` (so homepage / Google is not tab 1)
+- **Alt+F4** exits the kiosk window; the script then kills **only** the listener on port 8765
+
+Needs Mozilla Firefox. If behavior is weird (profile locked, wrong window), close other Firefox instances first and run the bat again.
+
+## Output formats you have now
+
+Nothing here builds a second binary. Clipboard + files + the live page:
+
+| Output | Where |
+|--------|--------|
+| Live page | Only runtime artifact — `reference/debugger/` in a browser |
+| Tuner Copy JSON | Backtick debugger → copy tuned pose |
+| Settings → Copy settings (`O`) | Writes / reads `aimOffset.settings` in `localStorage` |
+| Example content | [`examples/`](examples/) JSON + TOML |
+| Schema | [`schemas/weapon-offset-config.schema.json`](schemas/weapon-offset-config.schema.json) |
+
+## Platform / format outputs
+
+| Target | Status | Notes / effort |
+|--------|--------|----------------|
+| Local browser serve | Ready now | `python3 -m http.server` from `reference/debugger/` |
+| Firefox kiosk (`StartServer.bat`) | Ready now | Windows; dedicated profile; Alt+F4 exits |
+| Static host (GitHub Pages / Netlify / itch.io HTML5 / any static CDN) | Near-ready | Drop `reference/debugger/`; needs HTTPS + CDN reach for Three.js |
+| Pose / settings JSON (+ TOML examples) | Ready now | Content pipeline input |
+| JSON Schema validation | Ready now | Validate authored configs before engine import |
+| TypeScript math module | Ready as reference | Port freely into any language |
+| PWA / installable web | Small future tweak | Manifest + service worker on the same static files |
+| Desktop shell (Electron / Tauri) | Small wrap | Same static demo, windowed — thin host around the page |
+| Unity / Unreal / custom engine | Docs + math + schema today | Glue checklists in [`docs/05-engine-glue.md`](docs/05-engine-glue.md); no binary build in this repo |
+| Dedicated engine / custom host merge | Planned | Keep data model + feel contracts; rehost the renderer later (engine port) |
+
+## One core, many shells
+
+Prefer one airtight static core and portable data so each target is a thin shell, not a rewrite. Keep the demo modern and malleable — if it can run on a notepad, we are gods — rather than chasing every platform binary today. Browser knowledge-share first; dedicated engine / custom host merge later, carrying the same pose contracts and math.
 
 ## What this is not
 

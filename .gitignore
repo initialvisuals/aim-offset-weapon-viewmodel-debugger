@@ -1,0 +1,16 @@
+# Local / generated — never commit private operator notes
+DEVELOPER_NOTES.md
+DEVELOPER_NOTES.*.md
+
+# OS / editor clutter
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
+
+# Local serve / caches
+.cache/
+__pycache__/
+*.pyc

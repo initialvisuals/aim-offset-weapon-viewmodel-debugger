@@ -216,7 +216,7 @@ const RECOIL_RESET_MS = 200;
 
 /** Viewmodel isolation — ADS near-blur without smearing the range / HUD. */
 const VIEWMODEL_LAYER = 1;
-/** Barrel heat-haze cards — drawn after the scene grab so they can sample tScene. */
+/** Barrel heat-haze cards — vertex warp only; fragment discards (no grab composite). */
 const HEAT_HAZE_LAYER = 2;
 /** Disc radius (UV x) at ads=1 on the half-res viewmodel RT. Hint, not milk. */
 const ADS_DOF_RADIUS = 0.0028;

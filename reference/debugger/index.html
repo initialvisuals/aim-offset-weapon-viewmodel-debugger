@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260824v30" />
+  <link rel="stylesheet" href="styles.css?v=20260824v31" />
   <script type="importmap">
     {
       "imports": {
@@ -25,6 +25,11 @@
       <div>shells <span id="perfShells">0</span></div>
       <div>slugs <span id="perfSlugs">0</span></div>
     </div>
+    <div id="passLabPip" class="passlab-pip" hidden aria-hidden="true">
+      <canvas id="passLabPipCanvas" width="200" height="200"></canvas>
+      <div class="passlab-pip-src" id="passLabPipSrc">scene</div>
+    </div>
+    <div id="passLabSampleRect" class="passlab-sample-rect" hidden aria-hidden="true"></div>
     <div id="plugeOverlay" class="pluge-overlay" hidden aria-hidden="true">
       <div class="pluge-swatch" style="background:#000000" title="Black"><span>Black</span></div>
       <div class="pluge-swatch" style="background:#404040" title="Low"><span>Low</span></div>
@@ -171,7 +176,7 @@
                 <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint (blocked while crouched; sprint+crouch = slide)</li>
                 <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · <kbd>U</kbd> cycle hold · RMB ADS</li>
                 <li>Hold <kbd>Space</kbd> vault (when prompted) · ADS + Space = hold breath · tap Space reserved</li>
-                <li><kbd>O</kbd> Settings (options)</li>
+                <li><kbd>O</kbd> Settings (options) · <kbd>P</kbd> freeze &amp; save pass lab</li>
                 <li><kbd>B</kbd> fire mode (semi / auto — SMG only)</li>
                 <li><kbd>-</kbd>/<kbd>=</kbd> cycle optic zero (Sim) · irons locked 100 m</li>
                 <li>LMB fire (semi = click; SMG AUTO = hold; tracers from muzzle; Sim = HoB+zero by default)</li>
@@ -281,6 +286,23 @@
         </div>
         <label class="check-row"><input type="checkbox" id="chkPluge" /> Show PLUGE strip on viewport</label>
         <p class="note">If Black blends into Low, your display is crushing shadows — raise Brightness/Gamma.</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>Pass lab</h3>
+        <label>Backdrop
+          <select id="passLabModeSelect">
+            <option value="off" selected>off</option>
+            <option value="gray_ramp">gray_ramp</option>
+            <option value="chroma">chroma</option>
+            <option value="gamma">gamma</option>
+            <option value="trans_checker">trans_checker</option>
+            <option value="fog_vs_near">fog_vs_near</option>
+          </select>
+        </label>
+        <label class="check-row"><input type="checkbox" id="chkPassLabPip" /> PIP probe (center crop)</label>
+        <button type="button" id="btnPassLabFreeze">Freeze &amp; save pass lab</button>
+        <p class="note">Far-Z chart behind the bay (not a CSS overlay). Off restores the ToD sky. PIP is a live center crop with a red sample rect. <kbd>P</kbd> (when not typing) downloads full + PIP PNGs with a build stamp. Default off.</p>
       </div>
 
       <div class="settings-section">
@@ -511,7 +533,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>X</kbd> drop held kit · <kbd>F</kbd> bench / world kit / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · FX (hole/casing cap + fade + draw) · Lighting (clock + clouds + intensities + sun size/punch + god rays + bloom + dither/scale/offset/type + barrel heat) · Materials (concrete wear/scale/variation) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
+          <li>Settings: hip reticle · Brightness/Gamma · Pass lab (backdrop + PIP + <kbd>P</kbd> freeze) · FX (hole/casing cap + fade + draw) · Lighting (clock + clouds + intensities + sun size/punch + god rays + bloom + dither/scale/offset/type + barrel heat) · Materials (concrete wear/scale/variation) · Fog near/far (375/520 still hides long tracers) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
         </ul>
       </div>
     </div>
@@ -519,6 +541,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v57"></script>
+    <script type="module" src="app.js?v=20260824v58"></script>
 </body>
 </html>

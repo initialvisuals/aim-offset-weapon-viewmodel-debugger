@@ -274,8 +274,8 @@ const HEAT_HAZE_SIZE_MAX = 2;
  */
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v59";
-const APP_BUILD_STAMP = "2026-09-04 03:25";
+const APP_CACHE_BUST = "20260824v60";
+const APP_BUILD_STAMP = "2026-09-04 03:35";
 /** Pass-lab backdrop modes. `off` restores the ToD sky. */
 const PASS_LAB_MODES = ["off", "gray_ramp", "chroma", "gamma", "trans_checker", "fog_vs_near"];
 const PASS_LAB_MODE_DEFAULT = "off";
@@ -1913,7 +1913,7 @@ function applyTimeOfDay() {
       moonDisc.material.opacity = clamp(pal.moonI * 2.8, 0.16, 0.5);
     }
   }
-  if (scene) {
+  if (scene && !passLabBackdropOn()) {
     if (scene.background && scene.background.isColor) scene.background.copy(pal.sky);
     else scene.background = pal.sky.clone();
   }
@@ -1955,7 +1955,7 @@ function applyDisplayLook() {
   const bv = clamp(sky.b + lift * 0.12, 0, 1);
   sky.setRGB(r, gv, bv);
   if (renderer) renderer.setClearColor(sky, 1);
-  if (scene) {
+  if (scene && !passLabBackdropOn()) {
     if (scene.background && scene.background.isColor) scene.background.copy(sky);
     else scene.background = sky.clone();
   }

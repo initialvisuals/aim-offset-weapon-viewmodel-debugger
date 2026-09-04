@@ -103,7 +103,7 @@ Real guns put the barrel below the optic, so the bore line and the sight line ar
 | Show PLUGE strip | Settings | **OFF** — Black/Low/Mid/High/White overlay (unfiltered) |
 | Pass lab backdrop | Settings | **off** — far-Z unlit chart behind the bay (`gray_ramp` / `chroma` / `gamma` / `trans_checker` / `fog_vs_near`). Off restores ToD sky. |
 | Pass lab PIP | Settings | **OFF** — ~200 px center crop of the final frame + 1 px red sample rect. |
-| Freeze pass lab | Settings / `P` | Download `passlab-full-vNN-….png` + `passlab-pip-….png` with build stamp |
+| Freeze pass lab | Settings / `P` | Download `passlab-full-v60-….png` + `passlab-pip-….png` with build stamp. URL `?passlab=chroma&pip=1` opens a mode immediately. |
 | Hole cap / fade | Settings FX | Cap default **30000** (20–30000, step 100). Fade default **18s** after spawn (0 = FIFO only). Env/scuff + non-paper punches; paper holes wait for table reset (cap **30000**). Berm popups still clear on hide. |
 | Casing cap / fade | Settings FX | Cap default **30000** (10–30000, step 100). Fade default **12s** after sleep (0 = until cap recycles). Cap/fade despawn picks at random from the oldest third (no firing-order zipper). |
 | Concrete wear | Settings Materials | Default **0.40** (0–1) — dust / edge wear on bay walls, floor, berm. 0 = clean pour. Benches stay wood. |

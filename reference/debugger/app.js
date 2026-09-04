@@ -274,8 +274,8 @@ const HEAT_HAZE_SIZE_MAX = 2;
  */
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v61";
-const APP_BUILD_STAMP = "2026-09-04 03:40";
+const APP_CACHE_BUST = "20260824v62";
+const APP_BUILD_STAMP = "2026-09-04 03:50";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -2661,43 +2661,51 @@ function blitPassLabPipFromRT(rt, encode) {
   if (!pip || !renderer || !passLabRtOk(rt)) return false;
   const blit = ensurePassLabPipBlit();
   if (!blit) return false;
-  const crop = passLabCropRect(rt.width, rt.height);
-  const u = blit.mat.uniforms;
-  u.tInput.value = rt.texture;
-  u.uRect.value.set(
-    crop.x / rt.width,
-    1 - (crop.y + crop.h) / rt.height,
-    crop.w / rt.width,
-    crop.h / rt.height
-  );
-  u.uEncode.value = encode ? 1 : 0;
   const prev = renderer.getRenderTarget();
   const prevAC = renderer.autoClear;
-  renderer.autoClear = true;
-  renderer.setRenderTarget(blit.rt);
-  renderer.render(blit.fsScene, blit.fsCam);
-  const w = blit.rt.width;
-  const h = blit.rt.height;
-  const buf = new Uint8Array(w * h * 4);
-  renderer.readRenderTargetPixels(blit.rt, 0, 0, w, h, buf);
-  renderer.setRenderTarget(prev);
-  renderer.autoClear = prevAC;
-  u.tInput.value = null;
-  if (_passLabPipFlip.width !== w) _passLabPipFlip.width = w;
-  if (_passLabPipFlip.height !== h) _passLabPipFlip.height = h;
-  const fctx = _passLabPipFlip.getContext("2d");
-  if (!fctx) return false;
-  const img = fctx.createImageData(w, h);
-  for (let y = 0; y < h; y++) {
-    const src = (h - 1 - y) * w * 4;
-    img.data.set(buf.subarray(src, src + w * 4), y * w * 4);
+  try {
+    const crop = passLabCropRect(rt.width, rt.height);
+    const u = blit.mat.uniforms;
+    u.tInput.value = rt.texture;
+    u.uRect.value.set(
+      crop.x / rt.width,
+      1 - (crop.y + crop.h) / rt.height,
+      crop.w / rt.width,
+      crop.h / rt.height
+    );
+    u.uEncode.value = encode ? 1 : 0;
+    renderer.autoClear = true;
+    renderer.setRenderTarget(blit.rt);
+    renderer.render(blit.fsScene, blit.fsCam);
+    const w = blit.rt.width;
+    const h = blit.rt.height;
+    const buf = new Uint8Array(w * h * 4);
+    renderer.readRenderTargetPixels(blit.rt, 0, 0, w, h, buf);
+    u.tInput.value = null;
+    if (_passLabPipFlip.width !== w) _passLabPipFlip.width = w;
+    if (_passLabPipFlip.height !== h) _passLabPipFlip.height = h;
+    const fctx = _passLabPipFlip.getContext("2d");
+    if (!fctx) return false;
+    const img = fctx.createImageData(w, h);
+    for (let y = 0; y < h; y++) {
+      const src = (h - 1 - y) * w * 4;
+      img.data.set(buf.subarray(src, src + w * 4), y * w * 4);
+    }
+    fctx.putImageData(img, 0, 0);
+    const ctx = pip.getContext("2d");
+    if (!ctx) return false;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(_passLabPipFlip, 0, 0, w, h, 0, 0, pip.width, pip.height);
+    return true;
+  } catch (_) {
+    return false;
+  } finally {
+    renderer.setRenderTarget(prev);
+    renderer.autoClear = prevAC;
+    if (blit.mat && blit.mat.uniforms && blit.mat.uniforms.tInput) {
+      blit.mat.uniforms.tInput.value = null;
+    }
   }
-  fctx.putImageData(img, 0, 0);
-  const ctx = pip.getContext("2d");
-  if (!ctx) return false;
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(_passLabPipFlip, 0, 0, w, h, 0, 0, pip.width, pip.height);
-  return true;
 }
 
 function blitPassLabPipFromCanvas() {
@@ -2757,54 +2765,60 @@ async function freezePassLab() {
     showToast("Pass lab: renderer not ready", true);
     return;
   }
-  renderScene();
-  updatePassLabPip();
-  const src = renderer.domElement;
-  const resolved = resolvePassLabPipSource();
-  const baseStamp = passLabStampText();
-  const tag = passLabFileTag();
-  const fullStamp = `${baseStamp} · final`;
-  const pipStamp = `${baseStamp} · ${resolved.label}`;
-  const full = document.createElement("canvas");
-  full.width = src.width;
-  full.height = src.height;
-  const fctx = full.getContext("2d");
-  if (!fctx) {
+  try {
+    renderScene();
+    updatePassLabPip();
+    const src = renderer.domElement;
+    const resolved = resolvePassLabPipSource();
+    const baseStamp = passLabStampText();
+    const tag = passLabFileTag();
+    const fullStamp = `${baseStamp} · final`;
+    const pipStamp = `${baseStamp} · ${resolved.label}`;
+    const full = document.createElement("canvas");
+    full.width = src.width;
+    full.height = src.height;
+    const fctx = full.getContext("2d");
+    if (!fctx || !src.width || !src.height) {
+      showToast("Pass lab save failed", true);
+      return;
+    }
+    fctx.drawImage(src, 0, 0);
+    burnPassLabStamp(fctx, full.width, full.height, fullStamp);
+
+    const live = el("passLabPipCanvas");
+    const pip = document.createElement("canvas");
+    if (live && live.width && live.height) {
+      pip.width = live.width;
+      pip.height = live.height;
+      const pctx = pip.getContext("2d");
+      if (!pctx) {
+        showToast("Pass lab save failed", true);
+        return;
+      }
+      pctx.drawImage(live, 0, 0);
+      burnPassLabStamp(pctx, pip.width, pip.height, pipStamp);
+    } else {
+      const crop = passLabCropRect(src.width, src.height);
+      pip.width = Math.max(1, crop.w);
+      pip.height = Math.max(1, crop.h);
+      const pctx = pip.getContext("2d");
+      if (!pctx) {
+        showToast("Pass lab save failed", true);
+        return;
+      }
+      pctx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, pip.width, pip.height);
+      burnPassLabStamp(pctx, pip.width, pip.height, pipStamp);
+    }
+
+    // Toast first — Chrome may stall the second download behind a prompt.
+    showToast("Saving pass lab PNGs…");
+    const okFull = await downloadCanvasPng(full, `passlab-full-${tag}.png`);
+    const okPip = await downloadCanvasPng(pip, `passlab-pip-${resolved.kind}-${tag}.png`);
+    if (okFull && okPip) showToast("Saved pass lab PNGs");
+    else showToast("Pass lab save failed", true);
+  } catch (_) {
     showToast("Pass lab save failed", true);
-    return;
   }
-  fctx.drawImage(src, 0, 0);
-  burnPassLabStamp(fctx, full.width, full.height, fullStamp);
-
-  const live = el("passLabPipCanvas");
-  const pip = document.createElement("canvas");
-  if (live && live.width && live.height) {
-    pip.width = live.width;
-    pip.height = live.height;
-    const pctx = pip.getContext("2d");
-    if (!pctx) {
-      showToast("Pass lab save failed", true);
-      return;
-    }
-    pctx.drawImage(live, 0, 0);
-    burnPassLabStamp(pctx, pip.width, pip.height, pipStamp);
-  } else {
-    const crop = passLabCropRect(src.width, src.height);
-    pip.width = Math.max(1, crop.w);
-    pip.height = Math.max(1, crop.h);
-    const pctx = pip.getContext("2d");
-    if (!pctx) {
-      showToast("Pass lab save failed", true);
-      return;
-    }
-    pctx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, pip.width, pip.height);
-    burnPassLabStamp(pctx, pip.width, pip.height, pipStamp);
-  }
-
-  const okFull = await downloadCanvasPng(full, `passlab-full-${tag}.png`);
-  const okPip = await downloadCanvasPng(pip, `passlab-pip-${resolved.kind}-${tag}.png`);
-  if (okFull && okPip) showToast("Saved pass lab PNGs");
-  else showToast("Pass lab save failed", true);
 }
 
 function syncHeatHazeUI() {

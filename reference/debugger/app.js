@@ -266,6 +266,15 @@ const HEAT_HAZE_STRENGTH_MAX = 2;
 const HEAT_HAZE_SIZE_DEFAULT = 1;
 const HEAT_HAZE_SIZE_MIN = 0.35;
 const HEAT_HAZE_SIZE_MAX = 2;
+/**
+ * Fullscreen world/height-fog heat post. OFF by default — prior ships slapped
+ * sky-blue fog on fire/heat. Barrel cards stay the only heat-distortion path
+ * until this is proven safe. Settings checkbox can re-enable for experiments.
+ */
+const GROUND_HEAT_HAZE_DEFAULT = false;
+/** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
+const APP_CACHE_BUST = "20260824v56";
+const APP_BUILD_STAMP = "2026-09-03 21:14";
 const GROUND_HAZE_H = 0.46;
 const BARREL_HAZE_H = 0.11;
 /** Settings default cloud cover (0 = clear). */
@@ -452,6 +461,8 @@ const state = {
   heatHazeStrength: HEAT_HAZE_STRENGTH_DEFAULT,
   /** Noise scale + height-fog band mul. 1 = authored. */
   heatHazeSize: HEAT_HAZE_SIZE_DEFAULT,
+  /** Fullscreen ground/height-fog heat post. Default OFF (fog slap). */
+  groundHeatHaze: GROUND_HEAT_HAZE_DEFAULT,
   /** Visual disc + sky-shader halo (degrees). Must not enlarge the bloom kernel. */
   sunSize: SUN_SIZE_DEFAULT,
   /** Core brightness of the disc. Soft-clamped; halo stays dimmer. */
@@ -2169,17 +2180,27 @@ function setBarrelHeat(v, { toast = false } = {}) {
   scheduleSaveSettings();
 }
 
+function syncBuildStamp() {
+  const node = el("buildStamp");
+  if (!node) return;
+  const m = /v(\d+)/.exec(APP_CACHE_BUST);
+  const ver = m ? m[1] : APP_CACHE_BUST;
+  node.textContent = `v${ver} · ${APP_BUILD_STAMP}`;
+}
+
 function syncHeatHazeUI() {
   const st = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
   const sz = state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT;
   const stSlider = el("heatHazeStrengthSlider");
   const stVal = el("heatHazeStrengthVal");
-  if (stSlider && document.activeElement !== stSlider) stSlider.value = String(st);
+  if (stSlider) stSlider.value = String(st);
   if (stVal) stVal.textContent = Number(st).toFixed(2);
   const szSlider = el("heatHazeSizeSlider");
   const szVal = el("heatHazeSizeVal");
-  if (szSlider && document.activeElement !== szSlider) szSlider.value = String(sz);
+  if (szSlider) szSlider.value = String(sz);
   if (szVal) szVal.textContent = Number(sz).toFixed(2);
+  const chk = el("chkGroundHeatHaze");
+  if (chk) chk.checked = !!state.groundHeatHaze;
 }
 
 function setHeatHazeStrength(v, { toast = false } = {}) {
@@ -2199,6 +2220,15 @@ function setHeatHazeSize(v, { toast = false } = {}) {
   syncHeatHazeUI();
   if (toast) showToast(`Heat haze size ${state.heatHazeSize.toFixed(2)}`);
   scheduleSaveSettings();
+}
+
+function setGroundHeatHaze(on, { toast = false } = {}) {
+  state.groundHeatHaze = !!on;
+  const chk = el("chkGroundHeatHaze");
+  if (chk) chk.checked = state.groundHeatHaze;
+  applyHeatHazeUniforms();
+  scheduleSaveSettings();
+  if (toast) showToast(state.groundHeatHaze ? "Ground heat haze ON" : "Ground heat haze OFF");
 }
 
 function syncSunSizeUI() {
@@ -3033,6 +3063,9 @@ const player = {
   fovAds: FOV_BY_OPTIC.iron,
   fov: FOV_BY_OPTIC.hip,
   strafeTilt: 0,
+  /** Barrel heat-card top lean (opposite sway/strafe), smoothed. */
+  hazeLeanX: 0,
+  hazeLeanUp: 0,
   flashUntil: 0,
   swayT: 0,
   swayAmp: 1,
@@ -3095,6 +3128,7 @@ const SETTINGS_FIELDS = [
   { key: "barrelHeat", src: "state", type: "num" },
   { key: "heatHazeStrength", src: "state", type: "num" },
   { key: "heatHazeSize", src: "state", type: "num" },
+  { key: "groundHeatHaze", src: "state", type: "bool" },
   { key: "sunSize", src: "state", type: "num" },
   { key: "sunPunch", src: "state", type: "num" },
   { key: "clouds", src: "state", type: "num" },
@@ -3171,6 +3205,7 @@ function applySettingsBlob(blob) {
   state.concreteVar = clamp(state.concreteVar ?? CONCRETE_VAR_DEFAULT, CONCRETE_VAR_MIN, CONCRETE_VAR_MAX);
   state.heatHazeStrength = clamp(state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
   state.heatHazeSize = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+  state.groundHeatHaze = !!(state.groundHeatHaze ?? GROUND_HEAT_HAZE_DEFAULT);
   state.casingDraw = Math.round(clamp(state.casingDraw ?? CASING_DRAW_DEFAULT, CASING_DRAW_MIN, CASING_DRAW_MAX));
   state.decalDraw = Math.round(clamp(state.decalDraw ?? DECAL_DRAW_DEFAULT, DECAL_DRAW_MIN, DECAL_DRAW_MAX) / 10) * 10;
   state.homeHold = normalizeHomeHold(state.homeHold);
@@ -4930,14 +4965,14 @@ const HEAT_HAZE_NOISE_GLSL = /* glsl */`
           body = max(body, height * (0.40 + 0.60 * haze));
           mask = body * edgeX * edgeY * height;
         } else if (uBarrelCard > 0.5) {
-          // Soft safe zone: L/R/top dead margins; bottom seats on tube; active lobe bottom-mid → top-third.
-          float padLR = 0.22;
+          // Soft safe zone: L/R/top dead / feathered; bottom seats on tube; active lobe bottom-mid → top-third.
+          float padLR = 0.26;
           float edgeX = smoothstep(0.0, padLR, vu.x) * smoothstep(1.0, 1.0 - padLR, vu.x);
           float seat = smoothstep(-0.04, 0.05, vu.y);
-          float topCut = smoothstep(0.68, 0.40, vu.y);
-          float dx = (vu.x - 0.5) / 0.38;
-          float dy = (vu.y - 0.06) / 0.52;
-          float dome = 1.0 - smoothstep(0.42, 1.08, dx * dx + dy * dy * 0.9);
+          float topCut = smoothstep(0.72, 0.38, vu.y);
+          float dx = (vu.x - 0.5) / 0.40;
+          float dy = (vu.y - 0.05) / 0.55;
+          float dome = 1.0 - smoothstep(0.38, 1.12, dx * dx + dy * dy * 0.88);
           float vignette = edgeX * seat * topCut * clamp(dome, 0.0, 1.0);
           mask = body * vignette;
         } else {
@@ -5056,10 +5091,12 @@ function makeHeatHazeMaterial(opts = {}) {
         mask *= uHeat;
         if (mask < 0.003) discard;
         if (uHasScene < 0.5) discard;
+        // Camera-aligned warp: screen UV + soft offset. Cards are soft masks only.
         vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
-        vec2 off = (nxy - 0.5) * mask * uStrength * 0.022;
+        vec2 off = (nxy - 0.5) * mask * uStrength * 0.020;
         vec3 grabbed = texture2D(tScene, clamp(suv + off, 0.0, 1.0)).rgb;
-        gl_FragColor = vec4(grabbed, clamp(mask, 0.0, 1.0));
+        float a = clamp(mask * 0.85, 0.0, 0.85);
+        gl_FragColor = vec4(grabbed, a);
       }
     `,
   });
@@ -5081,9 +5118,6 @@ function tagBarrelHeatMesh(mesh, role) {
 function addBarrelHeatShimmer(x, y, z, length) {
   const len = Math.max(0.1, length);
   const hazeH = BARREL_HAZE_H;
-  // Larger than the tube so L/R/top safe margins sit inside the plane (borders off the effect).
-  const cardW = len * 1.22;
-  const cardH = hazeH * 1.48;
   const mat = makeHeatHazeMaterial({
     name: "barrelHeatHaze",
     rise: 0.55,
@@ -5091,7 +5125,7 @@ function addBarrelHeatShimmer(x, y, z, length) {
     nx: 8,
     ny: 26,
     amp: 0.20,
-    disp: 0.01,
+    disp: 0.008,
     bandH: hazeH,
     heightFog: false,
     barrelCard: true,
@@ -5100,20 +5134,32 @@ function addBarrelHeatShimmer(x, y, z, length) {
   group.name = "barrelHeatHaze";
   group.position.set(x, y, z);
   group.rotation.y = Math.PI / 2;
-  // Keep the crossed pair; soft vignette kills the hard X edges.
-  const rolls = [0.30, -0.30];
+  // Three cards (not ±cross): A left shorter/lower, B center taller/longer toward body, C mirror of A.
+  // Plane local X = along barrel (after group yaw); Y = up; Z = lateral.
+  // local −X points toward the gun body (group sits near tip).
   const sz = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
-  for (let i = 0; i < rolls.length; i++) {
-    const card = new THREE.Mesh(new THREE.PlaneGeometry(cardW, cardH, 24, 12), mat);
-    // Seat plane bottom on the tube so the hard seam is hidden against barrel/suppressor.
-    card.position.y = cardH * 0.48 * sz;
+  const specs = [
+    { name: "barrelHeatShimmerL", lat: -0.016, wMul: 0.70, hMul: 0.78, along: -0.01, seat: 0.46, roll: 0.10 },
+    { name: "barrelHeatShimmer", lat: 0, wMul: 1.12, hMul: 1.28, along: -0.055, seat: 0.48, roll: 0 },
+    { name: "barrelHeatShimmerR", lat: 0.016, wMul: 0.70, hMul: 0.78, along: -0.01, seat: 0.46, roll: -0.10 },
+  ];
+  for (const spec of specs) {
+    const cardW = len * 1.22 * spec.wMul;
+    const cardH = hazeH * 1.48 * spec.hMul;
+    const geo = new THREE.PlaneGeometry(cardW, cardH, 24, 12);
+    const base = new Float32Array(geo.attributes.position.array);
+    const card = new THREE.Mesh(geo, mat);
+    // Seat plane bottom on the tube/can so hard seams hide against steel.
+    card.position.set(spec.along, cardH * spec.seat * sz, spec.lat);
     card.scale.y = sz;
-    card.rotation.x = rolls[i];
+    card.rotation.x = spec.roll;
     card.renderOrder = 6;
     card.visible = false;
-    card.name = i === 0 ? "barrelHeatShimmer" : "barrelHeatShimmerV";
+    card.name = spec.name;
     card.userData.barrelHeatShimmer = true;
     card.userData.hazeH0 = cardH;
+    card.userData.hazeSeat = spec.seat;
+    card.userData.hazeBasePos = base;
     card.layers.set(HEAT_HAZE_LAYER);
     card.frustumCulled = false;
     card.raycast = () => {};
@@ -5156,6 +5202,7 @@ function tickBarrelHeat(dt) {
   barrelHeatClock += dt;
   coolBarrelHeat(dt);
   applyBarrelHeatVisual();
+  updateBarrelHeatCardMorph(dt);
   tickGroundHeatHaze();
 }
 
@@ -5172,6 +5219,10 @@ function groundHeatAmount() {
 
 function tickGroundHeatHaze() {
   if (!heatHazePost || !heatHazePost.hazeMat) return;
+  if (!state.groundHeatHaze) {
+    heatHazePost.hazeMat.uniforms.uHeat.value = 0;
+    return;
+  }
   const h = groundHeatAmount();
   heatHazePost.hazeMat.uniforms.uTime.value = barrelHeatClock;
   heatHazePost.hazeMat.uniforms.uHeat.value = h;
@@ -5206,15 +5257,52 @@ function syncHeatHazeMeshScales() {
   gunRoot.traverse((o) => {
     if (!o.userData.barrelHeatShimmer) return;
     const h0 = o.userData.hazeH0 || BARREL_HAZE_H;
+    const seat = o.userData.hazeSeat != null ? o.userData.hazeSeat : 0.48;
     o.scale.y = sz;
-    o.position.y = h0 * 0.48 * sz;
+    o.position.y = h0 * seat * sz;
+  });
+}
+
+/** Bottom edge stays seated on the tube; top free-floats opposite sway/strafe + a bit up. */
+function updateBarrelHeatCardMorph(dt) {
+  if (!gunRoot) return;
+  const sx = swayRig ? swayRig.position.x : 0;
+  const rz = swayRig ? swayRig.rotation.z : 0;
+  const strafe = player.strafeTilt || 0;
+  // Inertia opposite viewmodel swing: gun right → heat leans left.
+  const targetX = clamp(-(sx * 28 + rz * 0.55 + strafe * 4.0), -1, 1);
+  const targetUp = 0.35 + Math.min(0.65, Math.abs(targetX) * 0.55);
+  const k = 1 - Math.exp(-9 * Math.max(0.0001, dt));
+  player.hazeLeanX = lerp(player.hazeLeanX || 0, targetX, k);
+  player.hazeLeanUp = lerp(player.hazeLeanUp || 0, targetUp, k);
+  const leanX = player.hazeLeanX;
+  const leanUp = player.hazeLeanUp;
+  gunRoot.traverse((o) => {
+    if (!o.userData.barrelHeatShimmer || !o.userData.hazeBasePos || !o.geometry) return;
+    const pos = o.geometry.attributes.position;
+    if (!pos) return;
+    const base = o.userData.hazeBasePos;
+    const h = o.userData.hazeH0 || BARREL_HAZE_H;
+    const halfH = h * 0.5;
+    const arr = pos.array;
+    for (let i = 0, n = pos.count; i < n; i++) {
+      const ix = i * 3;
+      const y0 = base[ix + 1];
+      const t = clamp((y0 / halfH + 1) * 0.5, 0, 1);
+      const w = t * t;
+      arr[ix] = base[ix];
+      arr[ix + 1] = base[ix + 1] + leanUp * w * 0.028;
+      arr[ix + 2] = base[ix + 2] + leanX * w * 0.038;
+    }
+    pos.needsUpdate = true;
   });
 }
 
 function heatHazePassWanted() {
   const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
   if (str < 0.01) return false;
-  if (groundHeatAmount() > 0.035) return true;
+  // Height-fog fullscreen post is opt-in (default OFF) — barrel cards only otherwise.
+  if (state.groundHeatHaze && groundHeatAmount() > 0.035) return true;
   return !!barrelHeatHazeLive;
 }
 
@@ -5446,8 +5534,8 @@ function renderHeatHaze(dest) {
   const depthOk = hasDepth && dest.depthTexture.image &&
     dest.depthTexture.image.width === dest.width &&
     dest.depthTexture.image.height === dest.height;
-  // Bad/missing depth → skip fullscreen height-fog (pass-through). Barrel cards still OK.
-  if (h > 0.035 && str >= 0.01 && depthOk) {
+  // Height-fog fullscreen post: default OFF (fog slap). Even when enabled, bad depth → skip.
+  if (state.groundHeatHaze && h > 0.035 && str >= 0.01 && depthOk) {
     camera.updateMatrixWorld();
     const u = heatHazePost.hazeMat.uniforms;
     u.tScene.value = grabTex;
@@ -12676,7 +12764,13 @@ function bind() {
     heatHazeSizeSlider.value = String(state.heatHazeSize);
     heatHazeSizeSlider.oninput = (e) => setHeatHazeSize(e.target.value);
   }
+  const chkGroundHeatHaze = el("chkGroundHeatHaze");
+  if (chkGroundHeatHaze) {
+    chkGroundHeatHaze.checked = !!state.groundHeatHaze;
+    chkGroundHeatHaze.onchange = (e) => setGroundHeatHaze(e.target.checked, { toast: true });
+  }
   syncHeatHazeUI();
+  syncBuildStamp();
   const sunSizeSlider = el("sunSizeSlider");
   if (sunSizeSlider) {
     sunSizeSlider.value = String(state.sunSize);

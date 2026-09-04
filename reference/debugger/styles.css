@@ -602,3 +602,20 @@ body[data-game-style="arcade"] .settings-dialog .hint kbd {
 .perf-overlay[hidden] { display: none !important; }
 .perf-overlay div { display: grid; grid-template-columns: 4.4em auto; gap: 0 0.55rem; }
 .perf-overlay span { font-variant-numeric: tabular-nums; }
+
+
+/* ---- Build / cache stamp (bottom-left, non-interactive) ---- */
+.build-stamp {
+  pointer-events: none;
+  position: absolute;
+  left: 0.45rem;
+  bottom: 0.35rem;
+  z-index: 3;
+  color: #ffffff;
+  opacity: 0.25;
+  font: 11px/1.2 var(--mono);
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  user-select: none;
+  white-space: nowrap;
+}

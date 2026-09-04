@@ -274,8 +274,8 @@ const HEAT_HAZE_SIZE_MAX = 2;
  */
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v62";
-const APP_BUILD_STAMP = "2026-09-04 03:50";
+const APP_CACHE_BUST = "20260824v63";
+const APP_BUILD_STAMP = "2026-09-04 00:10";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -5740,6 +5740,10 @@ function makeHeatHazeMaterial(opts = {}) {
       void main() {
         #include <logdepthbuf_fragment>
         if (uHeat < 0.01 || uStrength < 0.01) discard;
+        // Barrel cards: vertex displacement already warps the mesh.
+        // Never color-composite the screen grab — at night that paints fog-grey
+        // into black only where the cards draw.
+        if (uBarrelCard > 0.5) discard;
         float mask = 0.0;
         vec2 nxy = vec2(0.0);
         float haze = 0.0;
@@ -5747,7 +5751,6 @@ function makeHeatHazeMaterial(opts = {}) {
         mask *= uHeat;
         if (mask < 0.003) discard;
         if (uHasScene < 0.5) discard;
-        // Subtle refraction: mix base + warped, low alpha. Never fog-decal the gun.
         vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
         vec2 off = (nxy - 0.5) * mask * uStrength * 0.014;
         vec4 baseSamp = texture2D(tScene, clamp(suv, 0.0, 1.0));
@@ -6106,6 +6109,12 @@ function initHeatHazePost() {
         vec3 warped = texture2D(tScene, clamp(vUv + off, 0.0, 1.0)).rgb;
         float warpAmt = clamp(mask * uStrength * 0.50, 0.0, 0.42);
         vec3 col = mix(base, warped, warpAmt);
+        // Luma-lock: refraction may shift, but never lift black sky into fog grey.
+        float lumaBase = max(dot(base, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+        float lumaCol = max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+        if (lumaCol > lumaBase) {
+          col *= lumaBase / max(lumaCol, 1e-5);
+        }
         gl_FragColor = vec4(col, a);
       }
     `,

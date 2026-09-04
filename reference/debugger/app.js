@@ -216,7 +216,7 @@ const RECOIL_RESET_MS = 200;
 
 /** Viewmodel isolation — ADS near-blur without smearing the range / HUD. */
 const VIEWMODEL_LAYER = 1;
-/** Barrel heat-haze cards — drawn after the scene grab so they can sample tScene. */
+/** Barrel heat-haze cards — vertex warp only; fragment discards (no grab composite). */
 const HEAT_HAZE_LAYER = 2;
 /** Disc radius (UV x) at ads=1 on the half-res viewmodel RT. Hint, not milk. */
 const ADS_DOF_RADIUS = 0.0028;
@@ -274,8 +274,8 @@ const HEAT_HAZE_SIZE_MAX = 2;
  */
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v62";
-const APP_BUILD_STAMP = "2026-09-04 03:50";
+const APP_CACHE_BUST = "20260824v63";
+const APP_BUILD_STAMP = "2026-09-04 01:40";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -2482,6 +2482,21 @@ function applyPassLabFromUrl() {
     const world = q.get("world");
     if (world === "1" || world === "true") setPassLabWorld(true, { toast: false });
     if (world === "0" || world === "false") setPassLabWorld(false, { toast: false });
+    const tod = q.get("tod") || q.get("clock");
+    if (tod != null && tod !== "") setTimeOfDay(tod, { toast: false });
+    const heat = q.get("heat");
+    if (heat != null && heat !== "") {
+      const n = clamp(parseFloat(heat), 0, 1);
+      if (Number.isFinite(n)) {
+        barrelHeatAmt[state.weaponId] = n;
+        // Persisted mul 0 would hide stored heat — force the visual on.
+        if (n > 0 && (state.barrelHeat ?? 0) < 0.01) {
+          state.barrelHeat = BARREL_HEAT_DEFAULT;
+          syncBarrelHeatUI();
+        }
+        requestAnimationFrame(() => applyBarrelHeatVisual());
+      }
+    }
   } catch (_) { /* ignore */ }
 }
 
@@ -4443,13 +4458,13 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
 
   float micro = conTriplanar(wp, n, scale);
   float mac = conMacro(wp, scale);
-  float patch = mix(micro, mac, mix(0.40, 0.78, rangeConLod));
+  float gritMix = mix(micro, mac, mix(0.40, 0.78, rangeConLod));
   float pit = mix(conPitting(wp, scale), 0.5, rangeConLod);
   float bay = conBay(wp);
 
   vec3 albedo = diffuseColor.rgb;
-  albedo *= mix(0.74, 1.20, patch);
-  albedo *= mix(1.0, 0.70, variation * (1.0 - patch) * mix(1.0, 0.40, rangeConLod));
+  albedo *= mix(0.74, 1.20, gritMix);
+  albedo *= mix(1.0, 0.70, variation * (1.0 - gritMix) * mix(1.0, 0.40, rangeConLod));
   albedo *= mix(0.86, 1.10, bay);
 
   vec2 pcell = conPanelCell(wp, n);
@@ -4494,7 +4509,7 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
   rough = mix(rough, rough * 0.78, wear);
   rough = mix(rough, min(rough + 0.06, 1.0), wet);
   rough = mix(rough, rough * 0.92, rust);
-  rough = mix(rough, rough * 1.05, patch * variation);
+  rough = mix(rough, rough * 1.05, gritMix * variation);
   rough = mix(rough, min(rough + 0.12, 1.0), contact);
   rough = mix(rough, min(rough + 0.10, 1.0), tileFx.x);
   rough = mix(rough, min(rough + 0.08, 1.0), ties);
@@ -5712,7 +5727,20 @@ function makeHeatHazeMaterial(opts = {}) {
         #include <logdepthbuf_vertex>
       }
     `,
-    fragmentShader: /* glsl */`
+    fragmentShader: opts.barrelCard
+      ? /* glsl */`
+      varying vec2 vUv;
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+      void main() {
+        #include <logdepthbuf_fragment>
+        // Vertex displacement already warps the mesh. No grab composite —
+        // at night that painted fog-grey into black only where cards draw.
+        gl_FragColor = vec4(0.0);
+        discard;
+      }
+    `
+      : /* glsl */`
       uniform float uTime;
       uniform float uHeat;
       uniform float uRise;
@@ -5747,7 +5775,6 @@ function makeHeatHazeMaterial(opts = {}) {
         mask *= uHeat;
         if (mask < 0.003) discard;
         if (uHasScene < 0.5) discard;
-        // Subtle refraction: mix base + warped, low alpha. Never fog-decal the gun.
         vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
         vec2 off = (nxy - 0.5) * mask * uStrength * 0.014;
         vec4 baseSamp = texture2D(tScene, clamp(suv, 0.0, 1.0));
@@ -6106,6 +6133,12 @@ function initHeatHazePost() {
         vec3 warped = texture2D(tScene, clamp(vUv + off, 0.0, 1.0)).rgb;
         float warpAmt = clamp(mask * uStrength * 0.50, 0.0, 0.42);
         vec3 col = mix(base, warped, warpAmt);
+        // Luma-lock: refraction may shift, but never lift black sky into fog grey.
+        float lumaBase = max(dot(base, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+        float lumaCol = max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+        if (lumaCol > lumaBase) {
+          col *= lumaBase / max(lumaCol, 1e-5);
+        }
         gl_FragColor = vec4(col, a);
       }
     `,
@@ -6229,8 +6262,13 @@ function renderHeatHaze(dest) {
   if (barrelHeatHazeLive) {
     camera.layers.set(HEAT_HAZE_LAYER);
     renderer.setRenderTarget(dest);
-    renderer.render(scene, camera);
-    restoreCameraLayers();
+    try {
+      renderer.render(scene, camera);
+    } catch (err) {
+      console.warn("[heat] barrel card pass failed", err);
+    } finally {
+      restoreCameraLayers();
+    }
   }
 
   renderer.autoClear = prevAutoClear;

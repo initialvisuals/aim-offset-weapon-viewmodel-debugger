@@ -310,7 +310,7 @@
         </label>
         <label class="check-row"><input type="checkbox" id="chkPassLabWorld" /> World backdrop (far quad, haze feel)</label>
         <button type="button" id="btnPassLabFreeze">Freeze &amp; save pass lab</button>
-        <p class="note">Flat chart is the default (screen-space plate). World far-quad is optional for in-scene haze. PIP samples <strong>final</strong> / <strong>scene</strong> dest / <strong>heat grab</strong> — individual passes and the composite. <kbd>P</kbd> downloads full + PIP PNGs. Default off. URL: <code>?passlab=chroma&amp;pip=1&amp;src=scene</code>.</p>
+        <p class="note">Flat chart is the default (screen-space plate). World far-quad is optional for in-scene haze. PIP samples <strong>final</strong> / <strong>scene</strong> dest / <strong>heat grab</strong> — individual passes and the composite. <kbd>P</kbd> downloads full + PIP PNGs. Default off. URL: <code>?passlab=chroma&amp;pip=1&amp;src=scene</code>. Night + hot tube: <code>?tod=22&amp;heat=1</code>.</p>
       </div>
 
       <div class="settings-section">
@@ -439,7 +439,7 @@
           <code id="heatHazeSizeVal">1.00</code>
         </label>
         <label class="check-row"><input type="checkbox" id="chkGroundHeatHaze" /> Ground / height-fog heat haze</label>
-        <p class="note">Colorless warp — a refraction of the grabbed scene, not a white sheet. Strength is how hard the air bends (0 = off). Size scales noise cells and the barrel lobe (mid = authored ~11&nbsp;cm barrel; low = tighter/shorter, high = bigger/taller). Barrel cards follow tube heat. The ground/height-fog fullscreen post is <strong>off by default</strong> (was slapping sky-blue fog); checkbox re-enables for experiments. The barrel heat slider above stays the orange on the steel.</p>
+        <p class="note">Barrel cards displace vertices for the warp feel; they do not color-composite the screen grab (that used to paint night fog-grey inside the card footprint). Strength is how hard the air bends (0 = off). Size scales noise cells and the barrel lobe (mid = authored ~11&nbsp;cm barrel; low = tighter/shorter, high = bigger/taller). Barrel cards follow tube heat. The ground/height-fog fullscreen post is <strong>off by default</strong> (was slapping sky-blue fog); checkbox re-enables for experiments and luma-locks so it cannot lift black sky into fog grey. The barrel heat slider above stays the orange on the steel.</p>
       </div>
 
       <div class="settings-section">
@@ -549,6 +549,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v62"></script>
+    <script type="module" src="app.js?v=20260824v63"></script>
 </body>
 </html>

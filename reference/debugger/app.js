@@ -270,11 +270,12 @@ const HEAT_HAZE_SIZE_MAX = 2;
  * Fullscreen world/height-fog heat post. OFF by default — prior ships slapped
  * sky-blue fog on fire/heat. Barrel cards stay the only heat-distortion path
  * until this is proven safe. Settings checkbox can re-enable for experiments.
+ * On load, a one-time migration forces persisted true → false (old builds).
  */
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v56";
-const APP_BUILD_STAMP = "2026-09-03 21:14";
+const APP_CACHE_BUST = "20260824v57";
+const APP_BUILD_STAMP = "2026-09-03 22:26";
 const GROUND_HAZE_H = 0.46;
 const BARREL_HAZE_H = 0.11;
 /** Settings default cloud cover (0 = clear). */
@@ -3213,15 +3214,23 @@ function applySettingsBlob(blob) {
 
 function loadPersistedSettings() {
   settingsHydrating = true;
+  let migrateGroundHeatOff = false;
   try {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return;
     applySettingsBlob(JSON.parse(raw));
+    // Older builds could persist groundHeatHaze:true → fullscreen blue fog slap.
+    // One-time migration: force OFF and rewrite settings; checkbox can re-enable later.
+    if (state.groundHeatHaze) {
+      state.groundHeatHaze = false;
+      migrateGroundHeatOff = true;
+    }
   } catch (err) {
     /* keep code defaults */
   } finally {
     settingsHydrating = false;
   }
+  if (migrateGroundHeatOff) scheduleSaveSettings();
 }
 
 /** Push current state into scene / sliders / HUD after a reset (scene already exists). */
@@ -5004,6 +5013,7 @@ function makeHeatHazeMaterial(opts = {}) {
       tScene: { value: getHeatHazeDummyTex() },
       uHasScene: { value: 0 },
       uResolution: { value: new THREE.Vector2(1, 1) },
+      cameraFar: { value: 2000 },
     },
     transparent: true,
     depthWrite: false,
@@ -5074,6 +5084,7 @@ function makeHeatHazeMaterial(opts = {}) {
       uniform sampler2D tScene;
       uniform float uHasScene;
       uniform vec2 uResolution;
+      uniform float cameraFar;
       varying vec2 vUv;
       varying vec3 vWorldPos;
       varying vec2 vNxy;
@@ -5091,12 +5102,22 @@ function makeHeatHazeMaterial(opts = {}) {
         mask *= uHeat;
         if (mask < 0.003) discard;
         if (uHasScene < 0.5) discard;
-        // Camera-aligned warp: screen UV + soft offset. Cards are soft masks only.
+        // Subtle refraction: mix base + warped, low alpha. Never fog-decal the gun.
         vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
-        vec2 off = (nxy - 0.5) * mask * uStrength * 0.020;
-        vec3 grabbed = texture2D(tScene, clamp(suv + off, 0.0, 1.0)).rgb;
-        float a = clamp(mask * 0.85, 0.0, 0.85);
-        gl_FragColor = vec4(grabbed, a);
+        vec2 off = (nxy - 0.5) * mask * uStrength * 0.014;
+        vec4 baseSamp = texture2D(tScene, clamp(suv, 0.0, 1.0));
+        vec3 base = baseSamp.rgb;
+        vec3 warped = texture2D(tScene, clamp(suv + off, 0.0, 1.0)).rgb;
+        float warpAmt = clamp(mask * uStrength * 0.50, 0.0, 0.42);
+        vec3 col = mix(base, warped, warpAmt);
+        // Depth gate (grab packs log-depth in A): crush over near viewmodel / hands.
+        float packed = baseSamp.a;
+        float clipW = exp2(packed * log2(max(cameraFar, 1.0) + 1.0)) - 1.0;
+        float nearGate = smoothstep(1.8, 4.0, clipW);
+        if (packed <= 1e-4) nearGate = 0.0;
+        float a = clamp(mask * 0.28, 0.0, 0.28) * nearGate;
+        if (a < 0.004) discard;
+        gl_FragColor = vec4(col, a);
       }
     `,
   });
@@ -5417,7 +5438,7 @@ function initHeatHazePost() {
         vec3 viewDir = normalize(viewH.xyz / vw);
         if (abs(viewDir.z) < 1e-3) discard;
         float clipW = exp2(packed * log2(cameraFar + 1.0)) - 1.0;
-        if (clipW < 0.05 || clipW > cameraFar * 0.98) discard;
+        if (clipW < 1.5 || clipW > cameraFar * 0.98) discard;
         float rayLen = clipW / max(1e-4, abs(viewDir.z));
         vec3 viewPos = viewDir * rayLen;
         vec3 wp = (viewInverse * vec4(viewPos, 1.0)).xyz;
@@ -5431,11 +5452,16 @@ function initHeatHazePost() {
         heatField(wp, vec2(0.5), mask, nxy, haze);
         mask *= uHeat;
         if (mask < 0.003) discard;
-        // Cap alpha so a hot mask can never slap the whole view with fog/sky color.
-        float a = clamp(mask * 0.72, 0.0, 0.72);
-        vec2 off = (nxy - 0.5) * mask * uStrength * 0.018;
-        vec3 grabbed = texture2D(tScene, clamp(vUv + off, 0.0, 1.0)).rgb;
-        gl_FragColor = vec4(grabbed, a);
+        // Subtle refraction + low alpha; crush near so viewmodel never gets fog-painted.
+        float nearGate = smoothstep(2.0, 5.0, clipW);
+        float a = clamp(mask * 0.28, 0.0, 0.28) * nearGate;
+        if (a < 0.004) discard;
+        vec2 off = (nxy - 0.5) * mask * uStrength * 0.014;
+        vec3 base = texture2D(tScene, vUv).rgb;
+        vec3 warped = texture2D(tScene, clamp(vUv + off, 0.0, 1.0)).rgb;
+        float warpAmt = clamp(mask * uStrength * 0.50, 0.0, 0.42);
+        vec3 col = mix(base, warped, warpAmt);
+        gl_FragColor = vec4(col, a);
       }
     `,
   });
@@ -5501,11 +5527,13 @@ function bindHeatHazeGrab(tex, resx, resy) {
   const dummy = getHeatHazeDummyTex();
   const has = tex ? 1 : 0;
   applyHeatHazeUniforms();
+  const far = (camera && camera.far) || 2000;
   eachHeatHazeMat((mat) => {
     if (!mat.uniforms.tScene) return;
     mat.uniforms.tScene.value = tex || dummy;
     mat.uniforms.uHasScene.value = has;
     if (mat.uniforms.uResolution) mat.uniforms.uResolution.value.set(resx, resy);
+    if (mat.uniforms.cameraFar) mat.uniforms.cameraFar.value = far;
   });
 }
 

@@ -5727,7 +5727,20 @@ function makeHeatHazeMaterial(opts = {}) {
         #include <logdepthbuf_vertex>
       }
     `,
-    fragmentShader: /* glsl */`
+    fragmentShader: opts.barrelCard
+      ? /* glsl */`
+      varying vec2 vUv;
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+      void main() {
+        #include <logdepthbuf_fragment>
+        // Vertex displacement already warps the mesh. No grab composite —
+        // at night that painted fog-grey into black only where cards draw.
+        gl_FragColor = vec4(0.0);
+        discard;
+      }
+    `
+      : /* glsl */`
       uniform float uTime;
       uniform float uHeat;
       uniform float uRise;
@@ -5755,12 +5768,6 @@ function makeHeatHazeMaterial(opts = {}) {
       void main() {
         #include <logdepthbuf_fragment>
         if (uHeat < 0.01 || uStrength < 0.01) discard;
-        // Barrel cards: vertex displacement already warps the mesh.
-        // Never color-composite the screen grab — at night that paints fog-grey
-        // into black only where the cards draw. Write a dummy first so GLSL
-        // compilers that reject "discard-only" programs still link.
-        gl_FragColor = vec4(0.0);
-        if (uBarrelCard > 0.5) discard;
         float mask = 0.0;
         vec2 nxy = vec2(0.0);
         float haze = 0.0;
@@ -6255,8 +6262,13 @@ function renderHeatHaze(dest) {
   if (barrelHeatHazeLive) {
     camera.layers.set(HEAT_HAZE_LAYER);
     renderer.setRenderTarget(dest);
-    renderer.render(scene, camera);
-    restoreCameraLayers();
+    try {
+      renderer.render(scene, camera);
+    } catch (err) {
+      console.warn("[heat] barrel card pass failed", err);
+    } finally {
+      restoreCameraLayers();
+    }
   }
 
   renderer.autoClear = prevAutoClear;

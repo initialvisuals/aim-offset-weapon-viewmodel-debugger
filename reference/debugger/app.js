@@ -2482,6 +2482,16 @@ function applyPassLabFromUrl() {
     const world = q.get("world");
     if (world === "1" || world === "true") setPassLabWorld(true, { toast: false });
     if (world === "0" || world === "false") setPassLabWorld(false, { toast: false });
+    const tod = q.get("tod") || q.get("clock");
+    if (tod != null && tod !== "") setTimeOfDay(tod, { toast: false });
+    const heat = q.get("heat");
+    if (heat != null && heat !== "") {
+      const n = clamp(parseFloat(heat), 0, 1);
+      if (Number.isFinite(n)) {
+        barrelHeatAmt[state.weaponId] = n;
+        applyBarrelHeatVisual();
+      }
+    }
   } catch (_) { /* ignore */ }
 }
 

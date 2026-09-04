@@ -275,7 +275,7 @@ const HEAT_HAZE_SIZE_MAX = 2;
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
 const APP_CACHE_BUST = "20260824v63";
-const APP_BUILD_STAMP = "2026-09-04 01:20";
+const APP_BUILD_STAMP = "2026-09-04 01:30";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -2494,7 +2494,7 @@ function applyPassLabFromUrl() {
           state.barrelHeat = BARREL_HEAT_DEFAULT;
           syncBarrelHeatUI();
         }
-        applyBarrelHeatVisual();
+        requestAnimationFrame(() => applyBarrelHeatVisual());
       }
     }
   } catch (_) { /* ignore */ }
@@ -4458,13 +4458,13 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
 
   float micro = conTriplanar(wp, n, scale);
   float mac = conMacro(wp, scale);
-  float patch = mix(micro, mac, mix(0.40, 0.78, rangeConLod));
+  float gritMix = mix(micro, mac, mix(0.40, 0.78, rangeConLod));
   float pit = mix(conPitting(wp, scale), 0.5, rangeConLod);
   float bay = conBay(wp);
 
   vec3 albedo = diffuseColor.rgb;
-  albedo *= mix(0.74, 1.20, patch);
-  albedo *= mix(1.0, 0.70, variation * (1.0 - patch) * mix(1.0, 0.40, rangeConLod));
+  albedo *= mix(0.74, 1.20, gritMix);
+  albedo *= mix(1.0, 0.70, variation * (1.0 - gritMix) * mix(1.0, 0.40, rangeConLod));
   albedo *= mix(0.86, 1.10, bay);
 
   vec2 pcell = conPanelCell(wp, n);
@@ -4509,7 +4509,7 @@ void applyRangeConcreteAlbedo(inout vec4 diffuseColor, inout float roughnessFact
   rough = mix(rough, rough * 0.78, wear);
   rough = mix(rough, min(rough + 0.06, 1.0), wet);
   rough = mix(rough, rough * 0.92, rust);
-  rough = mix(rough, rough * 1.05, patch * variation);
+  rough = mix(rough, rough * 1.05, gritMix * variation);
   rough = mix(rough, min(rough + 0.12, 1.0), contact);
   rough = mix(rough, min(rough + 0.10, 1.0), tileFx.x);
   rough = mix(rough, min(rough + 0.08, 1.0), ties);

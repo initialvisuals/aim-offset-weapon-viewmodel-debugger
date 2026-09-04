@@ -211,6 +211,10 @@ let heatHazeDummyTex = null;
 let heatHazeGrabRT = null;
 let heatHazePost = null;
 let barrelHeatHazeLive = false;
+const _hazeMuzzleWorld = new THREE.Vector3();
+const _hazeMuzzleLocal = new THREE.Vector3();
+const _hazeMuzzlePrev = new THREE.Vector3();
+let hazeMuzzlePrevOk = false;
 /** Recoil pattern index resets after this gap of not firing. */
 const RECOIL_RESET_MS = 200;
 
@@ -273,9 +277,13 @@ const HEAT_HAZE_SIZE_MAX = 2;
  * On load, a one-time migration forces persisted true → false (old builds).
  */
 const GROUND_HEAT_HAZE_DEFAULT = false;
+/** Vertex-discard barrel cards (no grab). Default ON — this is the heat warp. */
+const BARREL_HEAT_HAZE_DEFAULT = true;
+/** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
+const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v63";
-const APP_BUILD_STAMP = "2026-09-04 01:40";
+const APP_CACHE_BUST = "20260824v64";
+const APP_BUILD_STAMP = "2026-09-04 14:20";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -470,6 +478,10 @@ const state = {
   heatHazeStrength: HEAT_HAZE_STRENGTH_DEFAULT,
   /** Noise scale + height-fog band mul. 1 = authored. */
   heatHazeSize: HEAT_HAZE_SIZE_DEFAULT,
+  /** Master gate: OFF forces barrel cards + ground post off. Strength 0 also kills them. */
+  heatHazeMaster: HEAT_HAZE_MASTER_DEFAULT,
+  /** Barrel heat-haze cards (vertex warp, no grab). Default ON. */
+  barrelHeatHaze: BARREL_HEAT_HAZE_DEFAULT,
   /** Fullscreen ground/height-fog heat post. Default OFF (fog slap). */
   groundHeatHaze: GROUND_HEAT_HAZE_DEFAULT,
   /** Visual disc + sky-shader halo (degrees). Must not enlarge the bloom kernel. */
@@ -2494,6 +2506,13 @@ function applyPassLabFromUrl() {
           state.barrelHeat = BARREL_HEAT_DEFAULT;
           syncBarrelHeatUI();
         }
+        // Persisted haze toggles / strength 0 would hide the night-heat check.
+        if (n > 0) {
+          if (!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT)) state.heatHazeMaster = true;
+          if (!(state.barrelHeatHaze ?? BARREL_HEAT_HAZE_DEFAULT)) state.barrelHeatHaze = true;
+          if ((state.heatHazeStrength ?? 0) < 0.01) state.heatHazeStrength = HEAT_HAZE_STRENGTH_DEFAULT;
+          syncHeatHazeUI();
+        }
         requestAnimationFrame(() => applyBarrelHeatVisual());
       }
     }
@@ -2836,6 +2855,19 @@ async function freezePassLab() {
   }
 }
 
+function heatHazeMasterOn() {
+  const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
+  return !!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT) && str >= 0.01;
+}
+
+function barrelHeatCardsEnabled() {
+  return heatHazeMasterOn() && !!(state.barrelHeatHaze ?? BARREL_HEAT_HAZE_DEFAULT);
+}
+
+function groundHeatHazeEnabled() {
+  return heatHazeMasterOn() && !!state.groundHeatHaze;
+}
+
 function syncHeatHazeUI() {
   const st = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
   const sz = state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT;
@@ -2847,6 +2879,10 @@ function syncHeatHazeUI() {
   const szVal = el("heatHazeSizeVal");
   if (szSlider) szSlider.value = String(sz);
   if (szVal) szVal.textContent = Number(sz).toFixed(2);
+  const master = el("chkHeatHazeMaster");
+  if (master) master.checked = !!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT);
+  const cards = el("chkBarrelHeatHaze");
+  if (cards) cards.checked = !!(state.barrelHeatHaze ?? BARREL_HEAT_HAZE_DEFAULT);
   const chk = el("chkGroundHeatHaze");
   if (chk) chk.checked = !!state.groundHeatHaze;
 }
@@ -2854,6 +2890,7 @@ function syncHeatHazeUI() {
 function setHeatHazeStrength(v, { toast = false } = {}) {
   const n = clamp(parseFloat(v), 0, HEAT_HAZE_STRENGTH_MAX);
   state.heatHazeStrength = Number.isFinite(n) ? n : HEAT_HAZE_STRENGTH_DEFAULT;
+  applyBarrelHeatVisual();
   applyHeatHazeUniforms();
   syncHeatHazeUI();
   if (toast) showToast(`Heat haze ${state.heatHazeStrength.toFixed(2)}`);
@@ -2868,6 +2905,24 @@ function setHeatHazeSize(v, { toast = false } = {}) {
   syncHeatHazeUI();
   if (toast) showToast(`Heat haze size ${state.heatHazeSize.toFixed(2)}`);
   scheduleSaveSettings();
+}
+
+function setHeatHazeMaster(on, { toast = false } = {}) {
+  state.heatHazeMaster = !!on;
+  applyBarrelHeatVisual();
+  applyHeatHazeUniforms();
+  syncHeatHazeUI();
+  scheduleSaveSettings();
+  if (toast) showToast(state.heatHazeMaster ? "Heat haze master ON" : "Heat haze master OFF");
+}
+
+function setBarrelHeatHaze(on, { toast = false } = {}) {
+  state.barrelHeatHaze = !!on;
+  applyBarrelHeatVisual();
+  applyHeatHazeUniforms();
+  syncHeatHazeUI();
+  scheduleSaveSettings();
+  if (toast) showToast(state.barrelHeatHaze ? "Barrel heat haze ON" : "Barrel heat haze OFF");
 }
 
 function setGroundHeatHaze(on, { toast = false } = {}) {
@@ -3253,7 +3308,10 @@ function rebuildHeldGun() {
   if (player) {
     player.camRecoilP = 0;
     player.camRecoilY = 0;
+    player.hazeVelX = 0;
+    player.hazeVelY = 0;
   }
+  hazeMuzzlePrevOk = false;
   updateFireModeHud();
 }
 
@@ -3712,9 +3770,12 @@ const player = {
   fovAds: FOV_BY_OPTIC.iron,
   fov: FOV_BY_OPTIC.hip,
   strafeTilt: 0,
-  /** Barrel heat-card top lean (opposite sway/strafe), smoothed. */
+  /** Barrel heat-card top lean (opposite sway/strafe + motion trail), smoothed. */
   hazeLeanX: 0,
   hazeLeanUp: 0,
+  /** Camera-local muzzle velocity (m/s), low-passed — drives plume lag. */
+  hazeVelX: 0,
+  hazeVelY: 0,
   flashUntil: 0,
   swayT: 0,
   swayAmp: 1,
@@ -3777,6 +3838,8 @@ const SETTINGS_FIELDS = [
   { key: "barrelHeat", src: "state", type: "num" },
   { key: "heatHazeStrength", src: "state", type: "num" },
   { key: "heatHazeSize", src: "state", type: "num" },
+  { key: "heatHazeMaster", src: "state", type: "bool" },
+  { key: "barrelHeatHaze", src: "state", type: "bool" },
   { key: "groundHeatHaze", src: "state", type: "bool" },
   { key: "sunSize", src: "state", type: "num" },
   { key: "sunPunch", src: "state", type: "num" },
@@ -3801,6 +3864,8 @@ function collectSettingsBlob() {
   for (const f of SETTINGS_FIELDS) {
     blob[f.key] = settingsHost(f.src)[f.key];
   }
+  // Marker so the old every-load "force ground heat OFF" hammer runs once.
+  blob.heatGrabSplit = true;
   return blob;
 }
 
@@ -3858,6 +3923,8 @@ function applySettingsBlob(blob) {
   state.concreteVar = clamp(state.concreteVar ?? CONCRETE_VAR_DEFAULT, CONCRETE_VAR_MIN, CONCRETE_VAR_MAX);
   state.heatHazeStrength = clamp(state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
   state.heatHazeSize = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+  state.heatHazeMaster = !!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT);
+  state.barrelHeatHaze = !!(state.barrelHeatHaze ?? BARREL_HEAT_HAZE_DEFAULT);
   state.groundHeatHaze = !!(state.groundHeatHaze ?? GROUND_HEAT_HAZE_DEFAULT);
   state.casingDraw = Math.round(clamp(state.casingDraw ?? CASING_DRAW_DEFAULT, CASING_DRAW_MIN, CASING_DRAW_MAX));
   state.decalDraw = Math.round(clamp(state.decalDraw ?? DECAL_DRAW_DEFAULT, DECAL_DRAW_MIN, DECAL_DRAW_MAX) / 10) * 10;
@@ -3874,10 +3941,11 @@ function loadPersistedSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return;
-    applySettingsBlob(JSON.parse(raw));
+    const blob = JSON.parse(raw);
+    applySettingsBlob(blob);
     // Older builds could persist groundHeatHaze:true → fullscreen blue fog slap.
-    // One-time migration: force OFF and rewrite settings; checkbox can re-enable later.
-    if (state.groundHeatHaze) {
+    // One-time: force OFF until heatGrabSplit is written; checkbox then persists.
+    if (!blob.heatGrabSplit && state.groundHeatHaze) {
       state.groundHeatHaze = false;
       migrateGroundHeatOff = true;
     }
@@ -5712,13 +5780,17 @@ function makeHeatHazeMaterial(opts = {}) {
         float haze = 0.0;
         heatField(wp.xyz, uv, mask, nxy, haze);
         mask *= uHeat;
-        if (uStrength > 0.01 && mask > 0.002) {
+        // Bottom belt stays pinned to the tube (zero displace). Rise + lateral wiggle grow with UV.y.
+        float pin = uBarrelCard > 0.5 ? smoothstep(0.0, 0.08, uv.y) : 1.0;
+        if (uStrength > 0.01 && mask > 0.002 && pin > 0.0) {
           vec3 up = vec3(0.0, 1.0, 0.0);
           vec3 toCam = cameraPosition - wp.xyz;
           vec3 viewTan = normalize(cross(up, normalize(toCam + vec3(1e-5, 0.0, 0.0))));
-          float disp = (haze - 0.5) * mask * uStrength * uDisp;
+          float rise = pin * pin;
+          float disp = (haze - 0.5) * mask * uStrength * uDisp * rise;
           wp.xyz += up * disp;
-          wp.xyz += viewTan * (nxy.x - 0.5) * mask * uStrength * uDisp * 0.55;
+          wp.xyz += viewTan * (nxy.x - 0.5) * mask * uStrength * uDisp * 0.55 * rise;
+          wp.xyz += viewTan * (nxy.y - 0.5) * mask * uStrength * uDisp * 0.32 * rise;
         }
         vWorldPos = wp.xyz;
         vNxy = nxy;
@@ -5839,7 +5911,7 @@ function addBarrelHeatShimmer(x, y, z, length) {
   for (const spec of specs) {
     const cardW = len * 1.22 * spec.wMul;
     const cardH = hazeH * 1.48 * spec.hMul;
-    const geo = new THREE.PlaneGeometry(cardW, cardH, 24, 12);
+    const geo = new THREE.PlaneGeometry(cardW, cardH, 40, 20);
     const base = new Float32Array(geo.attributes.position.array);
     const card = new THREE.Mesh(geo, mat);
     // Seat plane bottom on the tube/can so hard seams hide against steel.
@@ -5881,7 +5953,8 @@ function applyBarrelHeatVisual() {
     }
     if (o.userData.barrelHeatShimmer && o.material && o.material.uniforms) {
       const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
-      const show = h > 0.38 && mul >= 0.01 && str >= 0.01;
+      const cardsOn = barrelHeatCardsEnabled();
+      const show = cardsOn && h > 0.38 && mul >= 0.01 && str >= 0.01;
       o.visible = show;
       o.material.uniforms.uHeat.value = show ? clamp((h - 0.38) * 1.2 * mul, 0, 1) : 0;
       o.material.uniforms.uTime.value = barrelHeatClock;
@@ -5912,7 +5985,7 @@ function groundHeatAmount() {
 
 function tickGroundHeatHaze() {
   if (!heatHazePost || !heatHazePost.hazeMat) return;
-  if (!state.groundHeatHaze) {
+  if (!groundHeatHazeEnabled()) {
     heatHazePost.hazeMat.uniforms.uHeat.value = 0;
     return;
   }
@@ -5956,20 +6029,52 @@ function syncHeatHazeMeshScales() {
   });
 }
 
-/** Bottom edge stays seated on the tube; top free-floats opposite sway/strafe + a bit up. */
+/** Bottom edge stays seated on the tube; top free-floats opposite sway + muzzle velocity. */
 function updateBarrelHeatCardMorph(dt) {
   if (!gunRoot) return;
   const sx = swayRig ? swayRig.position.x : 0;
   const rz = swayRig ? swayRig.rotation.z : 0;
   const strafe = player.strafeTilt || 0;
-  // Inertia opposite viewmodel swing: gun right → heat leans left.
-  const targetX = clamp(-(sx * 28 + rz * 0.55 + strafe * 4.0), -1, 1);
-  const targetUp = 0.35 + Math.min(0.65, Math.abs(targetX) * 0.55);
-  const k = 1 - Math.exp(-9 * Math.max(0.0001, dt));
+  // Camera-local muzzle vel (sway / bob / ADS / lean / recoil) — not world walk.
+  let vx = 0;
+  let vy = 0;
+  const dtUse = Math.max(0.0001, dt);
+  if (muzzleSocket && camera && dt > 1e-5 && dt < 0.12) {
+    muzzleSocket.updateWorldMatrix(true, false);
+    camera.updateMatrixWorld(true);
+    muzzleSocket.getWorldPosition(_hazeMuzzleWorld);
+    _hazeMuzzleLocal.copy(_hazeMuzzleWorld);
+    camera.worldToLocal(_hazeMuzzleLocal);
+    if (hazeMuzzlePrevOk) {
+      vx = (_hazeMuzzleLocal.x - _hazeMuzzlePrev.x) / dtUse;
+      vy = (_hazeMuzzleLocal.y - _hazeMuzzlePrev.y) / dtUse;
+    }
+    _hazeMuzzlePrev.copy(_hazeMuzzleLocal);
+    hazeMuzzlePrevOk = true;
+  } else if (dt >= 0.12) {
+    hazeMuzzlePrevOk = false;
+  }
+  const vk = 1 - Math.exp(-8 * dtUse);
+  player.hazeVelX = lerp(player.hazeVelX || 0, clamp(vx, -3.5, 3.5), vk);
+  player.hazeVelY = lerp(player.hazeVelY || 0, clamp(vy, -3.5, 3.5), vk);
+  // Inertia opposite viewmodel swing: gun right → heat trails left. Mild vel lag on top.
+  const targetX = clamp(
+    -(sx * 28 + rz * 0.55 + strafe * 4.0) - player.hazeVelX * 0.28,
+    -1.35,
+    1.35
+  );
+  const targetUp = clamp(
+    0.32 - player.hazeVelY * 0.20 + Math.min(0.55, Math.abs(targetX) * 0.45),
+    0,
+    1.15
+  );
+  const k = 1 - Math.exp(-9 * dtUse);
   player.hazeLeanX = lerp(player.hazeLeanX || 0, targetX, k);
   player.hazeLeanUp = lerp(player.hazeLeanUp || 0, targetUp, k);
+  if (!barrelHeatHazeLive) return;
   const leanX = player.hazeLeanX;
   const leanUp = player.hazeLeanUp;
+  const clock = barrelHeatClock;
   gunRoot.traverse((o) => {
     if (!o.userData.barrelHeatShimmer || !o.userData.hazeBasePos || !o.geometry) return;
     const pos = o.geometry.attributes.position;
@@ -5982,21 +6087,36 @@ function updateBarrelHeatCardMorph(dt) {
       const ix = i * 3;
       const y0 = base[ix + 1];
       const t = clamp((y0 / halfH + 1) * 0.5, 0, 1);
+      if (t <= 1e-4) {
+        arr[ix] = base[ix];
+        arr[ix + 1] = base[ix + 1];
+        arr[ix + 2] = base[ix + 2];
+        continue;
+      }
       const w = t * t;
-      arr[ix] = base[ix];
-      arr[ix + 1] = base[ix + 1] + leanUp * w * 0.028;
-      arr[ix + 2] = base[ix + 2] + leanX * w * 0.038;
+      const along = base[ix];
+      const wig = Math.sin(clock * 7.1 + along * 36 + t * 9.5) * 0.0016
+        + Math.sin(clock * 4.2 + along * 19) * 0.0011;
+      arr[ix] = base[ix] + wig * w * 0.55;
+      arr[ix + 1] = base[ix + 1] + leanUp * w * 0.028 + Math.abs(wig) * w * 0.35;
+      arr[ix + 2] = base[ix + 2] + leanX * w * 0.042 + wig * w;
     }
     pos.needsUpdate = true;
   });
 }
 
+function groundHeatHazePassWanted() {
+  if (!groundHeatHazeEnabled()) return false;
+  return groundHeatAmount() > 0.035;
+}
+
 function heatHazePassWanted() {
-  const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
-  if (str < 0.01) return false;
-  // Height-fog fullscreen post is opt-in (default OFF) — barrel cards only otherwise.
-  if (state.groundHeatHaze && groundHeatAmount() > 0.035) return true;
-  return !!barrelHeatHazeLive;
+  // Grab/post only when the ground height-fog blit will run. Barrel cards do not grab.
+  return groundHeatHazePassWanted();
+}
+
+function barrelHeatCardPassWanted() {
+  return barrelHeatCardsEnabled() && !!barrelHeatHazeLive;
 }
 
 function initHeatHazePost() {
@@ -6215,51 +6335,56 @@ function bindHeatHazeGrab(tex, resx, resy) {
   });
 }
 
-/** After the world (and ADS) land in dest, grab that RT. Height-fog is a
- * fullscreen UV warp from dest depth; barrel cards stay local to the tube.
+/** After the world (and ADS) land in dest. Ground post is the only grab path;
+ * barrel cards are vertex-discard and skip the scene grab entirely.
  */
 function renderHeatHaze(dest) {
-  if (!camera || !scene || !renderer || !heatHazePassWanted()) return;
+  if (!camera || !scene || !renderer) return;
+  const cardsOn = barrelHeatCardPassWanted();
+  const groundOn = groundHeatHazePassWanted();
+  if (!cardsOn && !groundOn) return;
   if (!dest || !dest.texture || dest.width < 1) return;
-  if (!heatHazePost) initHeatHazePost();
-  if (!grabHeatHazeScene(dest)) return;
 
   const resx = dest.width;
   const resy = dest.height;
-  const grabTex = heatHazeGrabRT.texture;
-  const hasDepth = !!(dest.depthTexture);
-  bindHeatHazeGrab(grabTex, resx, resy);
-
   const prevAutoClear = renderer.autoClear;
   const prevShadowAuto = renderer.shadowMap.autoUpdate;
   renderer.autoClear = false;
   renderer.shadowMap.autoUpdate = false;
 
-  const h = groundHeatAmount();
-  const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
-  const depthOk = hasDepth && dest.depthTexture.image &&
-    dest.depthTexture.image.width === dest.width &&
-    dest.depthTexture.image.height === dest.height;
-  // Height-fog fullscreen post: default OFF (fog slap). Even when enabled, bad depth → skip.
-  if (state.groundHeatHaze && h > 0.035 && str >= 0.01 && depthOk) {
-    camera.updateMatrixWorld();
-    const u = heatHazePost.hazeMat.uniforms;
-    u.tScene.value = grabTex;
-    u.uHasScene.value = 1;
-    u.uHasDepth.value = 1;
-    u.uHeat.value = h;
-    u.uTime.value = barrelHeatClock;
-    u.uStrength.value = clamp(str, 0, HEAT_HAZE_STRENGTH_MAX);
-    u.uSize.value = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
-    u.uFloorY.value = FLOOR_Y;
-    u.uResolution.value.set(resx, resy);
-    u.projInverse.value.copy(camera.projectionMatrixInverse);
-    u.viewInverse.value.copy(camera.matrixWorld);
-    u.cameraFar.value = camera.far;
-    blitHeatHaze(heatHazePost.hazeMat, dest);
+  let grabbed = false;
+  if (groundOn) {
+    if (!heatHazePost) initHeatHazePost();
+    const hasDepth = !!(dest.depthTexture);
+    const depthOk = hasDepth && dest.depthTexture.image &&
+      dest.depthTexture.image.width === dest.width &&
+      dest.depthTexture.image.height === dest.height;
+    const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
+    // Height-fog fullscreen post: default OFF (fog slap). Even when enabled, bad depth → skip.
+    if (depthOk && grabHeatHazeScene(dest)) {
+      grabbed = true;
+      const grabTex = heatHazeGrabRT.texture;
+      bindHeatHazeGrab(grabTex, resx, resy);
+      camera.updateMatrixWorld();
+      const h = groundHeatAmount();
+      const u = heatHazePost.hazeMat.uniforms;
+      u.tScene.value = grabTex;
+      u.uHasScene.value = 1;
+      u.uHasDepth.value = 1;
+      u.uHeat.value = h;
+      u.uTime.value = barrelHeatClock;
+      u.uStrength.value = clamp(str, 0, HEAT_HAZE_STRENGTH_MAX);
+      u.uSize.value = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+      u.uFloorY.value = FLOOR_Y;
+      u.uResolution.value.set(resx, resy);
+      u.projInverse.value.copy(camera.projectionMatrixInverse);
+      u.viewInverse.value.copy(camera.matrixWorld);
+      u.cameraFar.value = camera.far;
+      blitHeatHaze(heatHazePost.hazeMat, dest);
+    }
   }
 
-  if (barrelHeatHazeLive) {
+  if (cardsOn) {
     camera.layers.set(HEAT_HAZE_LAYER);
     renderer.setRenderTarget(dest);
     try {
@@ -6273,7 +6398,7 @@ function renderHeatHaze(dest) {
 
   renderer.autoClear = prevAutoClear;
   renderer.shadowMap.autoUpdate = prevShadowAuto;
-  bindHeatHazeGrab(null, resx, resy);
+  if (grabbed) bindHeatHazeGrab(null, resx, resy);
 }
 
 
@@ -13515,6 +13640,16 @@ function bind() {
   if (heatHazeSizeSlider) {
     heatHazeSizeSlider.value = String(state.heatHazeSize);
     heatHazeSizeSlider.oninput = (e) => setHeatHazeSize(e.target.value);
+  }
+  const chkHeatHazeMaster = el("chkHeatHazeMaster");
+  if (chkHeatHazeMaster) {
+    chkHeatHazeMaster.checked = !!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT);
+    chkHeatHazeMaster.onchange = (e) => setHeatHazeMaster(e.target.checked, { toast: true });
+  }
+  const chkBarrelHeatHaze = el("chkBarrelHeatHaze");
+  if (chkBarrelHeatHaze) {
+    chkBarrelHeatHaze.checked = !!(state.barrelHeatHaze ?? BARREL_HEAT_HAZE_DEFAULT);
+    chkBarrelHeatHaze.onchange = (e) => setBarrelHeatHaze(e.target.checked, { toast: true });
   }
   const chkGroundHeatHaze = el("chkGroundHeatHaze");
   if (chkGroundHeatHaze) {

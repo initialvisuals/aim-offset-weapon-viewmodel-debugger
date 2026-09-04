@@ -19,7 +19,7 @@ if not defined FF (
 set "PROFILE=%LOCALAPPDATA%\aim-offset-kiosk"
 if not exist "%PROFILE%" mkdir "%PROFILE%"
 
-start "" py -m http.server 8765 --bind 127.0.0.1
+start "aim-offset-server" /min py -m http.server 8765 --bind 127.0.0.1
 
 set WAITED=0
 :wait_server
@@ -37,7 +37,33 @@ pause
 exit /b 1
 
 :server_ready
-start "" /wait "%FF%" -kiosk -new-instance -no-remote -profile "%PROFILE%" -url "http://127.0.0.1:8765/"
+start "" "%FF%" -kiosk -new-instance -no-remote -profile "%PROFILE%" -url "http://127.0.0.1:8765/"
+
+echo Waiting for kiosk; Alt+F4 when done.
+
+REM Wait for the kiosk profile lock (firefox stub may exit; real process holds the lock).
+set LOCKWAIT=0
+:wait_lock_appear
+if exist "%PROFILE%\parent.lock" goto :wait_lock_gone
+if exist "%PROFILE%\.parentlock" goto :wait_lock_gone
+set /a LOCKWAIT+=1
+if %LOCKWAIT% geq 30 (
+  echo Profile lock did not appear. Leaving the server running until you close this window.
+  pause
+  call :kill_listener
+  exit /b 0
+)
+timeout /t 1 /nobreak >nul
+goto :wait_lock_appear
+
+:wait_lock_gone
+timeout /t 1 /nobreak >nul
+REM On Windows parent.lock often remains as a file; del fails while Firefox holds it.
+del "%PROFILE%\parent.lock" >nul 2>&1
+del "%PROFILE%\.parentlock" >nul 2>&1
+if exist "%PROFILE%\parent.lock" goto :wait_lock_gone
+if exist "%PROFILE%\.parentlock" goto :wait_lock_gone
+
 call :kill_listener
 exit /b 0
 

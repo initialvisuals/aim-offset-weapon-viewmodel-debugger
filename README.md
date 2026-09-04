@@ -177,9 +177,9 @@ Open http://127.0.0.1:8765/ and click the canvas for mouse look (pointer lock). 
 
 [`reference/debugger/StartServer.bat`](reference/debugger/StartServer.bat):
 
-- Serves `127.0.0.1:8765` from the debugger folder
+- Serves `127.0.0.1:8765` from the debugger folder (minimized titled window)
 - Waits until the server answers, then launches Firefox `-kiosk` with a dedicated profile under `%LOCALAPPDATA%\aim-offset-kiosk` (so homepage / Google is not tab 1)
-- **Alt+F4** exits the kiosk window; the script then kills **only** the listener on port 8765
+- The launcher waits on the kiosk profile lock (not the Firefox stub process); **Alt+F4** closes the kiosk, then the script kills **only** the listener on port 8765
 
 Needs Mozilla Firefox. If behavior is weird (profile locked, wrong window), close other Firefox instances first and run the bat again.
 

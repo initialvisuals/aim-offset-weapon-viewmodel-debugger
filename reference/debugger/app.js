@@ -274,8 +274,8 @@ const HEAT_HAZE_SIZE_MAX = 2;
  */
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v58";
-const APP_BUILD_STAMP = "2026-09-04 02:50";
+const APP_CACHE_BUST = "20260824v59";
+const APP_BUILD_STAMP = "2026-09-04 03:25";
 /** Pass-lab backdrop modes. `off` restores the ToD sky. */
 const PASS_LAB_MODES = ["off", "gray_ramp", "chroma", "gamma", "trans_checker", "fog_vs_near"];
 const PASS_LAB_MODE_DEFAULT = "off";
@@ -2431,11 +2431,14 @@ function updatePassLabBackdrop() {
   passLabMesh.visible = on;
   if (!on || !camera) return;
   bindPassLabMaterial();
+  // Sky-replace: 2D CanvasTexture as scene.background is a screen-space
+  // blit (always readable). The far plane stays in-world for haze/bloom.
+  if (scene && passLabMat && passLabMat.map) scene.background = passLabMat.map;
   camera.getWorldPosition(_skyCamPos);
   camera.getWorldDirection(_passLabFwd);
   const dist = Math.min((camera.far || 2000) * 0.88, 720);
   passLabMesh.position.copy(_skyCamPos).addScaledVector(_passLabFwd, dist);
-  // Plane +Z should match camera +Z so the front face looks back at the camera.
+  // Plane +Z matches camera +Z so the front looks back at the camera.
   passLabMesh.quaternion.copy(camera.quaternion);
   const vFov = (camera.fov * Math.PI) / 180;
   const h = 2.2 * dist * Math.tan(vFov * 0.5);

@@ -2489,6 +2489,11 @@ function applyPassLabFromUrl() {
       const n = clamp(parseFloat(heat), 0, 1);
       if (Number.isFinite(n)) {
         barrelHeatAmt[state.weaponId] = n;
+        // Persisted mul 0 would hide stored heat — force the visual on.
+        if (n > 0 && (state.barrelHeat ?? 0) < 0.01) {
+          state.barrelHeat = BARREL_HEAT_DEFAULT;
+          syncBarrelHeatUI();
+        }
         applyBarrelHeatVisual();
       }
     }

@@ -27,7 +27,7 @@
     </div>
     <div id="passLabPip" class="passlab-pip" hidden aria-hidden="true">
       <canvas id="passLabPipCanvas" width="200" height="200"></canvas>
-      <div class="passlab-pip-src" id="passLabPipSrc">scene</div>
+      <div class="passlab-pip-src" id="passLabPipSrc">final</div>
     </div>
     <div id="passLabSampleRect" class="passlab-sample-rect" hidden aria-hidden="true"></div>
     <div id="plugeOverlay" class="pluge-overlay" hidden aria-hidden="true">
@@ -301,8 +301,16 @@
           </select>
         </label>
         <label class="check-row"><input type="checkbox" id="chkPassLabPip" /> PIP probe (center crop)</label>
+        <label>PIP source
+          <select id="passLabPipSrcSelect">
+            <option value="final" selected>final (composite)</option>
+            <option value="scene">scene (pre-bloom dest)</option>
+            <option value="heat">heat grab</option>
+          </select>
+        </label>
+        <label class="check-row"><input type="checkbox" id="chkPassLabWorld" /> World backdrop (far quad, haze feel)</label>
         <button type="button" id="btnPassLabFreeze">Freeze &amp; save pass lab</button>
-        <p class="note">Far-Z chart behind the bay (not a CSS overlay). Off restores the ToD sky. PIP is a live center crop with a red sample rect. <kbd>P</kbd> (when not typing) downloads full + PIP PNGs with a build stamp. Default off. URL: <code>?passlab=chroma&amp;pip=1</code>.</p>
+        <p class="note">Flat chart is the default (screen-space plate). World far-quad is optional for in-scene haze. PIP samples <strong>final</strong> / <strong>scene</strong> dest / <strong>heat grab</strong> — individual passes and the composite. <kbd>P</kbd> downloads full + PIP PNGs. Default off. URL: <code>?passlab=chroma&amp;pip=1&amp;src=scene</code>.</p>
       </div>
 
       <div class="settings-section">
@@ -541,6 +549,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v60"></script>
+    <script type="module" src="app.js?v=20260824v61"></script>
 </body>
 </html>

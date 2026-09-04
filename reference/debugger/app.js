@@ -274,8 +274,11 @@ const HEAT_HAZE_SIZE_MAX = 2;
  */
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v60";
-const APP_BUILD_STAMP = "2026-09-04 03:35";
+const APP_CACHE_BUST = "20260824v61";
+const APP_BUILD_STAMP = "2026-09-04 03:40";
+/** PIP blit sources. `final` = what the user sees. */
+const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
+const PASS_LAB_PIP_SRC_DEFAULT = "final";
 /** Pass-lab backdrop modes. `off` restores the ToD sky. */
 const PASS_LAB_MODES = ["off", "gray_ramp", "chroma", "gamma", "trans_checker", "fog_vs_near"];
 const PASS_LAB_MODE_DEFAULT = "off";
@@ -479,6 +482,10 @@ const state = {
   passLabMode: PASS_LAB_MODE_DEFAULT,
   /** Live center-crop PIP + red sample rect. */
   passLabPip: false,
+  /** PIP blit: final composite / scene dest / heat grab. */
+  passLabPipSrc: PASS_LAB_PIP_SRC_DEFAULT,
+  /** Also place the chart on a far world quad (haze feel). Flat screen-space is the default. */
+  passLabWorld: false,
 };
 
 const LOOK_SENS_BASE = 0.0022;
@@ -2217,6 +2224,11 @@ function normalizePassLabMode(v) {
   return PASS_LAB_MODES.includes(s) ? s : PASS_LAB_MODE_DEFAULT;
 }
 
+function normalizePassLabPipSrc(v) {
+  const s = String(v || PASS_LAB_PIP_SRC_DEFAULT);
+  return PASS_LAB_PIP_SOURCES.includes(s) ? s : PASS_LAB_PIP_SRC_DEFAULT;
+}
+
 function passLabBackdropOn() {
   return normalizePassLabMode(state.passLabMode) !== "off";
 }
@@ -2428,17 +2440,18 @@ function updatePassLabBackdrop() {
     if (moonDisc) moonDisc.visible = false;
   }
   if (!passLabMesh) return;
-  passLabMesh.visible = on;
-  if (!on || !camera) return;
+  const world = on && !!state.passLabWorld;
+  passLabMesh.visible = world;
+  if (!on) return;
   bindPassLabMaterial();
-  // Sky-replace: 2D CanvasTexture as scene.background is a screen-space
-  // blit (always readable). The far plane stays in-world for haze/bloom.
+  // Flat debugger plate: 2D CanvasTexture as scene.background (screen-space).
+  // Optional far quad is the in-world haze feel — off by default.
   if (scene && passLabMat && passLabMat.map) scene.background = passLabMat.map;
+  if (!world || !camera) return;
   camera.getWorldPosition(_skyCamPos);
   camera.getWorldDirection(_passLabFwd);
   const dist = Math.min((camera.far || 2000) * 0.88, 720);
   passLabMesh.position.copy(_skyCamPos).addScaledVector(_passLabFwd, dist);
-  // Plane +Z matches camera +Z so the front looks back at the camera.
   passLabMesh.quaternion.copy(camera.quaternion);
   const vFov = (camera.fov * Math.PI) / 180;
   const h = 2.2 * dist * Math.tan(vFov * 0.5);
@@ -2464,6 +2477,11 @@ function applyPassLabFromUrl() {
     if (mode) setPassLabMode(mode, { toast: false });
     const pip = q.get("pip");
     if (pip === "1" || pip === "true") setPassLabPip(true, { toast: false });
+    const src = q.get("src") || q.get("passlabSrc");
+    if (src) setPassLabPipSrc(src, { toast: false });
+    const world = q.get("world");
+    if (world === "1" || world === "true") setPassLabWorld(true, { toast: false });
+    if (world === "0" || world === "false") setPassLabWorld(false, { toast: false });
   } catch (_) { /* ignore */ }
 }
 
@@ -2502,11 +2520,30 @@ function setPassLabPip(on, { toast = false } = {}) {
   scheduleSaveSettings();
 }
 
+function setPassLabPipSrc(v, { toast = false } = {}) {
+  state.passLabPipSrc = normalizePassLabPipSrc(v);
+  syncPassLabUI();
+  if (toast) showToast("PIP source " + state.passLabPipSrc);
+  scheduleSaveSettings();
+}
+
+function setPassLabWorld(on, { toast = false } = {}) {
+  state.passLabWorld = !!on;
+  updatePassLabBackdrop();
+  syncPassLabUI();
+  if (toast) showToast(state.passLabWorld ? "World backdrop ON" : "World backdrop OFF");
+  scheduleSaveSettings();
+}
+
 function syncPassLabUI() {
   const sel = el("passLabModeSelect");
   if (sel) sel.value = normalizePassLabMode(state.passLabMode);
   const chk = el("chkPassLabPip");
   if (chk) chk.checked = !!state.passLabPip;
+  const srcSel = el("passLabPipSrcSelect");
+  if (srcSel) srcSel.value = normalizePassLabPipSrc(state.passLabPipSrc);
+  const chkWorld = el("chkPassLabWorld");
+  if (chkWorld) chkWorld.checked = !!state.passLabWorld;
 }
 
 function passLabCropRect(bufW, bufH) {
@@ -2529,24 +2566,159 @@ function passLabCropRect(bufW, bufH) {
   };
 }
 
-function passLabSourceLabel() {
-  let src = "scene";
-  if (heatHazeGrabRT && heatHazePassWanted()) src += " · heat grab";
-  return src;
+let passLabLastDest = null;
+let passLabPipBlit = null;
+const _passLabPipFlip = document.createElement("canvas");
+
+function passLabRtOk(rt) {
+  return !!(rt && rt.texture && rt.width >= 2 && rt.height >= 2);
+}
+
+function ensurePassLabPipBlit() {
+  if (passLabPipBlit || !renderer) return passLabPipBlit;
+  const rt = new THREE.WebGLRenderTarget(PASS_LAB_PIP_CSS, PASS_LAB_PIP_CSS, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    type: THREE.UnsignedByteType,
+    format: THREE.RGBAFormat,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+  rt.texture.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.ShaderMaterial({
+    name: "passLabPipBlit",
+    uniforms: {
+      tInput: { value: null },
+      uRect: { value: new THREE.Vector4(0, 0, 1, 1) },
+      uEncode: { value: 1 },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tInput;
+      uniform vec4 uRect;
+      uniform float uEncode;
+      varying vec2 vUv;
+      void main() {
+        vec2 uv = uRect.xy + vUv * uRect.zw;
+        vec3 c = texture2D(tInput, uv).rgb;
+        if (uEncode > 0.5) {
+          c = c / (c + vec3(1.0));
+          c = pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));
+        }
+        gl_FragColor = vec4(c, 1.0);
+      }
+    `,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+  quad.frustumCulled = false;
+  const fsScene = new THREE.Scene();
+  fsScene.add(quad);
+  const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  passLabPipBlit = { rt, mat, quad, fsScene, fsCam };
+  return passLabPipBlit;
+}
+
+function passLabSrcNeedsEncode(rt) {
+  // HDR dest (bloom capture) and its heat grab need a cheap display encode.
+  // Dither dest is already tone-mapped during the world render.
+  if (!rt) return 0;
+  if (bloomWanted() && hdrBloom && (rt === hdrBloom.sceneRT || rt === passLabLastDest || rt === heatHazeGrabRT)) {
+    return 1;
+  }
+  return 0;
+}
+
+function resolvePassLabPipSource() {
+  const want = normalizePassLabPipSrc(state.passLabPipSrc);
+  const sceneRt = passLabRtOk(passLabLastDest) ? passLabLastDest : null;
+  const heatLive = heatHazePassWanted() && passLabRtOk(heatHazeGrabRT);
+  const heatRt = heatLive ? heatHazeGrabRT : null;
+  const encodeScene = passLabSrcNeedsEncode(sceneRt);
+  const encodeHeat = passLabSrcNeedsEncode(heatRt);
+  if (want === "heat") {
+    if (heatRt) return { kind: "heat", rt: heatRt, encode: encodeHeat, label: "heat grab" };
+    if (sceneRt) return { kind: "scene", rt: sceneRt, encode: encodeScene, label: "heat → scene" };
+    return { kind: "final", rt: null, encode: 0, label: "heat → final" };
+  }
+  if (want === "scene") {
+    if (sceneRt) return { kind: "scene", rt: sceneRt, encode: encodeScene, label: "scene" };
+    return { kind: "final", rt: null, encode: 0, label: "scene → final" };
+  }
+  return { kind: "final", rt: null, encode: 0, label: "final" };
+}
+
+function blitPassLabPipFromRT(rt, encode) {
+  const pip = el("passLabPipCanvas");
+  if (!pip || !renderer || !passLabRtOk(rt)) return false;
+  const blit = ensurePassLabPipBlit();
+  if (!blit) return false;
+  const crop = passLabCropRect(rt.width, rt.height);
+  const u = blit.mat.uniforms;
+  u.tInput.value = rt.texture;
+  u.uRect.value.set(
+    crop.x / rt.width,
+    1 - (crop.y + crop.h) / rt.height,
+    crop.w / rt.width,
+    crop.h / rt.height
+  );
+  u.uEncode.value = encode ? 1 : 0;
+  const prev = renderer.getRenderTarget();
+  const prevAC = renderer.autoClear;
+  renderer.autoClear = true;
+  renderer.setRenderTarget(blit.rt);
+  renderer.render(blit.fsScene, blit.fsCam);
+  const w = blit.rt.width;
+  const h = blit.rt.height;
+  const buf = new Uint8Array(w * h * 4);
+  renderer.readRenderTargetPixels(blit.rt, 0, 0, w, h, buf);
+  renderer.setRenderTarget(prev);
+  renderer.autoClear = prevAC;
+  u.tInput.value = null;
+  if (_passLabPipFlip.width !== w) _passLabPipFlip.width = w;
+  if (_passLabPipFlip.height !== h) _passLabPipFlip.height = h;
+  const fctx = _passLabPipFlip.getContext("2d");
+  if (!fctx) return false;
+  const img = fctx.createImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    const src = (h - 1 - y) * w * 4;
+    img.data.set(buf.subarray(src, src + w * 4), y * w * 4);
+  }
+  fctx.putImageData(img, 0, 0);
+  const ctx = pip.getContext("2d");
+  if (!ctx) return false;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(_passLabPipFlip, 0, 0, w, h, 0, 0, pip.width, pip.height);
+  return true;
+}
+
+function blitPassLabPipFromCanvas() {
+  const pip = el("passLabPipCanvas");
+  if (!pip || !renderer) return false;
+  const src = renderer.domElement;
+  const crop = passLabCropRect(src.width, src.height);
+  const ctx = pip.getContext("2d");
+  if (!ctx) return false;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, pip.width, pip.height);
+  return true;
 }
 
 function updatePassLabPip() {
   if (!passLabPipWanted() || !renderer) return;
-  const pip = el("passLabPipCanvas");
+  const resolved = resolvePassLabPipSource();
   const label = el("passLabPipSrc");
-  if (label) label.textContent = passLabSourceLabel();
-  if (!pip) return;
-  const src = renderer.domElement;
-  const crop = passLabCropRect(src.width, src.height);
-  const ctx = pip.getContext("2d");
-  if (!ctx) return;
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, pip.width, pip.height);
+  if (label) label.textContent = resolved.label;
+  if (resolved.kind === "final" || !resolved.rt) blitPassLabPipFromCanvas();
+  else if (!blitPassLabPipFromRT(resolved.rt, resolved.encode)) blitPassLabPipFromCanvas();
 }
 
 function burnPassLabStamp(ctx, w, h, text) {
@@ -2588,8 +2760,11 @@ async function freezePassLab() {
   renderScene();
   updatePassLabPip();
   const src = renderer.domElement;
-  const stamp = passLabStampText();
+  const resolved = resolvePassLabPipSource();
+  const baseStamp = passLabStampText();
   const tag = passLabFileTag();
+  const fullStamp = `${baseStamp} · final`;
+  const pipStamp = `${baseStamp} · ${resolved.label}`;
   const full = document.createElement("canvas");
   full.width = src.width;
   full.height = src.height;
@@ -2599,22 +2774,35 @@ async function freezePassLab() {
     return;
   }
   fctx.drawImage(src, 0, 0);
-  burnPassLabStamp(fctx, full.width, full.height, stamp);
+  burnPassLabStamp(fctx, full.width, full.height, fullStamp);
 
-  const crop = passLabCropRect(src.width, src.height);
+  const live = el("passLabPipCanvas");
   const pip = document.createElement("canvas");
-  pip.width = Math.max(1, crop.w);
-  pip.height = Math.max(1, crop.h);
-  const pctx = pip.getContext("2d");
-  if (!pctx) {
-    showToast("Pass lab save failed", true);
-    return;
+  if (live && live.width && live.height) {
+    pip.width = live.width;
+    pip.height = live.height;
+    const pctx = pip.getContext("2d");
+    if (!pctx) {
+      showToast("Pass lab save failed", true);
+      return;
+    }
+    pctx.drawImage(live, 0, 0);
+    burnPassLabStamp(pctx, pip.width, pip.height, pipStamp);
+  } else {
+    const crop = passLabCropRect(src.width, src.height);
+    pip.width = Math.max(1, crop.w);
+    pip.height = Math.max(1, crop.h);
+    const pctx = pip.getContext("2d");
+    if (!pctx) {
+      showToast("Pass lab save failed", true);
+      return;
+    }
+    pctx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, pip.width, pip.height);
+    burnPassLabStamp(pctx, pip.width, pip.height, pipStamp);
   }
-  pctx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, pip.width, pip.height);
-  burnPassLabStamp(pctx, pip.width, pip.height, stamp);
 
   const okFull = await downloadCanvasPng(full, `passlab-full-${tag}.png`);
-  const okPip = await downloadCanvasPng(pip, `passlab-pip-${tag}.png`);
+  const okPip = await downloadCanvasPng(pip, `passlab-pip-${resolved.kind}-${tag}.png`);
   if (okFull && okPip) showToast("Saved pass lab PNGs");
   else showToast("Pass lab save failed", true);
 }
@@ -3566,6 +3754,8 @@ const SETTINGS_FIELDS = [
   { key: "clouds", src: "state", type: "num" },
   { key: "passLabMode", src: "state", type: "str" },
   { key: "passLabPip", src: "state", type: "bool" },
+  { key: "passLabPipSrc", src: "state", type: "str" },
+  { key: "passLabWorld", src: "state", type: "bool" },
   { key: "crouchGrad", src: "state", type: "num" },
   { key: "crouchLastDepth", src: "state", type: "num" },
   { key: "homeHold", src: "state", type: "str" },
@@ -3645,6 +3835,8 @@ function applySettingsBlob(blob) {
   state.homeHold = normalizeHomeHold(state.homeHold);
   state.passLabMode = normalizePassLabMode(state.passLabMode);
   state.passLabPip = !!state.passLabPip;
+  state.passLabPipSrc = normalizePassLabPipSrc(state.passLabPipSrc);
+  state.passLabWorld = !!state.passLabWorld;
 }
 
 function loadPersistedSettings() {
@@ -3687,6 +3879,8 @@ function applySettingsSideEffects() {
   setPerfOverlay(!!state.showPerf, { toast: false });
   applyPassLabMode({ toast: false });
   setPassLabPip(!!state.passLabPip, { toast: false });
+  setPassLabPipSrc(state.passLabPipSrc, { toast: false });
+  setPassLabWorld(!!state.passLabWorld, { toast: false });
   trimImpactDecals();
   expireImpactDecals();
   trimCasings();
@@ -8951,6 +9145,7 @@ function renderScene() {
   }
 
   renderHeatHaze(dest);
+  passLabLastDest = dest;
 
   const out = ditherOn ? outputDither.rt : null;
   if (bloomOn) {
@@ -13189,6 +13384,16 @@ function bind() {
   if (chkPassLabPip) {
     chkPassLabPip.checked = !!state.passLabPip;
     chkPassLabPip.onchange = (e) => setPassLabPip(e.target.checked, { toast: true });
+  }
+  const passLabPipSrcSelect = el("passLabPipSrcSelect");
+  if (passLabPipSrcSelect) {
+    passLabPipSrcSelect.value = normalizePassLabPipSrc(state.passLabPipSrc);
+    passLabPipSrcSelect.onchange = (e) => setPassLabPipSrc(e.target.value, { toast: true });
+  }
+  const chkPassLabWorld = el("chkPassLabWorld");
+  if (chkPassLabWorld) {
+    chkPassLabWorld.checked = !!state.passLabWorld;
+    chkPassLabWorld.onchange = (e) => setPassLabWorld(e.target.checked, { toast: true });
   }
   const btnPassLabFreeze = el("btnPassLabFreeze");
   if (btnPassLabFreeze) {

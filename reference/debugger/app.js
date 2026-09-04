@@ -2457,6 +2457,16 @@ function applyPassLabMode({ toast = false } = {}) {
   }
 }
 
+function applyPassLabFromUrl() {
+  try {
+    const q = new URLSearchParams(location.search || "");
+    const mode = q.get("passlab") || q.get("passLab");
+    if (mode) setPassLabMode(mode, { toast: false });
+    const pip = q.get("pip");
+    if (pip === "1" || pip === "true") setPassLabPip(true, { toast: false });
+  } catch (_) { /* ignore */ }
+}
+
 function setPassLabMode(v, { toast = false } = {}) {
   state.passLabMode = normalizePassLabMode(v);
   applyPassLabMode({ toast });
@@ -10045,6 +10055,7 @@ function initThree() {
   applyDisplayLook();
   applyPassLabMode({ toast: false });
   syncPassLabPipOverlay();
+  applyPassLabFromUrl();
   const ro = new ResizeObserver(() => resize());
   ro.observe(canvas.parentElement || canvas);
   void prewarmShotFx().catch(() => {}).finally(() => {

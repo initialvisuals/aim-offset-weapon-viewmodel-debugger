@@ -4902,28 +4902,47 @@ const HEAT_HAZE_NOISE_GLSL = /* glsl */`
       }
       void heatField(vec3 wp, vec2 vu, out float mask, out vec2 nxy, out float haze) {
         vec2 ns = uNScale / max(uSize, 0.2);
-        vec2 field = vec2(wp.x, wp.z) * ns.x;
-        float y = wp.y * ns.y - uTime * uRise;
-        vec2 uv = vec2(field.x, y);
+        vec2 uv;
+        // Barrel cards: rise along card UV.y (up the plane). Height-fog post: world XZ + world Y.
+        if (uBarrelCard > 0.5) {
+          float along = (vu.x - 0.5) * ns.x * 0.28;
+          float rise = vu.y * ns.y - uTime * uRise;
+          uv = vec2(along, rise);
+        } else {
+          vec2 field = vec2(wp.x, wp.z) * ns.x;
+          float y = wp.y * ns.y - uTime * uRise;
+          uv = vec2(field.x, y);
+        }
         float n1 = fbm(uv);
         float n2 = fbm(uv * 1.63 + vec2(5.1, -uTime * 0.22));
         vec2 warped = uv + (vec2(n1, n2) - 0.5) * uWarp;
         haze = fbm(warped);
         float wiggle = abs(n1 - n2);
         float body = smoothstep(0.22, 0.68, haze) * (0.55 + 0.45 * wiggle);
-        float edgeX = smoothstep(0.0, 0.12, vu.x) * smoothstep(1.0, 0.88, vu.x);
-        float edgeY;
         float height = 1.0;
         if (uHeightFog > 0.5) {
-          edgeY = smoothstep(0.0, 0.04, vu.y) * smoothstep(1.0, 0.92, vu.y);
+          float edgeX = smoothstep(0.0, 0.12, vu.x) * smoothstep(1.0, 0.88, vu.x);
+          float edgeY = smoothstep(0.0, 0.04, vu.y) * smoothstep(1.0, 0.92, vu.y);
           float hAbove = wp.y - uFloorY;
           float fogN = fbm(vec2(wp.x, wp.z) * (0.09 / max(uSize, 0.2)) + vec2(uTime * 0.04, 3.1));
           float band = uBandH * uSize * (0.48 + 1.35 * fogN);
           height = (1.0 - smoothstep(band * 0.12, band, hAbove)) * smoothstep(-0.05, 0.04, hAbove);
           body = max(body, height * (0.40 + 0.60 * haze));
           mask = body * edgeX * edgeY * height;
+        } else if (uBarrelCard > 0.5) {
+          // Soft safe zone: L/R/top dead margins; bottom seats on tube; active lobe bottom-mid → top-third.
+          float padLR = 0.22;
+          float edgeX = smoothstep(0.0, padLR, vu.x) * smoothstep(1.0, 1.0 - padLR, vu.x);
+          float seat = smoothstep(-0.04, 0.05, vu.y);
+          float topCut = smoothstep(0.68, 0.40, vu.y);
+          float dx = (vu.x - 0.5) / 0.38;
+          float dy = (vu.y - 0.06) / 0.52;
+          float dome = 1.0 - smoothstep(0.42, 1.08, dx * dx + dy * dy * 0.9);
+          float vignette = edgeX * seat * topCut * clamp(dome, 0.0, 1.0);
+          mask = body * vignette;
         } else {
-          edgeY = smoothstep(0.0, 0.08, vu.y) * smoothstep(1.0, 0.34, vu.y);
+          float edgeX = smoothstep(0.0, 0.12, vu.x) * smoothstep(1.0, 0.88, vu.x);
+          float edgeY = smoothstep(0.0, 0.08, vu.y) * smoothstep(1.0, 0.34, vu.y);
           mask = body * edgeX * edgeY;
         }
         nxy = vec2(n1, n2);
@@ -4944,6 +4963,7 @@ function makeHeatHazeMaterial(opts = {}) {
       uSize: { value: HEAT_HAZE_SIZE_DEFAULT },
       uDisp: { value: opts.disp != null ? opts.disp : 0.02 },
       uHeightFog: { value: opts.heightFog ? 1 : 0 },
+      uBarrelCard: { value: opts.barrelCard ? 1 : 0 },
       uFloorY: { value: FLOOR_Y },
       uBandH: { value: opts.bandH != null ? opts.bandH : GROUND_HAZE_H },
       tScene: { value: getHeatHazeDummyTex() },
@@ -4969,6 +4989,7 @@ function makeHeatHazeMaterial(opts = {}) {
       uniform float uSize;
       uniform float uDisp;
       uniform float uHeightFog;
+      uniform float uBarrelCard;
       uniform float uFloorY;
       uniform float uBandH;
       varying vec2 vUv;
@@ -5012,6 +5033,7 @@ function makeHeatHazeMaterial(opts = {}) {
       uniform float uSize;
       uniform float uDisp;
       uniform float uHeightFog;
+      uniform float uBarrelCard;
       uniform float uFloorY;
       uniform float uBandH;
       uniform sampler2D tScene;
@@ -5059,33 +5081,39 @@ function tagBarrelHeatMesh(mesh, role) {
 function addBarrelHeatShimmer(x, y, z, length) {
   const len = Math.max(0.1, length);
   const hazeH = BARREL_HAZE_H;
+  // Larger than the tube so L/R/top safe margins sit inside the plane (borders off the effect).
+  const cardW = len * 1.22;
+  const cardH = hazeH * 1.48;
   const mat = makeHeatHazeMaterial({
     name: "barrelHeatHaze",
     rise: 0.55,
     warp: 0.28,
-    nx: 22,
-    ny: 28,
+    nx: 8,
+    ny: 26,
     amp: 0.20,
     disp: 0.01,
     bandH: hazeH,
     heightFog: false,
+    barrelCard: true,
   });
   const group = new THREE.Group();
   group.name = "barrelHeatHaze";
   group.position.set(x, y, z);
   group.rotation.y = Math.PI / 2;
-  const rolls = [0.34, -0.34];
+  // Keep the crossed pair; soft vignette kills the hard X edges.
+  const rolls = [0.30, -0.30];
   const sz = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
   for (let i = 0; i < rolls.length; i++) {
-    const card = new THREE.Mesh(new THREE.PlaneGeometry(len, hazeH, 24, 12), mat);
-    card.position.y = hazeH * 0.46 * sz;
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(cardW, cardH, 24, 12), mat);
+    // Seat plane bottom on the tube so the hard seam is hidden against barrel/suppressor.
+    card.position.y = cardH * 0.48 * sz;
     card.scale.y = sz;
     card.rotation.x = rolls[i];
     card.renderOrder = 6;
     card.visible = false;
     card.name = i === 0 ? "barrelHeatShimmer" : "barrelHeatShimmerV";
     card.userData.barrelHeatShimmer = true;
-    card.userData.hazeH0 = hazeH;
+    card.userData.hazeH0 = cardH;
     card.layers.set(HEAT_HAZE_LAYER);
     card.frustumCulled = false;
     card.raycast = () => {};
@@ -5179,7 +5207,7 @@ function syncHeatHazeMeshScales() {
     if (!o.userData.barrelHeatShimmer) return;
     const h0 = o.userData.hazeH0 || BARREL_HAZE_H;
     o.scale.y = sz;
-    o.position.y = h0 * 0.46 * sz;
+    o.position.y = h0 * 0.48 * sz;
   });
 }
 
@@ -5249,6 +5277,7 @@ function initHeatHazePost() {
       uStrength: { value: HEAT_HAZE_STRENGTH_DEFAULT },
       uSize: { value: HEAT_HAZE_SIZE_DEFAULT },
       uHeightFog: { value: 1 },
+      uBarrelCard: { value: 0 },
       uFloorY: { value: FLOOR_Y },
       uBandH: { value: GROUND_HAZE_H },
       tScene: { value: getHeatHazeDummyTex() },
@@ -5276,6 +5305,7 @@ function initHeatHazePost() {
       uniform float uStrength;
       uniform float uSize;
       uniform float uHeightFog;
+      uniform float uBarrelCard;
       uniform float uFloorY;
       uniform float uBandH;
       uniform sampler2D tScene;

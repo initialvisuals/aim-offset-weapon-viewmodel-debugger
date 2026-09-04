@@ -5234,6 +5234,8 @@ function initHeatHazePost() {
     toneMapped: false,
     fog: false,
     lights: false,
+    transparent: false,
+    blending: THREE.NoBlending,
   });
 
   const hazeMat = new THREE.ShaderMaterial({
@@ -5286,25 +5288,36 @@ function initHeatHazePost() {
       varying vec2 vUv;
 ` + HEAT_HAZE_NOISE_GLSL + /* glsl */`
       void main() {
+        // Hard no-op if grab/depth missing — never paint a full-frame fog fill.
         if (uHeat < 0.01 || uStrength < 0.01 || uHasScene < 0.5 || uHasDepth < 0.5) discard;
         float packed = texture2D(tScene, vUv).a;
-        if (packed >= 0.999 || packed <= 1e-5) discard;
+        // Sky / cleared depth, or absurd near values → skip (pass-through).
+        if (packed >= 0.997 || packed <= 1e-4) discard;
         vec4 clip = vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
         vec4 viewH = projInverse * clip;
-        vec3 viewDir = normalize(viewH.xyz / max(viewH.w, 1e-6));
+        float vw = max(abs(viewH.w), 1e-6);
+        vec3 viewDir = normalize(viewH.xyz / vw);
+        if (abs(viewDir.z) < 1e-3) discard;
         float clipW = exp2(packed * log2(cameraFar + 1.0)) - 1.0;
+        if (clipW < 0.05 || clipW > cameraFar * 0.98) discard;
         float rayLen = clipW / max(1e-4, abs(viewDir.z));
         vec3 viewPos = viewDir * rayLen;
         vec3 wp = (viewInverse * vec4(viewPos, 1.0)).xyz;
+        // Keep the band glued to the pour — off-floor Y means bad reconstruct or sky leak.
+        float hAbove = wp.y - uFloorY;
+        float bandMax = uBandH * max(uSize, 0.2) * 2.0;
+        if (hAbove < -0.08 || hAbove > bandMax) discard;
         float mask = 0.0;
         vec2 nxy = vec2(0.0);
         float haze = 0.0;
         heatField(wp, vec2(0.5), mask, nxy, haze);
         mask *= uHeat;
         if (mask < 0.003) discard;
-        vec2 off = (nxy - 0.5) * mask * uStrength * 0.022;
+        // Cap alpha so a hot mask can never slap the whole view with fog/sky color.
+        float a = clamp(mask * 0.72, 0.0, 0.72);
+        vec2 off = (nxy - 0.5) * mask * uStrength * 0.018;
         vec3 grabbed = texture2D(tScene, clamp(vUv + off, 0.0, 1.0)).rgb;
-        gl_FragColor = vec4(grabbed, clamp(mask, 0.0, 1.0));
+        gl_FragColor = vec4(grabbed, a);
       }
     `,
   });
@@ -5316,7 +5329,7 @@ function initHeatHazePost() {
   const fsScene = new THREE.Scene();
   fsScene.add(quad);
   const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  heatHazePost = { copyMat, hazeMat, quad, fsScene, fsCam };
+  heatHazePost = { copyMat, hazeMat, quad, fsScene, fsCam, _clear: new THREE.Color() };
 }
 
 function resizeHeatHazeGrab(w, h) {
@@ -5348,8 +5361,13 @@ function grabHeatHazeScene(dest) {
   u.uHasDepth.value = depthTex ? 1 : 0;
   try {
     const prevAutoClear = renderer.autoClear;
+    renderer.getClearColor(heatHazePost._clear);
+    const prevClearAlpha = renderer.getClearAlpha();
+    // Black clear — never leave sky/fog color in the grab if a texel is skipped.
+    renderer.setClearColor(0x000000, 1);
     renderer.autoClear = true;
     blitHeatHaze(heatHazePost.copyMat, heatHazeGrabRT);
+    renderer.setClearColor(heatHazePost._clear, prevClearAlpha);
     renderer.autoClear = prevAutoClear;
     u.tColor.value = null;
     u.tDepth.value = getHeatHazeDummyTex();
@@ -5395,7 +5413,11 @@ function renderHeatHaze(dest) {
 
   const h = groundHeatAmount();
   const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
-  if (h > 0.035 && str >= 0.01 && hasDepth) {
+  const depthOk = hasDepth && dest.depthTexture.image &&
+    dest.depthTexture.image.width === dest.width &&
+    dest.depthTexture.image.height === dest.height;
+  // Bad/missing depth → skip fullscreen height-fog (pass-through). Barrel cards still OK.
+  if (h > 0.035 && str >= 0.01 && depthOk) {
     camera.updateMatrixWorld();
     const u = heatHazePost.hazeMat.uniforms;
     u.tScene.value = grabTex;
@@ -6902,7 +6924,7 @@ function buildShootingRange() {
     bull.position.set(x, y, z + 0.014);
     const flash = new THREE.Mesh(
       new THREE.CircleGeometry(0.5 * scale, 28),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false })
     );
     flash.position.set(x, y, z + 0.02);
 
@@ -6984,7 +7006,7 @@ function createBermPopupFigure(x, z, yUp, yDown, scale) {
 
   const chestFlash = new THREE.Mesh(
     new THREE.PlaneGeometry(0.34 * s, 0.42 * s),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false })
   );
   chestFlash.position.set(0, chestY, 0.055 * s);
   group.add(chestFlash);
@@ -7002,7 +7024,7 @@ function createBermPopupFigure(x, z, yUp, yDown, scale) {
 
   const headFlash = new THREE.Mesh(
     new THREE.CircleGeometry(headR * 1.15, 14),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false })
   );
   headFlash.position.set(0, headY, 0.06 * s);
   group.add(headFlash);
@@ -7845,7 +7867,7 @@ function createKnockdownSilhouette(x, z, scale) {
   pelvisHinge.add(pelvisPlate);
   const pelvisFlash = new THREE.Mesh(
     new THREE.PlaneGeometry(0.36 * scale, 0.22 * scale),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false })
   );
   pelvisFlash.position.set(0, 0.06 * scale, 0.055 * scale);
   pelvisHinge.add(pelvisFlash);
@@ -7862,7 +7884,7 @@ function createKnockdownSilhouette(x, z, scale) {
   torsoPivot.add(makeBox(0.14 * scale, 0.12 * scale, 0.08 * scale, steelDark, 0.24 * scale, 0.46 * scale, 0.01 * scale));
   const chestFlash = new THREE.Mesh(
     new THREE.PlaneGeometry(0.4 * scale, 0.54 * scale),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false })
   );
   chestFlash.position.set(0, 0.28 * scale, 0.055 * scale);
   torsoPivot.add(chestFlash);
@@ -7877,7 +7899,7 @@ function createKnockdownSilhouette(x, z, scale) {
   headHinge.add(makeBox(0.14 * scale, 0.05 * scale, 0.02 * scale, 0x9aa8b5, 0, 0.15 * scale, 0.11 * scale));
   const headFlash = new THREE.Mesh(
     new THREE.PlaneGeometry(0.22 * scale, 0.26 * scale),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false })
   );
   headFlash.position.set(0, 0.13 * scale, 0.12 * scale);
   headHinge.add(headFlash);

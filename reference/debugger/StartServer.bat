@@ -27,7 +27,7 @@ py -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', t
 if not errorlevel 1 goto :server_ready
 set /a WAITED+=1
 if %WAITED% geq 20 goto :server_failed
-timeout /t 1 /nobreak >nul
+timeout.exe /t 1 /nobreak >nul
 goto :wait_server
 
 :server_failed
@@ -53,11 +53,11 @@ if %LOCKWAIT% geq 30 (
   call :kill_listener
   exit /b 0
 )
-timeout /t 1 /nobreak >nul
+timeout.exe /t 1 /nobreak >nul
 goto :wait_lock_appear
 
 :wait_lock_gone
-timeout /t 1 /nobreak >nul
+timeout.exe /t 1 /nobreak >nul
 REM On Windows parent.lock often remains as a file; del fails while Firefox holds it.
 del "%PROFILE%\parent.lock" >nul 2>&1
 del "%PROFILE%\.parentlock" >nul 2>&1

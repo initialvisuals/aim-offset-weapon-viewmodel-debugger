@@ -275,7 +275,7 @@ const HEAT_HAZE_SIZE_MAX = 2;
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
 const APP_CACHE_BUST = "20260824v63";
-const APP_BUILD_STAMP = "2026-09-04 01:10";
+const APP_BUILD_STAMP = "2026-09-04 01:20";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -5757,7 +5757,9 @@ function makeHeatHazeMaterial(opts = {}) {
         if (uHeat < 0.01 || uStrength < 0.01) discard;
         // Barrel cards: vertex displacement already warps the mesh.
         // Never color-composite the screen grab — at night that paints fog-grey
-        // into black only where the cards draw.
+        // into black only where the cards draw. Write a dummy first so GLSL
+        // compilers that reject "discard-only" programs still link.
+        gl_FragColor = vec4(0.0);
         if (uBarrelCard > 0.5) discard;
         float mask = 0.0;
         vec2 nxy = vec2(0.0);

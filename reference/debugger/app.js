@@ -2392,7 +2392,7 @@ function ensurePassLabBackdrop() {
     depthTest: true,
     depthWrite: false,
     toneMapped: true,
-    side: THREE.FrontSide,
+    side: THREE.DoubleSide,
     transparent: false,
     opacity: 1,
   });
@@ -2435,8 +2435,8 @@ function updatePassLabBackdrop() {
   camera.getWorldDirection(_passLabFwd);
   const dist = Math.min((camera.far || 2000) * 0.88, 720);
   passLabMesh.position.copy(_skyCamPos).addScaledVector(_passLabFwd, dist);
+  // Plane +Z should match camera +Z so the front face looks back at the camera.
   passLabMesh.quaternion.copy(camera.quaternion);
-  passLabMesh.rotateY(Math.PI);
   const vFov = (camera.fov * Math.PI) / 180;
   const h = 2.2 * dist * Math.tan(vFov * 0.5);
   const w = h * (camera.aspect || 16 / 9) * 1.12;

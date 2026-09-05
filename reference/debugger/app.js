@@ -6641,15 +6641,132 @@ function initHeatHazePost() {
       }
     `,
   });
+  const barrelMat = new THREE.ShaderMaterial({
+    name: "heatHazeBarrelBlit",
+    uniforms: {
+      uTime: { value: 0 },
+      uHeat: { value: 0 },
+      uRise: { value: 0.55 },
+      uWarp: { value: 0.28 },
+      uNScale: { value: new THREE.Vector2(8, 26) },
+      uStrength: { value: HEAT_HAZE_STRENGTH_DEFAULT },
+      uSize: { value: HEAT_HAZE_SIZE_DEFAULT },
+      uHeightFog: { value: 0 },
+      uBarrelCard: { value: 1 },
+      uFloorY: { value: FLOOR_Y },
+      uBandH: { value: BARREL_HAZE_H },
+      tScene: { value: getHeatHazeDummyTex() },
+      uHasScene: { value: 0 },
+      uHasDepth: { value: 0 },
+      uResolution: { value: new THREE.Vector2(1, 1) },
+      cameraFar: { value: 2000 },
+      uMuzzle: { value: new THREE.Vector2(0, 0) },
+      uAspect: { value: 1 },
+      uLean: { value: new THREE.Vector2(0, 0) },
+    },
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.NormalBlending,
+    premultipliedAlpha: false,
+    toneMapped: false,
+    fog: false,
+    lights: false,
+    vertexShader: vs,
+    fragmentShader: /* glsl */`
+      uniform float uTime;
+      uniform float uHeat;
+      uniform float uRise;
+      uniform float uWarp;
+      uniform vec2 uNScale;
+      uniform float uStrength;
+      uniform float uSize;
+      uniform float uHeightFog;
+      uniform float uBarrelCard;
+      uniform float uFloorY;
+      uniform float uBandH;
+      uniform sampler2D tScene;
+      uniform float uHasScene;
+      uniform float uHasDepth;
+      uniform vec2 uResolution;
+      uniform float cameraFar;
+      uniform vec2 uMuzzle;
+      uniform float uAspect;
+      uniform vec2 uLean;
+      varying vec2 vUv;
+` + HEAT_HAZE_NOISE_GLSL + /* glsl */`
+      void main() {
+        if (uHeat < 0.01 || uStrength < 0.01 || uHasScene < 0.5) discard;
+        vec2 mu = uMuzzle * 0.5 + 0.5;
+        vec2 d = (vUv - mu) * vec2(uAspect, 1.0);
+        d.x -= uLean.x * 0.05;
+        d.y -= uLean.y * 0.03 + 0.035;
+        float rad = 0.20 * max(uSize, 0.35);
+        float dome = smoothstep(rad, rad * 0.22, length(d));
+        if (dome < 0.01) discard;
+        vec2 vu = vec2(d.x / max(rad, 1e-4) * 0.5 + 0.5, clamp(1.0 - length(d) / max(rad, 1e-4), 0.0, 1.0));
+        float mask = 0.0;
+        vec2 nxy = vec2(0.0);
+        float haze = 0.0;
+        heatField(vec3(vUv, 0.0), vu, mask, nxy, haze);
+        mask *= uHeat * dome;
+        if (mask < 0.003) discard;
+        vec2 field = vec2(
+          (nxy.x - 0.5) * 8.0 + (haze - 0.5) * 5.0,
+          (nxy.y - 0.5) * 8.0 + (nxy.x - nxy.y) * 6.0
+        );
+        vec2 off = field * mix(0.40, 1.0, clamp(mask, 0.0, 1.0)) * uStrength * 0.085;
+        off = clamp(off, vec2(-0.11), vec2(0.11));
+        vec4 baseSamp = texture2D(tScene, clamp(vUv, 0.0, 1.0));
+        vec4 warpSamp = texture2D(tScene, clamp(vUv + off, 0.0, 1.0));
+        vec3 base = baseSamp.rgb;
+        vec3 warped = warpSamp.rgb;
+        float farLeak = 0.0;
+        if (uHasDepth > 0.5) {
+          float packedB = baseSamp.a;
+          float packedW = warpSamp.a;
+          if (packedB > 1e-4 && packedB < 0.997) {
+            float logFar = log2(max(cameraFar, 1.0) + 1.0);
+            float clipB = exp2(packedB * logFar) - 1.0;
+            if (clipB < 2.4) {
+              if (packedW <= 1e-4 || packedW >= 0.997) {
+                warped = base;
+                farLeak = 1.0;
+              } else {
+                float clipW = exp2(packedW * logFar) - 1.0;
+                farLeak = smoothstep(clipB + 1.2, clipB + 4.0, clipW);
+              }
+            }
+          }
+        }
+        float warpAmt = clamp(0.78 + mask * uStrength * 0.40, 0.78, 1.0) * (1.0 - farLeak);
+        vec3 col = mix(base, warped, warpAmt);
+        float lumaBase = max(dot(base, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+        float lumaCol = max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+        if (lumaBase < 0.055 && lumaCol > lumaBase + 0.08) {
+          col *= lumaBase / max(lumaCol, 1e-5);
+        } else if (uHasDepth < 0.5) {
+          float chromaCol = length(col - vec3(lumaCol));
+          if (lumaCol > lumaBase + 0.10 && chromaCol < 0.04) {
+            col *= lumaBase / max(lumaCol, 1e-5);
+          }
+        }
+        float a = clamp(0.50 + mask * uStrength * 0.70, 0.0, 0.96) * (1.0 - farLeak * 0.92);
+        if (a < 0.03) discard;
+        gl_FragColor = vec4(col, a);
+      }
+    `,
+  });
   if ("forceSinglePass" in copyMat) copyMat.forceSinglePass = true;
   if ("forceSinglePass" in hazeMat) hazeMat.forceSinglePass = true;
+  if ("forceSinglePass" in barrelMat) barrelMat.forceSinglePass = true;
 
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copyMat);
   quad.frustumCulled = false;
   const fsScene = new THREE.Scene();
   fsScene.add(quad);
   const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  heatHazePost = { copyMat, hazeMat, quad, fsScene, fsCam, _clear: new THREE.Color() };
+  heatHazePost = { copyMat, hazeMat, barrelMat, quad, fsScene, fsCam, _clear: new THREE.Color() };
 }
 
 function resizeHeatHazeGrab(w, h) {
@@ -6682,6 +6799,44 @@ function blitHeatHaze(mat, target) {
   heatHazePost.quad.material = mat;
   renderer.setRenderTarget(target);
   renderer.render(heatHazePost.fsScene, heatHazePost.fsCam);
+}
+
+/** Screen-space warp around the muzzle — same blit path as height-fog, so it
+ * actually composites. 3D cards still run for the lattice / trail.
+ */
+function blitBarrelHeatMuzzle(dest, resx, resy, hasDepth) {
+  if (!heatHazePost || !heatHazePost.barrelMat || !camera || !heatHazeGrabRT) return;
+  if (!muzzleSocket) return;
+  muzzleSocket.updateWorldMatrix(true, false);
+  camera.updateMatrixWorld(true);
+  muzzleSocket.getWorldPosition(_hazeMuzzleWorld);
+  _hazeMuzzleLocal.copy(_hazeMuzzleWorld).project(camera);
+  if (!Number.isFinite(_hazeMuzzleLocal.x) || !Number.isFinite(_hazeMuzzleLocal.y)) return;
+  if (_hazeMuzzleLocal.z < -1 || _hazeMuzzleLocal.z > 1) return;
+  const mul = state.barrelHeat ?? BARREL_HEAT_DEFAULT;
+  const raw = barrelHeatAmt[state.weaponId] || 0;
+  const h = mul < 0.01 ? 0 : raw;
+  const heat = clamp((h - 0.12) * 1.15 * mul, 0, 1);
+  const str = clamp(state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
+  const u = heatHazePost.barrelMat.uniforms;
+  u.tScene.value = heatHazeGrabRT.texture;
+  u.uHasScene.value = 1;
+  u.uHasDepth.value = hasDepth ? 1 : 0;
+  u.uHeat.value = heat;
+  u.uTime.value = barrelHeatClock;
+  u.uStrength.value = str;
+  u.uSize.value = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+  u.uResolution.value.set(resx, resy);
+  u.cameraFar.value = camera.far || 2000;
+  u.uMuzzle.value.set(
+    clamp(_hazeMuzzleLocal.x, -1.4, 1.4),
+    clamp(_hazeMuzzleLocal.y, -1.4, 1.4)
+  );
+  u.uAspect.value = resy > 0 ? resx / resy : 1;
+  u.uLean.value.set(player.hazeLeanX || 0, player.hazeLeanUp || 0);
+  blitHeatHaze(heatHazePost.barrelMat, dest);
+  u.tScene.value = getHeatHazeDummyTex();
+  u.uHasScene.value = 0;
 }
 
 /** Copy dest color into the dedicated grab. Depth in A is best-effort — a
@@ -6808,6 +6963,10 @@ function renderHeatHaze(dest) {
     u.viewInverse.value.copy(camera.matrixWorld);
     u.cameraFar.value = camera.far;
     blitHeatHaze(heatHazePost.hazeMat, dest);
+  }
+
+  if (cardsOn && grabbed) {
+    blitBarrelHeatMuzzle(dest, resx, resy, grabDepth);
   }
 
   if (cardsOn) {

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260824v69" />
+  <link rel="stylesheet" href="styles.css?v=20260824v70" />
   <style>
     /* Critical first-paint cover if styles.css is stale. Full rules live in styles.css. */
     .boot-overlay {
@@ -393,7 +393,7 @@
         </label>
         <label class="check-row"><input type="checkbox" id="chkPassLabWorld" /> World backdrop (far quad, haze feel)</label>
         <button type="button" id="btnPassLabFreeze">Freeze &amp; save pass lab</button>
-        <p class="note">Flat chart default (screen-space). Optional world far-quad for in-scene haze. PIP: <strong>final</strong> / <strong>scene</strong> / <strong>heat grab</strong> (heat fills only with ground haze). <kbd>P</kbd> saves full + PIP. Off by default. <code>?passlab=chroma&amp;pip=1&amp;src=scene</code> · <code>?tod=22&amp;heat=1</code>.</p>
+        <p class="note">Flat chart default (screen-space). Optional world far-quad for in-scene haze. PIP: <strong>final</strong> / <strong>scene</strong> / <strong>heat grab</strong> (heat fills when barrel cards or ground haze grab). <kbd>P</kbd> saves full + PIP. Off by default. <code>?passlab=chroma&amp;pip=1&amp;src=scene</code> · <code>?tod=22&amp;heat=1</code>.</p>
       </div>
 
       <div class="settings-section">
@@ -526,7 +526,7 @@
           <label class="check-row"><input type="checkbox" id="chkBarrelHeatHaze" checked /> Barrel cards</label>
           <label class="check-row"><input type="checkbox" id="chkGroundHeatHaze" /> Ground / height-fog</label>
         </div>
-        <p class="note">Barrel cards: lattice on the tube (bottoms locked; tops rise / trail). Vertex displace only — no grab composite. <strong>Cards</strong> default ON. <strong>Ground / height-fog</strong> is the only grab path and stays <strong>off</strong>. <strong>Master</strong> or strength 0 kills both. Size scales noise / lobe. Scene fog is a separate Fog control. Barrel heat slider stays the orange on the steel.</p>
+        <p class="note">Barrel cards: 40×20 lattice on the tube (bottoms locked; tops rise / trail). Grab + UV warp, depth-gated vs far fog and luma-locked so night sky stays black. <strong>Cards</strong> default ON. <strong>Ground / height-fog</strong> stays <strong>off</strong>. <strong>Master</strong> or strength 0 kills both. Size scales noise / lobe. Scene fog is a separate Fog control. Barrel heat slider stays the orange on the steel.</p>
       </div>
 
       <div class="settings-section">
@@ -628,6 +628,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v69"></script>
+    <script type="module" src="app.js?v=20260824v70"></script>
 </body>
 </html>

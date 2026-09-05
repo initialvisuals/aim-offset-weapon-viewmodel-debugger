@@ -282,8 +282,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v68";
-const APP_BUILD_STAMP = "2026-09-04 21:33";
+const APP_CACHE_BUST = "20260824v69";
+const APP_BUILD_STAMP = "2026-09-04 22:12";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -592,7 +592,7 @@ function el(id) { return document.getElementById(id); }
 function fmt(n) { return (Math.round(n * 1e6) / 1e6).toString(); }
 
 function gameplayActive() {
-  return !state.panelOpen && !state.gunModalOpen && !state.settingsOpen;
+  return !bootBlocksInput() && !state.panelOpen && !state.gunModalOpen && !state.settingsOpen;
 }
 function typingFocus() {
   const t = document.activeElement;
@@ -10663,12 +10663,160 @@ function initDisplayPosts() {
   resize();
 }
 
+/** Weighted deferred-boot stages. Heavier shader/post work gets more of the bar. */
+const BOOT_STAGE_WEIGHTS = {
+  core: 0.20,
+  postFX: 0.28,
+  walls: 0.14,
+  mid: 0.13,
+  far: 0.13,
+  prewarm: 0.12,
+};
+const BOOT_OVERLAY_FADE_MS = 320;
+const BOOT_OVERLAY_TIMEOUT_MS = 8000;
+
+let _bootOverlayDone = false;
+let _bootReadyForContinue = false;
+const _bootStagesDone = new Set();
+let _bootProgress = 0;
+let _bootTimeoutId = 0;
+
+function bootOverlayNode() {
+  return el("bootOverlay");
+}
+
+function bootOverlayGone(node = bootOverlayNode()) {
+  return !node || node.hidden || node.classList.contains("is-gone") || node.classList.contains("is-done");
+}
+
+/** True until the player dismisses the boot overlay (loading or continue prompt). */
+function bootBlocksInput() {
+  if (_bootOverlayDone) return false;
+  if (bootOverlayGone()) {
+    _bootOverlayDone = true;
+    return false;
+  }
+  return true;
+}
+
+function setBootBar(frac) {
+  const fill = el("bootBarFill");
+  const bar = el("bootBar");
+  const pct = Math.round(clamp(frac, 0, 1) * 100);
+  if (fill) fill.style.width = `${pct}%`;
+  if (bar) bar.setAttribute("aria-valuenow", String(pct));
+}
+
+function bootPassthroughEvent(e) {
+  if (!e || e.type !== "keydown") return false;
+  if (e.metaKey || e.ctrlKey || e.altKey) return true;
+  return /^F\d{1,2}$/.test(e.key || "");
+}
+
+function showBootContinue() {
+  if (_bootOverlayDone || _bootReadyForContinue) return;
+  _bootReadyForContinue = true;
+  if (_bootTimeoutId) {
+    clearTimeout(_bootTimeoutId);
+    _bootTimeoutId = 0;
+  }
+  setBootBar(1);
+  const node = bootOverlayNode();
+  if (!node) return;
+  node.classList.add("is-ready");
+  node.setAttribute("aria-busy", "false");
+  const label = el("bootLabel");
+  if (label) label.hidden = true;
+  const cont = el("bootContinue");
+  if (cont) cont.hidden = false;
+}
+
+function dismissBootOverlay() {
+  if (_bootOverlayDone) return;
+  _bootOverlayDone = true;
+  _bootReadyForContinue = true;
+  if (_bootTimeoutId) {
+    clearTimeout(_bootTimeoutId);
+    _bootTimeoutId = 0;
+  }
+  setBootBar(1);
+  const node = bootOverlayNode();
+  if (!node) return;
+  node.classList.add("is-ready");
+  node.classList.add("is-done");
+  node.setAttribute("aria-busy", "false");
+  const hide = () => {
+    node.classList.add("is-gone");
+    node.hidden = true;
+    node.setAttribute("aria-hidden", "true");
+  };
+  const onEnd = (ev) => {
+    if (ev && ev.target !== node) return;
+    node.removeEventListener("transitionend", onEnd);
+    hide();
+  };
+  node.addEventListener("transitionend", onEnd);
+  setTimeout(hide, BOOT_OVERLAY_FADE_MS + 80);
+}
+
+function acceptBootContinue(e) {
+  const node = bootOverlayNode();
+  if (_bootOverlayDone || bootOverlayGone(node)) {
+    _bootOverlayDone = true;
+    return false;
+  }
+  if (bootPassthroughEvent(e)) return false;
+  const ready = _bootReadyForContinue || (node && node.classList.contains("is-ready"));
+  if (ready) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+    }
+    dismissBootOverlay();
+    return true;
+  }
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+  }
+  return true;
+}
+
+function markBootStage(name) {
+  if (_bootOverlayDone || _bootReadyForContinue || !(name in BOOT_STAGE_WEIGHTS) || _bootStagesDone.has(name)) return;
+  _bootStagesDone.add(name);
+  _bootProgress = clamp(_bootProgress + BOOT_STAGE_WEIGHTS[name], 0, 1);
+  setBootBar(_bootProgress);
+  if (_bootStagesDone.size >= Object.keys(BOOT_STAGE_WEIGHTS).length) {
+    showBootContinue();
+  }
+}
+
+function armBootOverlayFallback() {
+  if (_bootTimeoutId || _bootOverlayDone || _bootReadyForContinue) return;
+  _bootTimeoutId = setTimeout(() => {
+    console.warn("[boot] overlay timeout — showing continue prompt");
+    showBootContinue();
+  }, BOOT_OVERLAY_TIMEOUT_MS);
+  const node = bootOverlayNode();
+  if (!node || node.dataset.bootBound) return;
+  node.dataset.bootBound = "1";
+  const onContinue = (e) => { acceptBootContinue(e); };
+  window.addEventListener("keydown", onContinue, true);
+  window.addEventListener("pointerdown", onContinue, true);
+  window.__aimBootOverlay = true;
+}
+
 /**
  * First Firefox open hitch was one long sync tick: world + posts + heat grab
  * shaders + pass-lab 1024 charts + spark compile + AudioContext noise.
  * Paint spawn/gun first, then spread the rest across later frames.
+ * Overlay tracks real stage completion — do not collapse this back to one tick.
  */
 function scheduleDeferredBoot() {
+  markBootStage("core");
   afterAnimationFrames(1, () => {
     try {
       initDisplayPosts();
@@ -10676,6 +10824,8 @@ function scheduleDeferredBoot() {
       else syncPassLabUI();
     } catch (err) {
       console.error("[boot] display posts", err);
+    } finally {
+      markBootStage("postFX");
     }
   });
   afterAnimationFrames(2, () => {
@@ -10683,6 +10833,8 @@ function scheduleDeferredBoot() {
       buildRoomWalls();
     } catch (err) {
       console.error("[boot] walls", err);
+    } finally {
+      markBootStage("walls");
     }
   });
   afterAnimationFrames(3, () => {
@@ -10690,6 +10842,8 @@ function scheduleDeferredBoot() {
       buildRoomMid();
     } catch (err) {
       console.error("[boot] mid range", err);
+    } finally {
+      markBootStage("mid");
     }
   });
   afterAnimationFrames(4, () => {
@@ -10697,16 +10851,31 @@ function scheduleDeferredBoot() {
       buildRoomFar();
     } catch (err) {
       console.error("[boot] far range", err);
+    } finally {
+      markBootStage("far");
     }
   });
+  let prewarmFxDone = false;
+  let idleSfxDone = false;
+  const maybePrewarmDone = () => {
+    if (prewarmFxDone && idleSfxDone) markBootStage("prewarm");
+  };
   afterAnimationFrames(5, () => {
-    void prewarmShotFx().catch(() => {});
+    void Promise.resolve()
+      .then(() => prewarmShotFx())
+      .catch(() => {})
+      .finally(() => {
+        prewarmFxDone = true;
+        maybePrewarmDone();
+      });
     if (renderer && renderer.debug) renderer.debug.checkShaderErrors = false;
   });
   const laterSfx = () => {
     if (sfx && typeof sfx.prewarmGlass === "function") {
       try { sfx.prewarmGlass(); } catch (_) {}
     }
+    idleSfxDone = true;
+    maybePrewarmDone();
   };
   if (typeof requestIdleCallback === "function") {
     requestIdleCallback(laterSfx, { timeout: 1200 });
@@ -13361,6 +13530,10 @@ function refresh(syncInputs = true) {
 }
 
 function onKeyDown(e) {
+  if (bootBlocksInput()) {
+    acceptBootContinue(e);
+    return;
+  }
   if (typingFocus()) return;
 
   const k = e.key;
@@ -13550,6 +13723,10 @@ function onKeyUp(e) {
 }
 
 function onMouseDown(e) {
+  if (bootBlocksInput()) {
+    acceptBootContinue(e);
+    return;
+  }
   const canvas = el("view3d");
   if (e.target !== canvas && !canvas.contains(e.target)) {
     // allow UI
@@ -13638,6 +13815,7 @@ function onWheel(e) {
 }
 
 function bind() {
+  armBootOverlayFallback();
   buildWeaponSelect();
   buildPoseSelect();
   buildAttSelect();

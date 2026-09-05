@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260824v31" />
+  <link rel="stylesheet" href="styles.css?v=20260824v65" />
   <script type="importmap">
     {
       "imports": {
@@ -247,13 +247,13 @@
     <div class="settings-dialog" role="dialog" aria-labelledby="settingsTitle">
       <header class="settings-head">
         <h2 id="settingsTitle">Settings</h2>
-        <button type="button" id="btnSettingsClose" title="Esc / O">Close</button>
+        <div class="settings-actions">
+          <button type="button" id="btnSettingsReset">Reset defaults</button>
+          <button type="button" id="btnSettingsCopy">Copy settings</button>
+          <button type="button" id="btnSettingsClose" title="Esc / O">Close</button>
+        </div>
       </header>
-      <p class="hint">Press <kbd>O</kbd> anytime to open or close. Gameplay pauses while open. Tuners persist in this browser.</p>
-      <div class="settings-actions">
-        <button type="button" id="btnSettingsReset">Reset defaults</button>
-        <button type="button" id="btnSettingsCopy">Copy settings</button>
-      </div>
+      <p class="hint">Press <kbd>O</kbd> to open or close. Gameplay pauses. Tuners persist in this browser.</p>
 
       <div class="settings-section">
         <h3>Game style</h3>
@@ -266,8 +266,10 @@
 
       <div class="settings-section">
         <h3>Display</h3>
-        <label class="check-row"><input type="checkbox" id="chkHipReticle" checked /> Show hip reticle</label>
-        <label class="check-row"><input type="checkbox" id="chkAimRays" /> Show aim/bore rays</label>
+        <div class="settings-checks">
+          <label class="check-row"><input type="checkbox" id="chkHipReticle" checked /> Show hip reticle</label>
+          <label class="check-row"><input type="checkbox" id="chkAimRays" /> Show aim/bore rays</label>
+        </div>
         <label class="slider-row">Brightness
           <input type="range" id="brightnessSlider" min="0.5" max="1.5" step="0.01" value="1.00" />
           <code id="brightnessVal">1.00</code>
@@ -276,7 +278,7 @@
           <input type="range" id="gammaSlider" min="0.8" max="1.6" step="0.01" value="1.00" />
           <code id="gammaVal">1.00</code>
         </label>
-        <p class="note">1.00 / 1.00 is ungraded sRGB. Scene time-of-day owns the look; use the sliders if your panel is dim.</p>
+        <p class="note">1.00 / 1.00 = ungraded sRGB. ToD owns the look; raise if the panel is dim.</p>
         <div class="pluge-calib" aria-label="Grey scale test strip">
           <div class="pluge-swatch" style="background:#000000"><span>Black</span></div>
           <div class="pluge-swatch" style="background:#404040"><span>Low</span></div>
@@ -285,7 +287,7 @@
           <div class="pluge-swatch" style="background:#ffffff"><span>White</span></div>
         </div>
         <label class="check-row"><input type="checkbox" id="chkPluge" /> Show PLUGE strip on viewport</label>
-        <p class="note">If Black blends into Low, your display is crushing shadows — raise Brightness/Gamma.</p>
+        <p class="note">If Black blends into Low, shadows are crushed — raise Brightness/Gamma.</p>
       </div>
 
       <div class="settings-section">
@@ -310,7 +312,7 @@
         </label>
         <label class="check-row"><input type="checkbox" id="chkPassLabWorld" /> World backdrop (far quad, haze feel)</label>
         <button type="button" id="btnPassLabFreeze">Freeze &amp; save pass lab</button>
-        <p class="note">Flat chart is the default (screen-space plate). World far-quad is optional for in-scene haze. PIP samples <strong>final</strong> / <strong>scene</strong> dest / <strong>heat grab</strong> — individual passes and the composite. Heat grab only fills when Ground / height-fog heat haze is on (barrel cards no longer grab). <kbd>P</kbd> downloads full + PIP PNGs. Default off. URL: <code>?passlab=chroma&amp;pip=1&amp;src=scene</code>. Night + hot tube: <code>?tod=22&amp;heat=1</code>.</p>
+        <p class="note">Flat chart default (screen-space). Optional world far-quad for in-scene haze. PIP: <strong>final</strong> / <strong>scene</strong> / <strong>heat grab</strong> (heat fills only with ground haze). <kbd>P</kbd> saves full + PIP. Off by default. <code>?passlab=chroma&amp;pip=1&amp;src=scene</code> · <code>?tod=22&amp;heat=1</code>.</p>
       </div>
 
       <div class="settings-section">
@@ -323,23 +325,23 @@
           <input type="range" id="casingCapSlider" min="10" max="30000" step="100" value="30000" />
           <code id="casingCapVal">30000</code>
         </label>
-        <label class="slider-row">Hole fade (s)
+        <label class="slider-row">Hole fade
           <input type="range" id="holeFadeSlider" min="0" max="60" step="1" value="18" />
           <code id="holeFadeVal">18s</code>
         </label>
-        <label class="slider-row">Casing fade (s)
+        <label class="slider-row">Casing fade
           <input type="range" id="casingFadeSlider" min="0" max="60" step="1" value="12" />
           <code id="casingFadeVal">12s</code>
         </label>
-        <label class="slider-row">Decal draw (m)
+        <label class="slider-row">Decal draw
           <input type="range" id="decalDrawSlider" min="50" max="2000" step="10" value="900" />
           <code id="decalDrawVal">900 m</code>
         </label>
-        <label class="slider-row">Casing draw (m)
+        <label class="slider-row">Casing draw
           <input type="range" id="casingDrawSlider" min="8" max="200" step="1" value="55" />
           <code id="casingDrawVal">55 m</code>
         </label>
-        <p class="note">Env / silhouette holes FIFO-cap and optionally expire. Paper-target holes stay until table reset. Berm popups still clear on hide. Casings sleep, then expire (0 = until the cap recycles). Cap and fade pick at random from the oldest third so brass does not vanish in firing order. Draw distance only hides (holes/crater plugs vs casings/spent slugs) — walk back and they reappear. Caps stay.</p>
+        <p class="note">Env/silhouette holes FIFO-cap and can expire. Paper holes wait for table reset. Casings sleep then fade (0 = until cap recycles). Cap/fade pick from the oldest third (no firing-order zipper). Draw distance hides only — walk back and they return.</p>
       </div>
 
       <div class="settings-section">
@@ -352,32 +354,32 @@
           <input type="range" id="cloudsSlider" min="0" max="1" step="0.01" value="0.55" />
           <code id="cloudsVal">0.55</code>
         </label>
-        <p class="note">Scene sun, sky, and fog. Display brightness/gamma stay as grade. Default evening keeps the dusk range; night stays dark (stars, not a washed navy). Clouds 0 = clear. Stars follow the clock. Intensity sliders multiply the current clock (1.00 = authored ToD).</p>
-        <label class="slider-row">Ambient intensity
+        <p class="note">Sun / sky / fog. Brightness/gamma stay as grade. Default dusk; night stays dark. Clouds 0 = clear. Intensities multiply the clock (1.00 = authored).</p>
+        <label class="slider-row">Ambient
           <input type="range" id="lightAmbSlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="lightAmbVal">1.00×</code>
         </label>
-        <label class="slider-row">Fill intensity
+        <label class="slider-row">Fill
           <input type="range" id="lightFillSlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="lightFillVal">1.00×</code>
         </label>
-        <label class="slider-row">Hemisphere intensity
+        <label class="slider-row">Hemi
           <input type="range" id="lightHemiSlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="lightHemiVal">1.00×</code>
         </label>
-        <label class="slider-row">Sun / key intensity
+        <label class="slider-row">Sun / key
           <input type="range" id="lightKeySlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="lightKeyVal">1.00×</code>
         </label>
-        <label class="slider-row">Rim intensity
+        <label class="slider-row">Rim
           <input type="range" id="lightRimSlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="lightRimVal">1.00×</code>
         </label>
-        <label class="slider-row">Moon intensity
+        <label class="slider-row">Moon
           <input type="range" id="lightMoonSlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="lightMoonVal">1.00×</code>
         </label>
-        <label class="slider-row">ACES exposure
+        <label class="slider-row">Exposure
           <input type="range" id="exposureSlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="exposureVal">1.00×</code>
         </label>
@@ -389,17 +391,17 @@
           <input type="range" id="sunPunchSlider" min="0" max="4" step="0.01" value="1.40" />
           <code id="sunPunchVal">1.40</code>
         </label>
-        <p class="note">Size is the visual disc + sky halo only (real sun ≈ 0.5°). It does not grow bloom. Punch is how hot the tiny core is — soft-clamped so it never floods. Halo stays dimmer and below the bloom threshold.</p>
+        <p class="note">Size = disc + sky halo only (real sun ≈ 0.5°), not bloom. Punch is the tiny core (soft-clamped). Halo stays below bloom.</p>
         <label class="slider-row">God rays
           <input type="range" id="godRaysSlider" min="0" max="2" step="0.01" value="0.90" />
           <code id="godRaysVal">0.90</code>
         </label>
-        <p class="note">Occlusion shafts from the sun shadow map, not a glow ball. Strongest looking toward low sun down the bay; fall off looking aside; noon is milder; night is off. Intensity lengthens / brightens streaks. 0 = skip the pass.</p>
+        <p class="note">Occlusion shafts from the sun shadow map, not a glow ball. Strongest toward low sun; noon milder; night off. 0 = skip.</p>
         <label class="slider-row">Bloom
           <input type="range" id="bloomSlider" min="0" max="2" step="0.01" value="0.22" />
           <code id="bloomVal">0.22</code>
         </label>
-        <p class="note">HDR glow on floods, muzzle, tracers, hot barrels, and a tiny sun core — not a second sun. Sky halo stays out of the bright-pass. 0 = skip the pass.</p>
+        <p class="note">HDR glow on floods, muzzle, tracers, hot barrels, tiny sun core — not a second sun. 0 = skip.</p>
         <label class="slider-row">Dither
           <input type="range" id="ditherSlider" min="0" max="0.008" step="0.0001" value="0.001" />
           <code id="ditherVal">0.0010</code>
@@ -408,11 +410,11 @@
           <input type="range" id="ditherScaleSlider" min="0.25" max="8" step="0.05" value="1" />
           <code id="ditherScaleVal">1.00</code>
         </label>
-        <label class="slider-row">Dither offset X (px)
+        <label class="slider-row">Dither X
           <input type="range" id="ditherOffXSlider" min="-32" max="32" step="0.25" value="0" />
           <code id="ditherOffXVal">0.00</code>
         </label>
-        <label class="slider-row">Dither offset Y (px)
+        <label class="slider-row">Dither Y
           <input type="range" id="ditherOffYSlider" min="-32" max="32" step="0.25" value="0" />
           <code id="ditherOffYVal">0.00</code>
         </label>
@@ -424,41 +426,43 @@
           </select>
         </label>
         <label class="check-row"><input type="checkbox" id="chkDitherAnimate" /> Animate dither</label>
-        <p class="note">Banding floor after tone map, not grain. Default hash is luma-only TPDF (no color sparkle, not a square grid). Scale changes pattern frequency; offsets slide it in pixels. IGN/Bayer are optional. Animate is off — frame crawl looks digital. Night lifts a hair; sky stays black. 0 = skip the pass.</p>
+        <p class="note">Banding floor after tone map, not grain. Hash = luma TPDF. Scale = frequency; offsets slide in px. Animate off (looks digital). 0 = skip.</p>
         <label class="slider-row">Barrel heat
           <input type="range" id="barrelHeatSlider" min="0" max="2" step="0.01" value="1.00" />
           <code id="barrelHeatVal">1.00</code>
         </label>
-        <p class="note">Orange/amber barrel glow from rounds through the tube. A mounted suppressor takes some of that heat on the can. SMG auto dumps cook fast; rifle warms on rapid fire; bolt barely ticks. Cools over a few seconds. 0 = off.</p>
-        <label class="slider-row">Heat haze strength
+        <p class="note">Orange/amber glow from rounds through the tube. A can takes some heat. SMG cooks fast; rifle warms; bolt barely ticks. 0 = off.</p>
+        <label class="slider-row">Haze strength
           <input type="range" id="heatHazeStrengthSlider" min="0" max="2" step="0.01" value="1.00" />
           <code id="heatHazeStrengthVal">1.00</code>
         </label>
-        <label class="slider-row">Heat haze size
+        <label class="slider-row">Haze size
           <input type="range" id="heatHazeSizeSlider" min="0.35" max="2" step="0.01" value="1.00" />
           <code id="heatHazeSizeVal">1.00</code>
         </label>
-        <label class="check-row"><input type="checkbox" id="chkHeatHazeMaster" checked /> Heat haze master</label>
-        <label class="check-row"><input type="checkbox" id="chkBarrelHeatHaze" checked /> Barrel heat haze (cards)</label>
-        <label class="check-row"><input type="checkbox" id="chkGroundHeatHaze" /> Ground / height-fog heat haze</label>
-        <p class="note">Barrel cards are a subdivided lattice pinned to the tube (bottoms locked; tops rise / wiggle and trail gun motion). They displace vertices only — no screen-grab color composite (that used to paint night fog-grey in the card footprint). <strong>Barrel heat haze (cards)</strong> default ON; off hides the cards and skips the heat-card pass. <strong>Ground / height-fog</strong> is the only grab/blit path and stays <strong>off by default</strong> (was slapping sky-blue fog). <strong>Heat haze master</strong> forces both off; strength 0 also kills all haze. Size scales noise cells and the barrel lobe. Scene distance fog (Fog section) is a separate control — these toggles do not touch it. The barrel heat slider above stays the orange on the steel.</p>
+        <div class="settings-checks">
+          <label class="check-row"><input type="checkbox" id="chkHeatHazeMaster" checked /> Heat haze master</label>
+          <label class="check-row"><input type="checkbox" id="chkBarrelHeatHaze" checked /> Barrel cards</label>
+          <label class="check-row"><input type="checkbox" id="chkGroundHeatHaze" /> Ground / height-fog</label>
+        </div>
+        <p class="note">Barrel cards: lattice on the tube (bottoms locked; tops rise / trail). Vertex displace only — no grab composite. <strong>Cards</strong> default ON. <strong>Ground / height-fog</strong> is the only grab path and stays <strong>off</strong>. <strong>Master</strong> or strength 0 kills both. Size scales noise / lobe. Scene fog is a separate Fog control. Barrel heat slider stays the orange on the steel.</p>
       </div>
 
       <div class="settings-section">
         <h3>Materials</h3>
-        <label class="slider-row">Concrete wear
+        <label class="slider-row">Wear
           <input type="range" id="concreteWearSlider" min="0" max="1" step="0.01" value="0.40" />
           <code id="concreteWearVal">0.40</code>
         </label>
-        <label class="slider-row">Concrete scale
+        <label class="slider-row">Scale
           <input type="range" id="concreteScaleSlider" min="0.40" max="1.60" step="0.02" value="1.00" />
           <code id="concreteScaleVal">1.00</code>
         </label>
-        <label class="slider-row">Concrete variation
+        <label class="slider-row">Variation
           <input type="range" id="concreteVarSlider" min="0" max="2" step="0.02" value="1.00" />
           <code id="concreteVarVal">1.00</code>
         </label>
-        <p class="note">Wear is dust and edge fade. Scale is grain size (low = finer grit, high = larger blotches). Variation is per-panel value drift (no hue swing). Mid-slider is the authored look — ends are useful, not one-tick. Default already reads as poured panels. Benches stay wood.</p>
+        <p class="note">Wear = dust / edge fade. Scale = grain (low finer, high blotchier). Variation = per-panel value drift. Mid-slider is authored. Benches stay wood.</p>
       </div>
 
       <div class="settings-section">
@@ -472,20 +476,20 @@
           <input type="range" id="fogFarSlider" min="200" max="650" step="1" value="520" />
           <code id="fogFarVal">520</code>
         </label>
-        <p class="note">Linear distance fog (<code>THREE.Fog</code>). Color tracks clear/background. Density (<code>FogExp2</code>) not exposed yet. This is <strong>not</strong> heat haze — Lighting heat toggles do not change bay fog. Optional floor-height shimmer is Lighting → Ground / height-fog heat haze (off by default).</p>
+        <p class="note">Linear <code>THREE.Fog</code> (color tracks clear). Not heat haze — Lighting heat toggles do not change bay fog. Floor shimmer is Lighting → Ground haze (off).</p>
       </div>
 
       <div class="settings-section">
         <h3>Camera clip</h3>
-        <p class="note">Near/far planes for depth teaching. Default far <strong>2000</strong> so looking up does not clip at 520&nbsp;m; fog 375/520 still hides long tracers. Logarithmic depth is on.</p>
-        <label class="slider-row">Near
+        <p class="note">Depth planes. Default far <strong>2000</strong> so looking up does not clip at 520&nbsp;m; fog 375/520 still hides tracers. Log depth on.</p>
+        <label class="slider-row slider-row-num">Near
           <input type="range" id="camNearSlider" min="0.01" max="0.5" step="0.01" value="0.05" />
-          <input type="number" id="camNearInput" min="0.001" max="2" step="0.01" value="0.05" style="width:4.5rem" />
+          <input type="number" id="camNearInput" min="0.001" max="2" step="0.01" value="0.05" />
           <code id="camNearVal">0.050</code>
         </label>
-        <label class="slider-row">Far
+        <label class="slider-row slider-row-num">Far
           <input type="range" id="camFarSlider" min="100" max="5000" step="10" value="2000" />
-          <input type="number" id="camFarInput" min="50" max="5000" step="10" value="2000" style="width:4.5rem" />
+          <input type="number" id="camFarInput" min="50" max="5000" step="10" value="2000" />
           <code id="camFarVal">2000</code>
         </label>
       </div>
@@ -506,11 +510,11 @@
 
       <div class="settings-section">
         <h3>Look</h3>
-        <label class="slider-row">Hip look sensitivity
+        <label class="slider-row">Hip look
           <input type="range" id="lookSensSlider" min="50" max="200" step="5" value="100" />
           <code id="lookSensVal">100%</code>
         </label>
-        <label class="slider-row">ADS look global mul
+        <label class="slider-row">ADS look mul
           <input type="range" id="adsLookMulSlider" min="50" max="150" step="5" value="100" />
           <code id="adsLookMulVal">1.00×</code>
         </label>
@@ -522,7 +526,7 @@
           <input type="range" id="adsDofRadiusSlider" min="0" max="0.012" step="0.0001" value="0.0028" />
           <code id="adsDofRadiusVal">0.0028</code>
         </label>
-        <p class="note">ADS viewmodel only (half-res). Ring taps plus center, plus a half-radius inner ring. Range stays sharp.</p>
+        <p class="note">ADS viewmodel only (half-res). Ring taps + center + inner ring. Range stays sharp.</p>
       </div>
 
       <div class="settings-section">
@@ -534,7 +538,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>X</kbd> drop held kit · <kbd>F</kbd> bench / world kit / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Settings: hip reticle · Brightness/Gamma · Pass lab (backdrop + PIP + <kbd>P</kbd> freeze) · FX (hole/casing cap + fade + draw) · Lighting (clock + clouds + intensities + sun size/punch + god rays + bloom + dither/scale/offset/type + barrel heat + heat haze master/cards/ground) · Materials (concrete wear/scale/variation) · Fog near/far (375/520 still hides long tracers; separate from heat haze) · camera far default 2000 · Look (DOF taps/blur) · PLUGE strip · persist locally · Reset defaults · Copy settings</li>
+          <li>Tuners persist locally · Reset defaults · Copy settings · <kbd>P</kbd> freeze pass lab</li>
         </ul>
       </div>
     </div>

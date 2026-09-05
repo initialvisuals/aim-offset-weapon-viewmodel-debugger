@@ -423,51 +423,71 @@ body[data-game-style="arcade"] button.toggle[aria-pressed="true"] {
 /* ---- Hip reticle toggle ---- */
 .crosshair.hip-hide { opacity: 0 !important; visibility: hidden; }
 
-/* ---- Settings overlay ---- */
+/* ---- Settings overlay (dense, still sectioned) ---- */
+.modal-backdrop.settings-backdrop {
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2.2vh 0.55rem 0.45rem;
+}
 .settings-dialog {
+  --settings-sticky-head: 2.35rem;
+  --settings-label: 7.6rem;
+  --settings-value: 3.25rem;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  width: min(420px, 100%);
-  max-height: min(90vh, 820px);
+  border-radius: 10px;
+  width: min(500px, calc(100vw - 1.1rem));
+  max-height: min(94vh, 920px);
   overflow: auto;
-  padding: 1rem 1.1rem 1.15rem;
+  overscroll-behavior: contain;
+  padding: 0.45rem 0.7rem 0.65rem;
   box-shadow: 0 12px 40px rgba(0,0,0,0.5);
 }
 .settings-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.35rem;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  min-height: var(--settings-sticky-head);
+  margin: 0 0 0.2rem;
+  padding: 0.1rem 0 0.28rem;
+  background: var(--panel);
+  box-shadow: 0 1px 0 var(--line);
 }
-.settings-head h2 { margin: 0; font-size: 1.05rem; }
+.settings-head h2 { margin: 0; font-size: 0.95rem; letter-spacing: 0.01em; }
 .settings-dialog .hint {
   color: var(--muted);
-  font-size: 0.8rem;
-  margin: 0 0 0.55rem;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  margin: 0 0 0.35rem;
 }
 .settings-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  margin: 0 0 0.85rem;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  margin: 0;
 }
 .settings-actions button {
-  font-size: 0.82rem;
+  font-size: 0.72rem;
+  padding: 0.22rem 0.48rem;
 }
 .settings-dialog .hint kbd {
   font-family: var(--mono);
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   background: #222834;
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 0.05rem 0.35rem;
+  padding: 0.02rem 0.28rem;
   color: var(--text);
 }
 .settings-section {
-  margin-bottom: 0.9rem;
-  padding-bottom: 0.75rem;
+  margin-bottom: 0.38rem;
+  padding-bottom: 0.32rem;
   border-bottom: 1px solid var(--line);
 }
 .settings-section:last-child {
@@ -476,50 +496,110 @@ body[data-game-style="arcade"] button.toggle[aria-pressed="true"] {
   border-bottom: none;
 }
 .settings-section h3 {
-  margin: 0 0 0.45rem;
-  font-size: 0.72rem;
+  position: sticky;
+  top: var(--settings-sticky-head);
+  z-index: 3;
+  margin: 0 0 0.22rem;
+  padding: 0.22rem 0 0.16rem;
+  font-size: 0.66rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: var(--muted);
+  background: var(--panel);
+  box-shadow: 0 1px 0 var(--line);
 }
-.settings-section .note { margin: 0.4rem 0 0; }
+.settings-section .note {
+  margin: 0.16rem 0 0.1rem;
+  font-size: 0.68rem;
+  line-height: 1.32;
+}
+.settings-dialog .segmented .seg {
+  padding: 0.22rem 0.7rem;
+  min-width: 3.8rem;
+  font-size: 0.78rem;
+}
+.settings-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.06rem 0.95rem;
+  margin: 0 0 0.1rem;
+}
+.settings-checks .check-row { margin-bottom: 0; }
 .check-row {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.38rem;
   color: var(--text);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+  line-height: 1.25;
   text-transform: none;
   letter-spacing: 0;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.14rem;
   cursor: pointer;
 }
-.check-row input { width: 1rem; height: 1rem; accent-color: var(--accent); }
+.check-row input { width: 0.9rem; height: 0.9rem; accent-color: var(--accent); flex: 0 0 auto; }
 .slider-row {
   display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto;
-  gap: 0.25rem 0.5rem;
+  grid-template-columns: var(--settings-label) minmax(0, 1fr) var(--settings-value);
+  column-gap: 0.42rem;
   align-items: center;
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.12rem;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.66rem;
+  line-height: 1.15;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.035em;
 }
 .slider-row input[type="range"] {
-  grid-column: 1 / -1;
+  grid-column: auto;
   width: 100%;
+  min-width: 0;
+  height: 1.15rem;
+  margin: 0;
+}
+.slider-row input[type="number"] {
+  width: 4.1rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.12rem 0.28rem;
+  font: 0.72rem/1.2 var(--mono);
+}
+.slider-row.slider-row-num {
+  grid-template-columns: 3.4rem minmax(0, 1fr) 4.1rem var(--settings-value);
 }
 .slider-row code {
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   color: var(--ok);
   text-transform: none;
   letter-spacing: 0;
+  text-align: right;
+  justify-self: end;
+  min-width: 0;
 }
-.settings-keys { margin: 0; padding-left: 1.1rem; }
+.settings-dialog > .settings-section > label:not(.slider-row):not(.check-row) {
+  display: grid;
+  grid-template-columns: var(--settings-label) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.28rem 0.42rem;
+  margin: 0 0 0.14rem;
+}
+.settings-dialog select {
+  min-width: 0;
+  width: 100%;
+  padding: 0.18rem 0.4rem;
+  font-size: 0.78rem;
+}
+.settings-keys {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.75rem;
+  line-height: 1.38;
+}
+.settings-keys li + li { margin-top: 0.08rem; }
 body[data-game-style="arcade"] .settings-dialog {
   box-shadow: 0 12px 40px rgba(0,0,0,0.55), 0 0 24px rgba(255, 79, 216, 0.18);
   border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
@@ -527,15 +607,26 @@ body[data-game-style="arcade"] .settings-dialog {
 body[data-game-style="arcade"] .settings-dialog .hint kbd {
   background: rgba(60, 20, 48, 0.9);
 }
+@media (max-width: 440px) {
+  .settings-dialog {
+    --settings-label: 5.8rem;
+    --settings-value: 2.85rem;
+    width: min(100%, calc(100vw - 0.7rem));
+    padding: 0.38rem 0.5rem 0.55rem;
+  }
+  .slider-row.slider-row-num {
+    grid-template-columns: 2.8rem minmax(0, 1fr) 3.6rem var(--settings-value);
+  }
+}
 
 /* PLUGE / grey calibration strip (unfiltered — true display blacks/whites) */
 .pluge-calib {
   display: flex;
   width: 100%;
-  height: 2.1rem;
-  margin: 0.45rem 0 0.35rem;
+  height: 1.45rem;
+  margin: 0.22rem 0 0.16rem;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 5px;
   overflow: hidden;
 }
 .pluge-calib .pluge-swatch {
@@ -667,7 +758,9 @@ body[data-game-style="arcade"] .settings-dialog .hint kbd {
   margin-top: -0.5px;
 }
 .settings-section #btnPassLabFreeze {
-  margin: 0.35rem 0 0.15rem;
+  margin: 0.12rem 0 0.04rem;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.75rem;
 }
 
 /* ---- Build / cache stamp (bottom-left, non-interactive) ---- */

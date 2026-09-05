@@ -215,6 +215,7 @@ const _hazeMuzzleWorld = new THREE.Vector3();
 const _hazeMuzzleLocal = new THREE.Vector3();
 const _hazeMuzzlePrev = new THREE.Vector3();
 const _hazeBillboardCam = new THREE.Vector3();
+const _hazeBillboardUp = new THREE.Vector3();
 let hazeMuzzlePrevOk = false;
 /** Recoil pattern index resets after this gap of not firing. */
 const RECOIL_RESET_MS = 200;
@@ -294,7 +295,7 @@ const PASS_LAB_MODE_DEFAULT = "off";
 /** PIP / sample-rect size in CSS pixels (square). */
 const PASS_LAB_PIP_CSS = 200;
 const GROUND_HAZE_H = 0.46;
-const BARREL_HAZE_H = 0.11;
+const BARREL_HAZE_H = 0.13;
 /** Settings default cloud cover (0 = clear). */
 const CLOUDS_DEFAULT = 0.55;
 /** Dust / edge wear on bay concrete (0 = clean pour). Shared GPU uniform. */
@@ -5995,14 +5996,14 @@ const HEAT_HAZE_NOISE_GLSL = /* glsl */`
           body = max(body, height * (0.40 + 0.60 * haze));
           mask = body * edgeX * edgeY * height;
         } else if (uBarrelCard > 0.5) {
-          // Soft safe zone: L/R/top dead / feathered; bottom seats on tube; active lobe bottom-mid → top-third.
-          float padLR = 0.26;
+          // Soft safe zone: L/R/top feathered; bottom seats on tube; lobe covers most of the card.
+          float padLR = 0.16;
           float edgeX = smoothstep(0.0, padLR, vu.x) * smoothstep(1.0, 1.0 - padLR, vu.x);
           float seat = smoothstep(-0.04, 0.05, vu.y);
-          float topCut = smoothstep(0.72, 0.38, vu.y);
-          float dx = (vu.x - 0.5) / 0.40;
-          float dy = (vu.y - 0.05) / 0.55;
-          float dome = 1.0 - smoothstep(0.38, 1.12, dx * dx + dy * dy * 0.88);
+          float topCut = smoothstep(0.88, 0.46, vu.y);
+          float dx = (vu.x - 0.5) / 0.46;
+          float dy = (vu.y - 0.04) / 0.68;
+          float dome = 1.0 - smoothstep(0.32, 1.18, dx * dx + dy * dy * 0.82);
           float vignette = edgeX * seat * topCut * clamp(dome, 0.0, 1.0);
           mask = body * vignette;
         } else {
@@ -6042,6 +6043,8 @@ function makeHeatHazeMaterial(opts = {}) {
     // Screen-space footprint: dest already holds the world. Depth-test would
     // clip the near-edge-on lattice; the fragment depth-gates fog onto the gun.
     depthTest: false,
+    blending: THREE.NormalBlending,
+    premultipliedAlpha: false,
     side: THREE.DoubleSide,
     toneMapped: false,
     fog: false,
@@ -6131,7 +6134,12 @@ function makeHeatHazeMaterial(opts = {}) {
         if (mask < 0.003) discard;
         if (uHasScene < 0.5) discard;
         vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
-        vec2 off = (nxy - 0.5) * mask * uStrength * 0.020;
+        // fbm sits near 0.47 with low variance — (nxy-0.5)*0.020 was ~1 px at 1080p.
+        vec2 field = vec2(
+          (nxy.x - 0.5) * 6.2 + (haze - 0.5) * 3.4,
+          (nxy.y - 0.5) * 6.2 + (nxy.x - nxy.y) * 4.2
+        );
+        vec2 off = field * mix(0.20, 1.0, clamp(mask, 0.0, 1.0)) * uStrength * 0.052;
         vec4 baseSamp = texture2D(tScene, clamp(suv, 0.0, 1.0));
         vec4 warpSamp = texture2D(tScene, clamp(suv + off, 0.0, 1.0));
         vec3 base = baseSamp.rgb;
@@ -6141,29 +6149,36 @@ function makeHeatHazeMaterial(opts = {}) {
         float farLeak = 0.0;
         if (uHasDepth > 0.5) {
           float packedB = baseSamp.a;
-          if (packedB > 1e-4 && packedB < 0.997) {
+          float packedW = warpSamp.a;
+          if (packedW <= 1e-4 || packedW >= 0.997) {
+            warped = base;
+            farLeak = 1.0;
+          } else if (packedB > 1e-4 && packedB < 0.997) {
             float logFar = log2(max(cameraFar, 1.0) + 1.0);
             float clipB = exp2(packedB * logFar) - 1.0;
             if (clipB < 2.4) {
-              float packedW = warpSamp.a;
-              if (packedW <= 1e-4 || packedW >= 0.997) {
-                farLeak = 1.0;
-              } else {
-                float clipW = exp2(packedW * logFar) - 1.0;
-                farLeak = smoothstep(clipB + 1.2, clipB + 4.0, clipW);
-              }
+              float clipW = exp2(packedW * logFar) - 1.0;
+              farLeak = smoothstep(clipB + 1.2, clipB + 4.0, clipW);
             }
           }
         }
-        vec3 col = warped;
-        // Luma-lock: refraction may shift, but never lift black sky / steel into fog grey.
+        float warpAmt = clamp(0.50 + mask * uStrength * 0.70, 0.50, 1.0) * (1.0 - farLeak * 0.92);
+        vec3 col = mix(base, warped, warpAmt);
+        // Fog guard: crush night-black / blued steel lifted into sky grey.
+        // Mid-tone casings must keep neighbor luma or the mix is identity.
         float lumaBase = max(dot(base, vec3(0.2126, 0.7152, 0.0722)), 0.0);
         float lumaCol = max(dot(col, vec3(0.2126, 0.7152, 0.0722)), 0.0);
-        if (lumaCol > lumaBase) {
+        if (lumaBase < 0.055 && lumaCol > lumaBase + 0.08) {
           col *= lumaBase / max(lumaCol, 1e-5);
+        } else if (uHasDepth < 0.5) {
+          // No packed depth: reject grey fog lifts, keep brass chroma.
+          float chromaCol = length(col - vec3(lumaCol));
+          if (lumaCol > lumaBase + 0.10 && chromaCol < 0.04) {
+            col *= lumaBase / max(lumaCol, 1e-5);
+          }
         }
-        float a = clamp(mask * uStrength * 0.85, 0.0, 0.85) * (1.0 - farLeak * 0.92);
-        if (a < 0.008) discard;
+        float a = clamp(mask * uStrength * 1.35, 0.0, 0.94) * (1.0 - farLeak * 0.92);
+        if (a < 0.012) discard;
         gl_FragColor = vec4(col, a);
       }
     `,
@@ -6207,9 +6222,9 @@ function addBarrelHeatShimmer(x, y, z, length) {
   // local −X points toward the gun body (group sits near tip).
   const sz = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
   const specs = [
-    { name: "barrelHeatShimmerL", lat: -0.016, wMul: 0.70, hMul: 0.78, along: -0.01, seat: 0.46, roll: 0.10 },
-    { name: "barrelHeatShimmer", lat: 0, wMul: 1.12, hMul: 1.28, along: -0.055, seat: 0.48, roll: 0 },
-    { name: "barrelHeatShimmerR", lat: 0.016, wMul: 0.70, hMul: 0.78, along: -0.01, seat: 0.46, roll: -0.10 },
+    { name: "barrelHeatShimmerL", lat: -0.018, wMul: 0.82, hMul: 0.92, along: -0.01, seat: 0.46, roll: 0.10 },
+    { name: "barrelHeatShimmer", lat: 0, wMul: 1.36, hMul: 1.52, along: -0.05, seat: 0.50, roll: 0 },
+    { name: "barrelHeatShimmerR", lat: 0.018, wMul: 0.82, hMul: 0.92, along: -0.01, seat: 0.46, roll: -0.10 },
   ];
   for (const spec of specs) {
     const cardW = len * 1.22 * spec.wMul;
@@ -6377,8 +6392,14 @@ function updateBarrelHeatCardMorph(dt) {
   if (!barrelHeatHazeLive) return;
   if (camera) {
     camera.getWorldPosition(_hazeBillboardCam);
+    // Camera world-up, not world Y — lookAt(worldY) collapses when the
+    // player looks down at a casing pile (view ≈ +Y, cross product → 0).
+    _hazeBillboardUp.setFromMatrixColumn(camera.matrixWorld, 1);
+    if (_hazeBillboardUp.lengthSq() < 1e-8) _hazeBillboardUp.set(0, 1, 0);
+    else _hazeBillboardUp.normalize();
     gunRoot.traverse((o) => {
       if (!o.userData.barrelHeatShimmer) return;
+      o.up.copy(_hazeBillboardUp);
       o.lookAt(_hazeBillboardCam);
     });
   }
@@ -6693,7 +6714,9 @@ function renderHeatHaze(dest) {
 
   let grabbed = false;
   let grabDepth = false;
-  const grab = grabHeatHazeScene(dest, { wantDepth: groundOn && depthOk });
+  // Pack depth for cards too so the near-gun fog gate can run without
+  // a luma-lock that crushes mid-tone casing warps back to identity.
+  const grab = grabHeatHazeScene(dest, { wantDepth: depthOk });
   if (grab.ok) {
     grabbed = true;
     grabDepth = !!grab.hasDepth;

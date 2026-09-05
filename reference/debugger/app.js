@@ -282,8 +282,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v66";
-const APP_BUILD_STAMP = "2026-09-04 20:56";
+const APP_CACHE_BUST = "20260824v67";
+const APP_BUILD_STAMP = "2026-09-04 21:30";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -6569,6 +6569,12 @@ function renderHeatHaze(dest) {
   }
 
   if (cardsOn) {
+    // Overlay pass only. A Color background force-clears (fog/sky sheet);
+    // a Pass-lab texture is pushed with layers.enableAll() and depthTest off,
+    // so it would paint FOG|NEAR (or any chart) over the already-drawn world.
+    // Same isolation as the ADS / god-ray extra renders.
+    const prevBg = scene.background;
+    scene.background = null;
     camera.layers.set(HEAT_HAZE_LAYER);
     renderer.setRenderTarget(dest);
     try {
@@ -6576,6 +6582,7 @@ function renderHeatHaze(dest) {
     } catch (err) {
       console.warn("[heat] barrel card pass failed", err);
     } finally {
+      scene.background = prevBg;
       restoreCameraLayers();
     }
   }

@@ -293,8 +293,13 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
+<<<<<<< HEAD
 const APP_CACHE_BUST = "20260824v71";
 const APP_BUILD_STAMP = "2026-09-05 00:45";
+=======
+const APP_CACHE_BUST = "20260905v71";
+const APP_BUILD_STAMP = "2026-09-05 00:52";
+>>>>>>> 6b9086a (Retoken v71 cache so the muzzle blit actually loads.)
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";

@@ -5935,8 +5935,9 @@ function makeHeatHazeMaterial(opts = {}) {
     },
     transparent: true,
     depthWrite: false,
-    depthTest: true,
-    blending: THREE.NormalBlending,
+    // Screen-space footprint: dest already holds the world. Depth-test would
+    // clip the near-edge-on lattice; the fragment depth-gates fog onto the gun.
+    depthTest: false,
     side: THREE.DoubleSide,
     toneMapped: false,
     fog: false,
@@ -6026,26 +6027,31 @@ function makeHeatHazeMaterial(opts = {}) {
         if (mask < 0.003) discard;
         if (uHasScene < 0.5) discard;
         vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
-        vec2 off = (nxy - 0.5) * mask * uStrength * 0.018;
+        vec2 off = (nxy - 0.5) * mask * uStrength * 0.020;
         vec4 baseSamp = texture2D(tScene, clamp(suv, 0.0, 1.0));
         vec4 warpSamp = texture2D(tScene, clamp(suv + off, 0.0, 1.0));
         vec3 base = baseSamp.rgb;
         vec3 warped = warpSamp.rgb;
-        // Depth gate: keep near viewmodel pixels, but never pull far/sky/fog into them.
+        // Depth gate vs near viewmodel only: do not pull far/sky/fog onto the gun.
+        // Cards live in the air above the tube — mid/far background must still warp.
         float farLeak = 0.0;
         if (uHasDepth > 0.5) {
           float packedB = baseSamp.a;
-          float packedW = warpSamp.a;
-          if (packedW <= 1e-4 || packedW >= 0.997) {
-            farLeak = 1.0;
-          } else if (packedB > 1e-4) {
+          if (packedB > 1e-4 && packedB < 0.997) {
             float logFar = log2(max(cameraFar, 1.0) + 1.0);
             float clipB = exp2(packedB * logFar) - 1.0;
-            float clipW = exp2(packedW * logFar) - 1.0;
-            farLeak = smoothstep(clipB + 1.5, clipB + 5.0, clipW);
+            if (clipB < 2.4) {
+              float packedW = warpSamp.a;
+              if (packedW <= 1e-4 || packedW >= 0.997) {
+                farLeak = 1.0;
+              } else {
+                float clipW = exp2(packedW * logFar) - 1.0;
+                farLeak = smoothstep(clipB + 1.2, clipB + 4.0, clipW);
+              }
+            }
           }
         }
-        float warpAmt = clamp(mask * uStrength * 0.70, 0.0, 0.78) * (1.0 - farLeak);
+        float warpAmt = clamp(mask * uStrength * 0.85, 0.0, 0.85) * (1.0 - farLeak);
         vec3 col = mix(base, warped, warpAmt);
         // Luma-lock: refraction may shift, but never lift black sky / steel into fog grey.
         float lumaBase = max(dot(base, vec3(0.2126, 0.7152, 0.0722)), 0.0);
@@ -6053,7 +6059,7 @@ function makeHeatHazeMaterial(opts = {}) {
         if (lumaCol > lumaBase) {
           col *= lumaBase / max(lumaCol, 1e-5);
         }
-        float a = clamp(mask * 0.72, 0.0, 0.78);
+        float a = clamp(mask * 0.85, 0.0, 0.85);
         if (a < 0.008) discard;
         gl_FragColor = vec4(col, a);
       }

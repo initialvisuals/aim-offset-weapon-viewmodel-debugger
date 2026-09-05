@@ -298,8 +298,12 @@ const APP_CACHE_BUST = "20260824v71";
 const APP_BUILD_STAMP = "2026-09-05 00:45";
 =======
 const APP_CACHE_BUST = "20260905v71";
+<<<<<<< HEAD
 const APP_BUILD_STAMP = "2026-09-05 00:52";
 >>>>>>> 6b9086a (Retoken v71 cache so the muzzle blit actually loads.)
+=======
+const APP_BUILD_STAMP = "2026-09-05 00:55";
+>>>>>>> dd6b323 (Soften the muzzle warp mask so it is not a hard ring.)
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -6707,7 +6711,9 @@ function initHeatHazePost() {
         d.x -= uLean.x * 0.05;
         d.y -= uLean.y * 0.04 + 0.10;
         float rad = 0.42 * max(uSize, 0.35);
-        float dome = smoothstep(rad, rad * 0.22, length(d));
+        float r = length(d);
+        float nRad = 0.72 + 0.40 * noise(d * 5.5 + vec2(uTime * 0.35, 2.2));
+        float dome = smoothstep(rad * nRad, rad * nRad * 0.16, r);
         if (dome < 0.01) discard;
         vec2 vu = vec2(d.x / max(rad, 1e-4) * 0.5 + 0.5, clamp(1.0 - length(d) / max(rad, 1e-4), 0.0, 1.0));
         float mask = 0.0;

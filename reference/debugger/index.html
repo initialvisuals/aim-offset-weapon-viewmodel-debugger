@@ -4,7 +4,25 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260824v68" />
+  <link rel="stylesheet" href="styles.css?v=20260824v69" />
+  <style>
+    /* Critical first-paint cover if styles.css is stale. Full rules live in styles.css. */
+    .boot-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 400;
+      background: #000;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding-bottom: 22vh;
+      opacity: 1;
+      transition: opacity 0.32s ease;
+    }
+    .boot-overlay.is-done { opacity: 0; pointer-events: none; }
+    .boot-overlay.is-gone,
+    .boot-overlay[hidden] { display: none !important; }
+  </style>
   <script type="importmap">
     {
       "imports": {
@@ -14,6 +32,31 @@
     </script>
 </head>
 <body class="app-shell" data-game-style="sim">
+  <div id="bootOverlay" class="boot-overlay" role="status" aria-live="polite" aria-busy="true">
+    <div class="boot-overlay-inner">
+      <p class="boot-label" id="bootLabel">Loading…</p>
+      <div class="boot-bar" id="bootBar" role="progressbar" aria-labelledby="bootLabel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="bootBarFill" class="boot-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var FALLBACK_MS = 12000;
+      var FADE_MS = 320;
+      window.setTimeout(function () {
+        var node = document.getElementById("bootOverlay");
+        if (!node || node.classList.contains("is-done") || node.hidden) return;
+        node.classList.add("is-done");
+        node.setAttribute("aria-busy", "false");
+        window.setTimeout(function () {
+          node.classList.add("is-gone");
+          node.hidden = true;
+          node.setAttribute("aria-hidden", "true");
+        }, FADE_MS + 40);
+      }, FALLBACK_MS);
+    })();
+  </script>
   <div class="viewport-wrap">
     <canvas id="view3d"></canvas>
     <div id="buildStamp" class="build-stamp" aria-hidden="true"></div>
@@ -547,6 +590,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v68"></script>
+    <script type="module" src="app.js?v=20260824v69"></script>
 </body>
 </html>

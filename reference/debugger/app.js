@@ -6154,11 +6154,12 @@ function makeHeatHazeMaterial(opts = {}) {
         vec2 suv = vProj.xy / max(vProj.w, 1e-6) * 0.5 + 0.5;
         // fbm sits near 0.47 with low variance — (nxy-0.5)*0.020 was ~1 px at 1080p.
         vec2 field = vec2(
-          (nxy.x - 0.5) * 7.0 + (haze - 0.5) * 4.0,
-          (nxy.y - 0.5) * 7.0 + (nxy.x - nxy.y) * 5.0
+          (nxy.x - 0.5) * 8.0 + (haze - 0.5) * 5.0,
+          (nxy.y - 0.5) * 8.0 + (nxy.x - nxy.y) * 6.0
         );
-        vec2 off = field * mix(0.28, 1.0, clamp(mask, 0.0, 1.0)) * uStrength * 0.048;
-        off = clamp(off, vec2(-0.07), vec2(0.07));
+        // Hot card: tens of pixels at 1080p so a casing pile / floor grid reads.
+        vec2 off = field * mix(0.40, 1.0, clamp(mask, 0.0, 1.0)) * uStrength * 0.085;
+        off = clamp(off, vec2(-0.11), vec2(0.11));
         vec4 baseSamp = texture2D(tScene, clamp(suv, 0.0, 1.0));
         vec4 warpSamp = texture2D(tScene, clamp(suv + off, 0.0, 1.0));
         vec3 base = baseSamp.rgb;
@@ -6183,7 +6184,7 @@ function makeHeatHazeMaterial(opts = {}) {
             }
           }
         }
-        float warpAmt = clamp(0.62 + mask * uStrength * 0.55, 0.62, 1.0) * (1.0 - farLeak);
+        float warpAmt = clamp(0.78 + mask * uStrength * 0.40, 0.78, 1.0) * (1.0 - farLeak);
         vec3 col = mix(base, warped, warpAmt);
         // Fog guard: crush night-black / blued steel lifted into sky grey.
         // Mid-tone casings must keep neighbor luma or the mix is identity.
@@ -6198,8 +6199,8 @@ function makeHeatHazeMaterial(opts = {}) {
             col *= lumaBase / max(lumaCol, 1e-5);
           }
         }
-        float a = clamp(mask * uStrength * 1.40, 0.0, 0.94) * (1.0 - farLeak * 0.92);
-        if (a < 0.02) discard;
+        float a = clamp(0.50 + mask * uStrength * 0.70, 0.0, 0.96) * (1.0 - farLeak * 0.92);
+        if (a < 0.03) discard;
         gl_FragColor = vec4(col, a);
       }
     `,
@@ -6244,9 +6245,9 @@ function addBarrelHeatShimmer(x, y, z, length) {
   // local −X points toward the gun body (group sits near tip).
   const sz = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
   const specs = [
-    { name: "barrelHeatShimmerL", lat: -0.022, wMul: 0.95, hMul: 1.05, along: -0.01, seat: 0.46, roll: 0.10 },
-    { name: "barrelHeatShimmer", lat: 0, wMul: 1.55, hMul: 1.72, along: -0.04, seat: 0.52, roll: 0 },
-    { name: "barrelHeatShimmerR", lat: 0.022, wMul: 0.95, hMul: 1.05, along: -0.01, seat: 0.46, roll: -0.10 },
+    { name: "barrelHeatShimmerL", lat: -0.024, wMul: 1.05, hMul: 1.18, along: -0.01, seat: 0.48, roll: 0.10 },
+    { name: "barrelHeatShimmer", lat: 0, wMul: 1.85, hMul: 2.05, along: -0.03, seat: 0.54, roll: 0 },
+    { name: "barrelHeatShimmerR", lat: 0.024, wMul: 1.05, hMul: 1.18, along: -0.01, seat: 0.48, roll: -0.10 },
   ];
   for (const spec of specs) {
     const cardW = len * 1.22 * spec.wMul;

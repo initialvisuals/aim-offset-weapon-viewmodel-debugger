@@ -6700,8 +6700,8 @@ function initHeatHazePost() {
         vec2 mu = uMuzzle * 0.5 + 0.5;
         vec2 d = (vUv - mu) * vec2(uAspect, 1.0);
         d.x -= uLean.x * 0.05;
-        d.y -= uLean.y * 0.03 + 0.035;
-        float rad = 0.20 * max(uSize, 0.35);
+        d.y -= uLean.y * 0.04 + 0.10;
+        float rad = 0.42 * max(uSize, 0.35);
         float dome = smoothstep(rad, rad * 0.22, length(d));
         if (dome < 0.01) discard;
         vec2 vu = vec2(d.x / max(rad, 1e-4) * 0.5 + 0.5, clamp(1.0 - length(d) / max(rad, 1e-4), 0.0, 1.0));
@@ -6812,7 +6812,7 @@ function blitBarrelHeatMuzzle(dest, resx, resy, hasDepth) {
   muzzleSocket.getWorldPosition(_hazeMuzzleWorld);
   _hazeMuzzleLocal.copy(_hazeMuzzleWorld).project(camera);
   if (!Number.isFinite(_hazeMuzzleLocal.x) || !Number.isFinite(_hazeMuzzleLocal.y)) return;
-  if (_hazeMuzzleLocal.z < -1 || _hazeMuzzleLocal.z > 1) return;
+  if (Math.abs(_hazeMuzzleLocal.z) > 1.15) return;
   const mul = state.barrelHeat ?? BARREL_HEAT_DEFAULT;
   const raw = barrelHeatAmt[state.weaponId] || 0;
   const h = mul < 0.01 ? 0 : raw;

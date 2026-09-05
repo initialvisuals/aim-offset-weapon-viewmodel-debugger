@@ -282,8 +282,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v67";
-const APP_BUILD_STAMP = "2026-09-04 21:30";
+const APP_CACHE_BUST = "20260824v68";
+const APP_BUILD_STAMP = "2026-09-04 21:33";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -2637,17 +2637,20 @@ function bindPassLabMaterial() {
 }
 
 function updatePassLabBackdrop() {
-  ensurePassLabBackdrop();
   const on = passLabBackdropOn();
   if (skyDome) skyDome.visible = !on;
   if (on) {
     if (sunDisc) sunDisc.visible = false;
     if (moonDisc) moonDisc.visible = false;
   }
+  if (!on) {
+    if (passLabMesh) passLabMesh.visible = false;
+    return;
+  }
+  ensurePassLabBackdrop();
   if (!passLabMesh) return;
-  const world = on && !!state.passLabWorld;
+  const world = !!state.passLabWorld;
   passLabMesh.visible = world;
-  if (!on) return;
   bindPassLabMaterial();
   // Flat debugger plate: 2D CanvasTexture as scene.background (screen-space).
   // Optional far quad is the in-world haze feel — off by default.
@@ -2666,8 +2669,6 @@ function updatePassLabBackdrop() {
 
 function applyPassLabMode({ toast = false } = {}) {
   state.passLabMode = normalizePassLabMode(state.passLabMode);
-  ensurePassLabBackdrop();
-  bindPassLabMaterial();
   updatePassLabBackdrop();
   syncPassLabUI();
   if (toast) {
@@ -2795,7 +2796,7 @@ function passLabCropRect(bufW, bufH) {
 
 let passLabLastDest = null;
 let passLabPipBlit = null;
-const _passLabPipFlip = document.createElement("canvas");
+let _passLabPipFlip = null;
 
 function passLabRtOk(rt) {
   return !!(rt && rt.texture && rt.width >= 2 && rt.height >= 2);
@@ -2909,6 +2910,7 @@ function blitPassLabPipFromRT(rt, encode) {
     const buf = new Uint8Array(w * h * 4);
     renderer.readRenderTargetPixels(blit.rt, 0, 0, w, h, buf);
     u.tInput.value = null;
+    if (!_passLabPipFlip) _passLabPipFlip = document.createElement("canvas");
     if (_passLabPipFlip.width !== w) _passLabPipFlip.width = w;
     if (_passLabPipFlip.height !== h) _passLabPipFlip.height = h;
     const fctx = _passLabPipFlip.getContext("2d");
@@ -4972,8 +4974,10 @@ function getConcreteVariant(kind, seed) {
   return list[Math.floor(t * list.length) % list.length];
 }
 
+let _woodTexShared = null;
 function makeWoodTexture() {
-  return makeCanvasTexture((ctx, size) => {
+  if (_woodTexShared) return _woodTexShared;
+  _woodTexShared = makeCanvasTexture((ctx, size) => {
     ctx.fillStyle = "#5a4634";
     ctx.fillRect(0, 0, size, size);
     for (let y = 0; y < size; y += 3) {
@@ -4989,6 +4993,7 @@ function makeWoodTexture() {
       ctx.stroke();
     }
   }, 128, { repeat: [2, 1] });
+  return _woodTexShared;
 }
 
 /** Register world solids for lean anti-clip probes (excludes player / gun / targets). */
@@ -7288,7 +7293,8 @@ function addBayWallPanels(wallMat, rangeCenterZ) {
   }
 }
 
-function buildRoom() {
+/** Near-spawn bay only — enough to stand, loot, and look around on first paint. */
+function buildRoomCore() {
   leanSolids = [];
   const floorMat = makeConcreteMaterial("floor");
   // Bay geometry centered on the 200 m mark so spawn→berm (~410 m) stays covered.
@@ -7305,27 +7311,41 @@ function buildRoom() {
   grid.material.opacity = 0.16;
   scene.add(grid);
 
-  // Low side walls as ~5.5 m pour panels (outside the ±5.5 rails)
-  addBayWallPanels(makeConcreteMaterial("wall"), rangeCenterZ);
-
   buildOpticsTable();
   buildWeaponsBench();
   buildKitTable();
-  buildRangeProps();
   buildFiringLineStall();
   buildRangeBenches();
-  try {
-    buildRangeFloodlights();
-  } catch (err) {
-    console.error('[flood] buildRangeFloodlights failed', err);
-  }
   try {
     buildSpawnShelter();
   } catch (err) {
     console.error('[shelter] buildSpawnShelter failed', err);
   }
-  buildShootingRange();
   scatterStartAreaDrops();
+}
+
+function buildRoomWalls() {
+  addBayWallPanels(makeConcreteMaterial("wall"), rangeZ(200));
+}
+
+function buildRoomMid() {
+  buildRangeProps();
+  try {
+    buildRangeFloodlights();
+  } catch (err) {
+    console.error('[flood] buildRangeFloodlights failed', err);
+  }
+}
+
+function buildRoomFar() {
+  buildShootingRange();
+}
+
+function buildRoom() {
+  buildRoomCore();
+  buildRoomWalls();
+  buildRoomMid();
+  buildRoomFar();
 }
 
 function buildOpticsTable() {
@@ -10609,24 +10629,90 @@ function initThree() {
   camera.add(holdRoot);
 
 
-  buildRoom();
+  buildRoomCore();
   buildBlockGun(state.weaponId);
-  initAdsDof();
-  initGodRays();
-  initHdrBloom();
-  initOutputDither();
-  initHeatHazePost();
   resize();
   applyDisplayLook();
-  applyPassLabMode({ toast: false });
   syncPassLabPipOverlay();
   applyPassLabFromUrl();
   const ro = new ResizeObserver(() => resize());
   ro.observe(canvas.parentElement || canvas);
-  void prewarmShotFx().catch(() => {}).finally(() => {
-    clock.start();
-    animate();
+  clock.start();
+  animate();
+  scheduleDeferredBoot();
+}
+
+function afterAnimationFrames(count, fn) {
+  let left = Math.max(1, count | 0);
+  const tick = () => {
+    left -= 1;
+    if (left <= 0) fn();
+    else requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+let _displayPostsReady = false;
+function initDisplayPosts() {
+  if (_displayPostsReady || !renderer) return;
+  _displayPostsReady = true;
+  initAdsDof();
+  initGodRays();
+  initHdrBloom();
+  initOutputDither();
+  resize();
+}
+
+/**
+ * First Firefox open hitch was one long sync tick: world + posts + heat grab
+ * shaders + pass-lab 1024 charts + spark compile + AudioContext noise.
+ * Paint spawn/gun first, then spread the rest across later frames.
+ */
+function scheduleDeferredBoot() {
+  afterAnimationFrames(1, () => {
+    try {
+      initDisplayPosts();
+      if (passLabBackdropOn() || passLabPipWanted()) applyPassLabMode({ toast: false });
+      else syncPassLabUI();
+    } catch (err) {
+      console.error("[boot] display posts", err);
+    }
   });
+  afterAnimationFrames(2, () => {
+    try {
+      buildRoomWalls();
+    } catch (err) {
+      console.error("[boot] walls", err);
+    }
+  });
+  afterAnimationFrames(3, () => {
+    try {
+      buildRoomMid();
+    } catch (err) {
+      console.error("[boot] mid range", err);
+    }
+  });
+  afterAnimationFrames(4, () => {
+    try {
+      buildRoomFar();
+    } catch (err) {
+      console.error("[boot] far range", err);
+    }
+  });
+  afterAnimationFrames(5, () => {
+    void prewarmShotFx().catch(() => {});
+    if (renderer && renderer.debug) renderer.debug.checkShaderErrors = false;
+  });
+  const laterSfx = () => {
+    if (sfx && typeof sfx.prewarmGlass === "function") {
+      try { sfx.prewarmGlass(); } catch (_) {}
+    }
+  };
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(laterSfx, { timeout: 1200 });
+  } else {
+    afterAnimationFrames(8, laterSfx);
+  }
 }
 
 function resize() {
@@ -12080,13 +12166,16 @@ async function prewarmShotFx() {
   ];
   camera.updateMatrixWorld(true);
   try {
-    renderer.compile(scene, camera);
+    const warm = new THREE.Scene();
+    warm.add(new THREE.AmbientLight(0xffffff, 1));
+    warm.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.6));
+    for (const d of dummies) warm.add(d.mesh);
+    renderer.compile(warm, camera);
   } catch (_) {}
   for (const d of dummies) {
     if (d.mesh.parent) d.mesh.parent.remove(d.mesh);
     if (d.disposeMat && d.mesh.material) d.mesh.material.dispose();
   }
-  if (sfx && typeof sfx.prewarmGlass === "function") sfx.prewarmGlass();
 }
 
 /** Flattened stuck slug — stacked squat cylinders, beer-bottle geo, flush in the crater. */

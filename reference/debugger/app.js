@@ -282,8 +282,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v64";
-const APP_BUILD_STAMP = "2026-09-04 14:20";
+const APP_CACHE_BUST = "20260824v65";
+const APP_BUILD_STAMP = "2026-09-04 20:24";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -3173,7 +3173,6 @@ function syncSettingsUI() {
   syncHeatHazeUI();
   syncFxSettingsUI();
   syncPassLabUI();
-  syncCrouchSlider();
 }
 
 function renderGunList() {
@@ -4838,14 +4837,6 @@ function sitEyeWorld() {
   return player.supportY + player.crouchSitHeight;
 }
 
-function syncCrouchSlider() {
-  const slider = el("crouchHeightSlider");
-  const val = el("crouchHeightVal");
-  const pct = Math.round(clamp(state.crouchGrad, 0, 1) * 100);
-  if (slider && document.activeElement !== slider) slider.value = String(pct);
-  if (val) val.textContent = pct + "%";
-}
-
 function setCrouchGrad(g, { remember = true } = {}) {
   state.crouchGrad = clamp(g, 0, 1);
   if (remember && state.crouchGrad > 0.04) state.crouchLastDepth = state.crouchGrad;
@@ -4853,7 +4844,6 @@ function setCrouchGrad(g, { remember = true } = {}) {
     state.crouchGrad = 0;
     state.crouchToggled = false;
   }
-  syncCrouchSlider();
   scheduleSaveSettings();
 }
 
@@ -13497,16 +13487,6 @@ function bind() {
     adsDofRadiusSlider.oninput = (e) => setAdsDofRadius(e.target.value);
   }
   syncAdsDofUI();
-  const crouchSlider = el("crouchHeightSlider");
-  if (crouchSlider) {
-    crouchSlider.oninput = (e) => {
-      const pct = clamp(parseFloat(e.target.value) || 0, 0, 100);
-      const g = pct / 100;
-      state.crouchToggled = g > 0.04;
-      setCrouchGrad(g);
-    };
-    syncCrouchSlider();
-  }
 
   const camNearSlider = el("camNearSlider");
   const camNearInput = el("camNearInput");

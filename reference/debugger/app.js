@@ -6081,6 +6081,7 @@ function makeHeatHazeMaterial(opts = {}) {
       varying vec3 vWorldPos;
       varying vec2 vNxy;
       varying float vMask;
+      varying vec4 vProj;
       #include <common>
       #include <logdepthbuf_pars_vertex>
 ` + HEAT_HAZE_NOISE_GLSL + /* glsl */`
@@ -6108,6 +6109,7 @@ function makeHeatHazeMaterial(opts = {}) {
         vNxy = nxy;
         vMask = mask;
         gl_Position = projectionMatrix * viewMatrix * wp;
+        vProj = gl_Position;
         #include <logdepthbuf_vertex>
       }
     `,
@@ -6134,6 +6136,7 @@ function makeHeatHazeMaterial(opts = {}) {
       varying vec3 vWorldPos;
       varying vec2 vNxy;
       varying float vMask;
+      varying vec4 vProj;
       #include <common>
       #include <logdepthbuf_pars_fragment>
 ` + HEAT_HAZE_NOISE_GLSL + /* glsl */`
@@ -6147,13 +6150,15 @@ function makeHeatHazeMaterial(opts = {}) {
         mask *= uHeat;
         if (mask < 0.003) discard;
         if (uHasScene < 0.5) discard;
-        vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
+        // Clip-space UV — gl_FragCoord / uResolution can miss the grab (milk sheet).
+        vec2 suv = vProj.xy / max(vProj.w, 1e-6) * 0.5 + 0.5;
         // fbm sits near 0.47 with low variance — (nxy-0.5)*0.020 was ~1 px at 1080p.
         vec2 field = vec2(
           (nxy.x - 0.5) * 7.0 + (haze - 0.5) * 4.0,
           (nxy.y - 0.5) * 7.0 + (nxy.x - nxy.y) * 5.0
         );
-        vec2 off = field * mix(0.28, 1.0, clamp(mask, 0.0, 1.0)) * uStrength * 0.070;
+        vec2 off = field * mix(0.28, 1.0, clamp(mask, 0.0, 1.0)) * uStrength * 0.048;
+        off = clamp(off, vec2(-0.07), vec2(0.07));
         vec4 baseSamp = texture2D(tScene, clamp(suv, 0.0, 1.0));
         vec4 warpSamp = texture2D(tScene, clamp(suv + off, 0.0, 1.0));
         vec3 base = baseSamp.rgb;
@@ -6193,7 +6198,7 @@ function makeHeatHazeMaterial(opts = {}) {
             col *= lumaBase / max(lumaCol, 1e-5);
           }
         }
-        float a = clamp(0.42 + mask * uStrength * 0.95, 0.0, 0.95) * (1.0 - farLeak * 0.92);
+        float a = clamp(mask * uStrength * 1.40, 0.0, 0.94) * (1.0 - farLeak * 0.92);
         if (a < 0.02) discard;
         gl_FragColor = vec4(col, a);
       }

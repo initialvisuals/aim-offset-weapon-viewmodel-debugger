@@ -282,8 +282,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v65";
-const APP_BUILD_STAMP = "2026-09-04 20:35";
+const APP_CACHE_BUST = "20260824v66";
+const APP_BUILD_STAMP = "2026-09-04 20:56";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -401,6 +401,8 @@ const state = {
   reloadElapsed: 0,
   /** Active reload duration (sec). */
   reloadDuration: 1.2,
+  /** True after the mid-reload insert cue has played this cycle. */
+  reloadInsertPlayed: false,
   /** Bolt-action cycle in progress (example_sniper). */
   boltCycling: false,
   boltElapsed: 0,
@@ -655,6 +657,7 @@ function toggleFireMode() {
   }
   state.fireMode = state.fireMode === "auto" ? "semi" : "auto";
   updateFireModeHud();
+  sfx.play("cycle");
   showToast(state.fireMode === "auto" ? "AUTO" : "SEMI");
 }
 
@@ -698,7 +701,7 @@ function updateBoltCycle(dt) {
   if (!state.boltEjected && u >= 0.32) {
     spawnCasing();
     state.boltEjected = true;
-    sfx.play("dry");
+    sfx.play("bolt");
   }
   if (u >= 1) cancelBoltCycle();
 }
@@ -713,6 +716,7 @@ function syncAmmoForLoadout({ refill = false } = {}) {
     // Cancel in-progress reload on weapon/optic swap; keep remaining rounds.
     state.reloading = false;
     state.reloadElapsed = 0;
+    state.reloadInsertPlayed = false;
   }
   cancelBoltCycle();
   resetMagVisual();
@@ -755,7 +759,8 @@ function beginReload() {
   state.reloading = true;
   state.reloadElapsed = 0;
   state.reloadDuration = spec.reloadSec;
-  sfx.play("dry"); // existing click — mag release
+  state.reloadInsertPlayed = false;
+  sfx.play("reload_release");
   updateAmmoHud();
 }
 
@@ -765,7 +770,7 @@ function finishReload() {
   state.reloading = false;
   state.reloadElapsed = 0;
   resetMagVisual();
-  sfx.play("dry"); // existing click — mag seated
+  sfx.play("reload_seat");
   updateAmmoHud();
 }
 
@@ -780,6 +785,10 @@ function updateReload(dt) {
   // Mag unseats down the well, drops, then the seated size/shape slams in from below.
   if (magMesh) {
     applyReloadMagMotion(t);
+  }
+  if (!state.reloadInsertPlayed && t >= 0.56) {
+    state.reloadInsertPlayed = true;
+    sfx.play("reload_insert");
   }
   if (t >= 1) finishReload();
   else updateAmmoHud();
@@ -827,9 +836,66 @@ function applyReloadMagMotion(u) {
 }
 
 
-/* ---- Cheap Web Audio SFX (no external files) ---- */
+/* ---- Web Audio SFX (procedural + file-slot hooks) ----
+ * sfx.play(kind, opts) looks up sfx.slots[kind]. A URL string is fetched and
+ * decoded once; an AudioBuffer plays immediately. Empty / null / missing =
+ * procedural fallback (no assets required). Call sites stay sfx.play("fire").
+ *
+ * Stable slot ids:
+ *   fire              shot — opts.weaponClass = "smg" | "rifle" | "sniper"
+ *   dry               empty-chamber click only (not reload)
+ *   reload_release    mag unseat
+ *   reload_insert     mag offered to the well (rise-in beat)
+ *   reload_seat       mag seated
+ *   pickup            F retrieve / table bench equip (not G / debugger UI)
+ *   putdown           X drop  (alias: drop)
+ *   drop              alias of putdown
+ *   bolt              sniper bolt cycle (eject beat)
+ *   cycle             fire-mode selector (B, SMG only)
+ *   hit / bullseye / miss / glass / fizzle / shatter
+ *
+ * Later: sfx.slots.fire = "sounds/fire.ogg" (or an AudioBuffer). Same for any id.
+ */
+function sfxWeaponClass(weaponId = state.weaponId) {
+  if (weaponId === "example_rifle") return "rifle";
+  if (weaponId === "example_sniper") return "sniper";
+  return "smg";
+}
+
+const SFX_SLOT_IDS = Object.freeze([
+  "fire", "dry",
+  "reload_release", "reload_insert", "reload_seat",
+  "pickup", "putdown", "drop",
+  "bolt", "cycle",
+  "hit", "bullseye", "miss",
+  "glass", "fizzle", "shatter",
+]);
+
 const sfx = {
   ctx: null,
+  slotIds: SFX_SLOT_IDS,
+  /** Per-slot URL string or AudioBuffer. null / "" = procedural. */
+  slots: {
+    fire: null,
+    dry: null,
+    reload_release: null,
+    reload_insert: null,
+    reload_seat: null,
+    pickup: null,
+    putdown: null,
+    drop: null,
+    bolt: null,
+    cycle: null,
+    hit: null,
+    bullseye: null,
+    miss: null,
+    glass: null,
+    fizzle: null,
+    shatter: null,
+  },
+  decoded: Object.create(null),
+  prefetching: Object.create(null),
+  failed: Object.create(null),
   ensure() {
     if (this.ctx) return this.ctx;
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -841,6 +907,66 @@ const sfx = {
     const c = this.ensure();
     if (c && c.state === "suspended") c.resume().catch(() => {});
     return c;
+  },
+  canonicalKind(kind) {
+    return kind === "drop" ? "putdown" : kind;
+  },
+  slotSource(kind) {
+    const k = this.canonicalKind(kind);
+    const primary = this.slots[k];
+    if (primary != null && primary !== "") return primary;
+    if (k === "putdown") {
+      const alias = this.slots.drop;
+      if (alias != null && alias !== "") return alias;
+    }
+    return null;
+  },
+  prefetchUrl(url) {
+    if (!url || this.decoded[url] || this.prefetching[url] || this.failed[url]) return;
+    const c = this.ensure();
+    if (!c) return;
+    this.prefetching[url] = true;
+    fetch(url).then((r) => {
+      if (!r.ok) throw new Error("sfx slot " + url);
+      return r.arrayBuffer();
+    }).then((ab) => c.decodeAudioData(ab.slice(0))).then((buf) => {
+      this.decoded[url] = buf;
+      this.prefetching[url] = false;
+    }).catch(() => {
+      this.prefetching[url] = false;
+      this.failed[url] = true;
+    });
+  },
+  startBuffer(c, buf, opts) {
+    const now = c.currentTime;
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    const g = c.createGain();
+    const gain = opts && opts.gain != null ? opts.gain : 1;
+    g.gain.value = gain;
+    src.connect(g);
+    g.connect(c.destination);
+    src.start(now);
+  },
+  playRegistered(kind, opts) {
+    const src = this.slotSource(kind);
+    if (src == null || src === "") return false;
+    const c = this.ensure();
+    if (!c) return false;
+    if (typeof AudioBuffer !== "undefined" && src instanceof AudioBuffer) {
+      this.startBuffer(c, src, opts);
+      return true;
+    }
+    if (typeof src === "string") {
+      const buf = this.decoded[src];
+      if (buf) {
+        this.startBuffer(c, buf, opts);
+        return true;
+      }
+      this.prefetchUrl(src);
+      return false;
+    }
+    return false;
   },
   noiseBufs: Object.create(null),
   noiseBuffer(duration = 0.08) {
@@ -855,6 +981,90 @@ const sfx = {
     for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1;
     this.noiseBufs[key] = buf;
     return buf;
+  },
+  tone(c, now, { type = "sine", f0, f1, peak, attack = 0.004, dur }) {
+    const osc = c.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(Math.max(20, f0), now);
+    if (f1 != null) osc.frequency.exponentialRampToValueAtTime(Math.max(20, f1), now + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + Math.max(0.0008, attack));
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    osc.connect(g);
+    g.connect(c.destination);
+    osc.start(now);
+    osc.stop(now + dur + 0.02);
+  },
+  noiseBurst(c, now, { dur, peak, type = "bandpass", freq, Q = 0.8, attack = 0.003 }) {
+    const src = c.createBufferSource();
+    src.buffer = this.noiseBuffer(Math.max(dur, 0.05));
+    const filt = c.createBiquadFilter();
+    filt.type = type;
+    filt.frequency.value = freq;
+    filt.Q.value = Q;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + Math.max(0.0008, attack));
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(filt);
+    filt.connect(g);
+    g.connect(c.destination);
+    src.start(now);
+    src.stop(now + dur + 0.01);
+  },
+  playFire(c, opts) {
+    const klass = (opts && opts.weaponClass) || sfxWeaponClass();
+    const now = c.currentTime;
+    const spec = klass === "sniper"
+      ? { body0: 68, body1: 26, bodyPeak: 0.72, bodyDur: 0.18, crack: 980, noiseHz: 700, noiseQ: 0.55, noisePeak: 0.44, noiseDur: 0.15, crackPeak: 0.20, crackDur: 0.048 }
+      : klass === "rifle"
+      ? { body0: 96, body1: 38, bodyPeak: 0.58, bodyDur: 0.12, crack: 1380, noiseHz: 1040, noiseQ: 0.65, noisePeak: 0.38, noiseDur: 0.09, crackPeak: 0.17, crackDur: 0.032 }
+      : { body0: 158, body1: 76, bodyPeak: 0.34, bodyDur: 0.052, crack: 2140, noiseHz: 1780, noiseQ: 0.8, noisePeak: 0.26, noiseDur: 0.046, crackPeak: 0.13, crackDur: 0.016 };
+    this.noiseBurst(c, now, { dur: spec.noiseDur, peak: spec.noisePeak, type: "bandpass", freq: spec.noiseHz, Q: spec.noiseQ, attack: 0.002 });
+    this.tone(c, now, { type: "sine", f0: spec.body0, f1: spec.body1, peak: spec.bodyPeak, attack: 0.004, dur: spec.bodyDur });
+    this.tone(c, now, { type: "triangle", f0: spec.body0 * 1.75, f1: spec.body1 * 1.35, peak: spec.bodyPeak * 0.32, attack: 0.003, dur: spec.bodyDur * 0.68 });
+    this.tone(c, now, { type: "square", f0: spec.crack, f1: spec.crack * 0.42, peak: spec.crackPeak, attack: 0.001, dur: spec.crackDur });
+  },
+  playReloadRelease(c) {
+    const now = c.currentTime;
+    this.tone(c, now, { type: "triangle", f0: 640, f1: 230, peak: 0.16, attack: 0.002, dur: 0.08 });
+    this.tone(c, now, { type: "square", f0: 1720, f1: 700, peak: 0.07, attack: 0.001, dur: 0.034 });
+    this.noiseBurst(c, now, { dur: 0.09, peak: 0.10, type: "highpass", freq: 1700, Q: 0.7, attack: 0.004 });
+  },
+  playReloadInsert(c) {
+    const now = c.currentTime;
+    this.noiseBurst(c, now, { dur: 0.085, peak: 0.09, type: "bandpass", freq: 880, Q: 1.15, attack: 0.008 });
+    this.tone(c, now, { type: "triangle", f0: 270, f1: 175, peak: 0.11, attack: 0.01, dur: 0.11 });
+  },
+  playReloadSeat(c) {
+    const now = c.currentTime;
+    this.tone(c, now, { type: "triangle", f0: 330, f1: 128, peak: 0.22, attack: 0.002, dur: 0.09 });
+    this.tone(c, now, { type: "square", f0: 860, f1: 400, peak: 0.09, attack: 0.001, dur: 0.038 });
+    this.noiseBurst(c, now, { dur: 0.05, peak: 0.08, type: "lowpass", freq: 1300, Q: 0.8, attack: 0.002 });
+  },
+  playPickup(c) {
+    const now = c.currentTime;
+    this.noiseBurst(c, now, { dur: 0.10, peak: 0.08, type: "bandpass", freq: 400, Q: 0.75, attack: 0.012 });
+    this.tone(c, now + 0.028, { type: "sine", f0: 175, f1: 86, peak: 0.14, attack: 0.008, dur: 0.12 });
+    this.tone(c, now + 0.018, { type: "triangle", f0: 520, f1: 250, peak: 0.07, attack: 0.004, dur: 0.07 });
+  },
+  playPutdown(c) {
+    const now = c.currentTime;
+    this.tone(c, now, { type: "sine", f0: 86, f1: 34, peak: 0.28, attack: 0.012, dur: 0.18 });
+    this.noiseBurst(c, now, { dur: 0.14, peak: 0.12, type: "lowpass", freq: 210, Q: 0.55, attack: 0.01 });
+    this.tone(c, now + 0.016, { type: "triangle", f0: 200, f1: 86, peak: 0.08, attack: 0.008, dur: 0.10 });
+  },
+  playBolt(c) {
+    const now = c.currentTime;
+    this.tone(c, now, { type: "triangle", f0: 370, f1: 132, peak: 0.20, attack: 0.003, dur: 0.11 });
+    this.noiseBurst(c, now, { dur: 0.07, peak: 0.11, type: "bandpass", freq: 1550, Q: 0.9, attack: 0.002 });
+    this.tone(c, now + 0.024, { type: "square", f0: 230, f1: 105, peak: 0.10, attack: 0.002, dur: 0.08 });
+  },
+  playCycle(c) {
+    const now = c.currentTime;
+    this.tone(c, now, { type: "square", f0: 900, f1: 620, peak: 0.07, attack: 0.001, dur: 0.028 });
+    this.tone(c, now + 0.016, { type: "triangle", f0: 1260, f1: 860, peak: 0.05, attack: 0.001, dur: 0.022 });
   },
   /** Build glass + fizzle noise + silently tick the graph so first bulb-pop is not first-use. */
   prewarmGlass() {
@@ -884,41 +1094,24 @@ const sfx = {
       fizz.stop(now + 0.001);
     } catch (_) {}
   },
-  play(kind) {
+  play(kind, opts) {
     const c = this.resume();
     if (!c) return;
+    const slot = this.canonicalKind(kind);
+    if (this.playRegistered(slot, opts || {})) return;
+
+    if (slot === "fire") { this.playFire(c, opts || {}); return; }
+    if (slot === "reload_release") { this.playReloadRelease(c); return; }
+    if (slot === "reload_insert") { this.playReloadInsert(c); return; }
+    if (slot === "reload_seat") { this.playReloadSeat(c); return; }
+    if (slot === "pickup") { this.playPickup(c); return; }
+    if (slot === "putdown") { this.playPutdown(c); return; }
+    if (slot === "bolt") { this.playBolt(c); return; }
+    if (slot === "cycle") { this.playCycle(c); return; }
+
     const now = c.currentTime;
     const out = c.createGain();
     out.connect(c.destination);
-
-    if (kind === "fire") {
-      out.gain.setValueAtTime(0.0001, now);
-      out.gain.exponentialRampToValueAtTime(0.35, now + 0.004);
-      out.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
-      const noise = c.createBufferSource();
-      noise.buffer = this.noiseBuffer(0.06);
-      const bp = c.createBiquadFilter();
-      bp.type = "bandpass";
-      bp.frequency.value = 1200;
-      bp.Q.value = 0.7;
-      noise.connect(bp);
-      bp.connect(out);
-      noise.start(now);
-      noise.stop(now + 0.07);
-      const osc = c.createOscillator();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(95, now);
-      osc.frequency.exponentialRampToValueAtTime(45, now + 0.08);
-      const og = c.createGain();
-      og.gain.setValueAtTime(0.0001, now);
-      og.gain.exponentialRampToValueAtTime(0.45, now + 0.005);
-      og.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
-      osc.connect(og);
-      og.connect(c.destination);
-      osc.start(now);
-      osc.stop(now + 0.11);
-      return;
-    }
 
     if (kind === "bullseye") {
       out.gain.setValueAtTime(0.0001, now);
@@ -3281,6 +3474,7 @@ function setHandsEmpty(empty) {
     state.adsFactor = 0;
     state.reloading = false;
     state.reloadElapsed = 0;
+    state.reloadInsertPlayed = false;
     cancelBoltCycle();
   }
   if (holdRoot) holdRoot.visible = !empty;
@@ -7445,6 +7639,7 @@ function dropHeldWeapon({ atFeet = false } = {}) {
     angVel,
   });
   setHandsEmpty(true);
+  sfx.play("putdown");
   const lab = (WEAPON_META[snap.weaponId] && WEAPON_META[snap.weaponId].label) || snap.weaponId;
   showToast("Dropped " + lab);
   return rec;
@@ -7467,6 +7662,7 @@ function pickupWorldDrop(group) {
   consumeWorldDrop(group);
   if (holdingWeapon()) dropHeldWeapon({ atFeet: true });
   applyLoadout(snap);
+  sfx.play("pickup");
 }
 
 function updateWorldDrops(dt) {
@@ -11338,7 +11534,7 @@ function fireWeapon({ fromHold = false } = {}) {
   }
   state.ammoInMag -= 1;
   updateAmmoHud();
-  sfx.play("fire");
+  sfx.play("fire", { weaponClass: sfxWeaponClass() });
   player.fireCooldown = fireCooldownForLoadout();
   addBarrelHeatShot();
   fireFlash();
@@ -12920,6 +13116,7 @@ function tryEquipLooked() {
       return;
     }
     equipWeapon(pu.weaponId);
+    sfx.play("pickup");
     return;
   }
   if (state.handsEmpty) return;

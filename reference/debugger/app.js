@@ -216,7 +216,16 @@ const _hazeMuzzleLocal = new THREE.Vector3();
 const _hazeMuzzlePrev = new THREE.Vector3();
 const _hazeBillboardCam = new THREE.Vector3();
 const _hazeBillboardUp = new THREE.Vector3();
+const _hazeBillboardX = new THREE.Vector3();
+const _hazeBillboardY = new THREE.Vector3();
+const _hazeBillboardZ = new THREE.Vector3();
+const _hazeCardPos = new THREE.Vector3();
+const _hazeBillboardMat = new THREE.Matrix4();
+const _hazeWorldQuat = new THREE.Quaternion();
+const _hazeParentQuat = new THREE.Quaternion();
 let hazeMuzzlePrevOk = false;
+/** When set (URL `?heat=`), stored heat does not cool — inspection freeze. */
+let barrelHeatFreeze = null;
 /** Recoil pattern index resets after this gap of not firing. */
 const RECOIL_RESET_MS = 200;
 
@@ -2755,6 +2764,7 @@ function applyPassLabFromUrl() {
       const n = clamp(parseFloat(heat), 0, 1);
       if (Number.isFinite(n)) {
         barrelHeatAmt[state.weaponId] = n;
+        barrelHeatFreeze = n > 0 ? n : null;
         // Persisted mul 0 would hide stored heat — force the visual on.
         if (n > 0 && (state.barrelHeat ?? 0) < 0.01) {
           state.barrelHeat = BARREL_HEAT_DEFAULT;
@@ -5897,6 +5907,10 @@ function coolBarrelHeat(dt) {
   const ids = Object.keys(barrelHeatAmt);
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
+    if (barrelHeatFreeze != null && id === state.weaponId) {
+      barrelHeatAmt[id] = barrelHeatFreeze;
+      continue;
+    }
     const h = barrelHeatAmt[id];
     if (h <= 1e-5) {
       barrelHeatAmt[id] = 0;
@@ -6136,10 +6150,10 @@ function makeHeatHazeMaterial(opts = {}) {
         vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
         // fbm sits near 0.47 with low variance — (nxy-0.5)*0.020 was ~1 px at 1080p.
         vec2 field = vec2(
-          (nxy.x - 0.5) * 6.2 + (haze - 0.5) * 3.4,
-          (nxy.y - 0.5) * 6.2 + (nxy.x - nxy.y) * 4.2
+          (nxy.x - 0.5) * 7.0 + (haze - 0.5) * 4.0,
+          (nxy.y - 0.5) * 7.0 + (nxy.x - nxy.y) * 5.0
         );
-        vec2 off = field * mix(0.20, 1.0, clamp(mask, 0.0, 1.0)) * uStrength * 0.052;
+        vec2 off = field * mix(0.28, 1.0, clamp(mask, 0.0, 1.0)) * uStrength * 0.070;
         vec4 baseSamp = texture2D(tScene, clamp(suv, 0.0, 1.0));
         vec4 warpSamp = texture2D(tScene, clamp(suv + off, 0.0, 1.0));
         vec3 base = baseSamp.rgb;
@@ -6150,19 +6164,21 @@ function makeHeatHazeMaterial(opts = {}) {
         if (uHasDepth > 0.5) {
           float packedB = baseSamp.a;
           float packedW = warpSamp.a;
-          if (packedW <= 1e-4 || packedW >= 0.997) {
-            warped = base;
-            farLeak = 1.0;
-          } else if (packedB > 1e-4 && packedB < 0.997) {
+          if (packedB > 1e-4 && packedB < 0.997) {
             float logFar = log2(max(cameraFar, 1.0) + 1.0);
             float clipB = exp2(packedB * logFar) - 1.0;
             if (clipB < 2.4) {
-              float clipW = exp2(packedW * logFar) - 1.0;
-              farLeak = smoothstep(clipB + 1.2, clipB + 4.0, clipW);
+              if (packedW <= 1e-4 || packedW >= 0.997) {
+                warped = base;
+                farLeak = 1.0;
+              } else {
+                float clipW = exp2(packedW * logFar) - 1.0;
+                farLeak = smoothstep(clipB + 1.2, clipB + 4.0, clipW);
+              }
             }
           }
         }
-        float warpAmt = clamp(0.50 + mask * uStrength * 0.70, 0.50, 1.0) * (1.0 - farLeak * 0.92);
+        float warpAmt = clamp(0.62 + mask * uStrength * 0.55, 0.62, 1.0) * (1.0 - farLeak);
         vec3 col = mix(base, warped, warpAmt);
         // Fog guard: crush night-black / blued steel lifted into sky grey.
         // Mid-tone casings must keep neighbor luma or the mix is identity.
@@ -6177,8 +6193,8 @@ function makeHeatHazeMaterial(opts = {}) {
             col *= lumaBase / max(lumaCol, 1e-5);
           }
         }
-        float a = clamp(mask * uStrength * 1.35, 0.0, 0.94) * (1.0 - farLeak * 0.92);
-        if (a < 0.012) discard;
+        float a = clamp(0.42 + mask * uStrength * 0.95, 0.0, 0.95) * (1.0 - farLeak * 0.92);
+        if (a < 0.02) discard;
         gl_FragColor = vec4(col, a);
       }
     `,
@@ -6217,14 +6233,15 @@ function addBarrelHeatShimmer(x, y, z, length) {
   group.name = "barrelHeatHaze";
   group.position.set(x, y, z);
   group.rotation.y = Math.PI / 2;
+  group.layers.set(HEAT_HAZE_LAYER);
   // Three cards (not ±cross): A left shorter/lower, B center taller/longer toward body, C mirror of A.
   // Plane local X = along barrel (after group yaw); Y = up; Z = lateral.
   // local −X points toward the gun body (group sits near tip).
   const sz = clamp(state.heatHazeSize ?? HEAT_HAZE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
   const specs = [
-    { name: "barrelHeatShimmerL", lat: -0.018, wMul: 0.82, hMul: 0.92, along: -0.01, seat: 0.46, roll: 0.10 },
-    { name: "barrelHeatShimmer", lat: 0, wMul: 1.36, hMul: 1.52, along: -0.05, seat: 0.50, roll: 0 },
-    { name: "barrelHeatShimmerR", lat: 0.018, wMul: 0.82, hMul: 0.92, along: -0.01, seat: 0.46, roll: -0.10 },
+    { name: "barrelHeatShimmerL", lat: -0.022, wMul: 0.95, hMul: 1.05, along: -0.01, seat: 0.46, roll: 0.10 },
+    { name: "barrelHeatShimmer", lat: 0, wMul: 1.55, hMul: 1.72, along: -0.04, seat: 0.52, roll: 0 },
+    { name: "barrelHeatShimmerR", lat: 0.022, wMul: 0.95, hMul: 1.05, along: -0.01, seat: 0.46, roll: -0.10 },
   ];
   for (const spec of specs) {
     const cardW = len * 1.22 * spec.wMul;
@@ -6272,9 +6289,9 @@ function applyBarrelHeatVisual() {
     if (o.userData.barrelHeatShimmer && o.material && o.material.uniforms) {
       const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
       const cardsOn = barrelHeatCardsEnabled();
-      const show = cardsOn && h > 0.38 && mul >= 0.01 && str >= 0.01;
+      const show = cardsOn && h > 0.16 && mul >= 0.01 && str >= 0.01;
       o.visible = show;
-      o.material.uniforms.uHeat.value = show ? clamp((h - 0.38) * 1.2 * mul, 0, 1) : 0;
+      o.material.uniforms.uHeat.value = show ? clamp((h - 0.12) * 1.15 * mul, 0, 1) : 0;
       o.material.uniforms.uTime.value = barrelHeatClock;
       if (show) barrelHeatHazeLive = true;
     }
@@ -6394,13 +6411,13 @@ function updateBarrelHeatCardMorph(dt) {
     camera.getWorldPosition(_hazeBillboardCam);
     // Camera world-up, not world Y — lookAt(worldY) collapses when the
     // player looks down at a casing pile (view ≈ +Y, cross product → 0).
+    // Build the basis ourselves: cards are camera-children, so lookAt is shaky.
     _hazeBillboardUp.setFromMatrixColumn(camera.matrixWorld, 1);
     if (_hazeBillboardUp.lengthSq() < 1e-8) _hazeBillboardUp.set(0, 1, 0);
     else _hazeBillboardUp.normalize();
     gunRoot.traverse((o) => {
       if (!o.userData.barrelHeatShimmer) return;
-      o.up.copy(_hazeBillboardUp);
-      o.lookAt(_hazeBillboardCam);
+      faceHeatCardAtCamera(o);
     });
   }
   const leanX = player.hazeLeanX;
@@ -6434,6 +6451,30 @@ function updateBarrelHeatCardMorph(dt) {
     }
     pos.needsUpdate = true;
   });
+}
+
+/** World +Z faces the camera so the XY lattice has screen area. */
+function faceHeatCardAtCamera(o) {
+  o.updateWorldMatrix(true, false);
+  _hazeCardPos.setFromMatrixPosition(o.matrixWorld);
+  _hazeBillboardZ.subVectors(_hazeBillboardCam, _hazeCardPos);
+  if (_hazeBillboardZ.lengthSq() < 1e-10) return;
+  _hazeBillboardZ.normalize();
+  _hazeBillboardX.crossVectors(_hazeBillboardUp, _hazeBillboardZ);
+  if (_hazeBillboardX.lengthSq() < 1e-8) {
+    _hazeBillboardX.setFromMatrixColumn(camera.matrixWorld, 0);
+  }
+  _hazeBillboardX.normalize();
+  _hazeBillboardY.crossVectors(_hazeBillboardZ, _hazeBillboardX).normalize();
+  _hazeBillboardX.crossVectors(_hazeBillboardY, _hazeBillboardZ).normalize();
+  _hazeBillboardMat.makeBasis(_hazeBillboardX, _hazeBillboardY, _hazeBillboardZ);
+  _hazeWorldQuat.setFromRotationMatrix(_hazeBillboardMat);
+  if (o.parent) {
+    _hazeParentQuat.setFromRotationMatrix(o.parent.matrixWorld);
+    o.quaternion.copy(_hazeParentQuat).invert().multiply(_hazeWorldQuat);
+  } else {
+    o.quaternion.copy(_hazeWorldQuat);
+  }
 }
 
 function groundHeatHazePassWanted() {
@@ -6612,6 +6653,23 @@ function resizeHeatHazeGrab(w, h) {
   if (heatHazeGrabRT.width !== tw || heatHazeGrabRT.height !== th) {
     heatHazeGrabRT.setSize(tw, th);
   }
+}
+
+/** When bloom+dither are off, heat still renders into a dest RT — copy it out. */
+function blitSceneDestToScreen(rt) {
+  if (!rt || !rt.texture || !renderer) return;
+  if (!heatHazePost) initHeatHazePost();
+  const u = heatHazePost.copyMat.uniforms;
+  const dummy = getHeatHazeDummyTex();
+  u.tColor.value = rt.texture;
+  u.tDepth.value = dummy;
+  u.uHasDepth.value = 0;
+  const prevAuto = renderer.autoClear;
+  renderer.autoClear = true;
+  blitHeatHaze(heatHazePost.copyMat, null);
+  renderer.autoClear = prevAuto;
+  u.tColor.value = null;
+  u.tDepth.value = dummy;
 }
 
 function blitHeatHaze(mat, target) {
@@ -9662,7 +9720,13 @@ function renderScene() {
   const amount = adsDofAmount();
   const bloomOn = bloomWanted();
   const ditherOn = ditherWanted();
-  const dest = bloomOn ? hdrBloom.sceneRT : (ditherOn ? outputDither.rt : null);
+  const heatOn = heatHazePassWanted();
+  // Heat cards need a readable dest. Backbuffer cannot be grabbed.
+  const dest = bloomOn
+    ? hdrBloom.sceneRT
+    : (ditherOn || heatOn) && outputDither
+      ? outputDither.rt
+      : null;
   const prevTM = renderer.toneMapping;
   if (bloomOn) renderer.toneMapping = THREE.NoToneMapping;
 
@@ -9710,7 +9774,7 @@ function renderScene() {
   renderHeatHaze(dest);
   passLabLastDest = dest;
 
-  const out = ditherOn ? outputDither.rt : null;
+  const out = bloomOn ? (ditherOn ? outputDither.rt : null) : dest;
   if (bloomOn) {
     renderer.toneMapping = prevTM;
     renderBloom(out);
@@ -9720,6 +9784,7 @@ function renderScene() {
   }
   renderGodRays(out);
   if (ditherOn) renderOutputDither();
+  else if (!bloomOn && dest) blitSceneDestToScreen(dest);
 }
 
 /* ---- Volumetric sun shafts (god rays) ----

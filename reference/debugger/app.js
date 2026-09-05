@@ -592,7 +592,7 @@ function el(id) { return document.getElementById(id); }
 function fmt(n) { return (Math.round(n * 1e6) / 1e6).toString(); }
 
 function gameplayActive() {
-  return !state.panelOpen && !state.gunModalOpen && !state.settingsOpen;
+  return !bootBlocksInput() && !state.panelOpen && !state.gunModalOpen && !state.settingsOpen;
 }
 function typingFocus() {
   const t = document.activeElement;
@@ -10676,9 +10676,28 @@ const BOOT_OVERLAY_FADE_MS = 320;
 const BOOT_OVERLAY_TIMEOUT_MS = 8000;
 
 let _bootOverlayDone = false;
+let _bootReadyForContinue = false;
 const _bootStagesDone = new Set();
 let _bootProgress = 0;
 let _bootTimeoutId = 0;
+
+function bootOverlayNode() {
+  return el("bootOverlay");
+}
+
+function bootOverlayGone(node = bootOverlayNode()) {
+  return !node || node.hidden || node.classList.contains("is-gone") || node.classList.contains("is-done");
+}
+
+/** True until the player dismisses the boot overlay (loading or continue prompt). */
+function bootBlocksInput() {
+  if (_bootOverlayDone) return false;
+  if (bootOverlayGone()) {
+    _bootOverlayDone = true;
+    return false;
+  }
+  return true;
+}
 
 function setBootBar(frac) {
   const fill = el("bootBarFill");
@@ -10688,16 +10707,42 @@ function setBootBar(frac) {
   if (bar) bar.setAttribute("aria-valuenow", String(pct));
 }
 
-function dismissBootOverlay() {
-  if (_bootOverlayDone) return;
-  _bootOverlayDone = true;
+function bootPassthroughEvent(e) {
+  if (!e || e.type !== "keydown") return false;
+  if (e.metaKey || e.ctrlKey || e.altKey) return true;
+  return /^F\d{1,2}$/.test(e.key || "");
+}
+
+function showBootContinue() {
+  if (_bootOverlayDone || _bootReadyForContinue) return;
+  _bootReadyForContinue = true;
   if (_bootTimeoutId) {
     clearTimeout(_bootTimeoutId);
     _bootTimeoutId = 0;
   }
   setBootBar(1);
-  const node = el("bootOverlay");
+  const node = bootOverlayNode();
   if (!node) return;
+  node.classList.add("is-ready");
+  node.setAttribute("aria-busy", "false");
+  const label = el("bootLabel");
+  if (label) label.hidden = true;
+  const cont = el("bootContinue");
+  if (cont) cont.hidden = false;
+}
+
+function dismissBootOverlay() {
+  if (_bootOverlayDone) return;
+  _bootOverlayDone = true;
+  _bootReadyForContinue = true;
+  if (_bootTimeoutId) {
+    clearTimeout(_bootTimeoutId);
+    _bootTimeoutId = 0;
+  }
+  setBootBar(1);
+  const node = bootOverlayNode();
+  if (!node) return;
+  node.classList.add("is-ready");
   node.classList.add("is-done");
   node.setAttribute("aria-busy", "false");
   const hide = () => {
@@ -10714,22 +10759,54 @@ function dismissBootOverlay() {
   setTimeout(hide, BOOT_OVERLAY_FADE_MS + 80);
 }
 
+function acceptBootContinue(e) {
+  const node = bootOverlayNode();
+  if (_bootOverlayDone || bootOverlayGone(node)) {
+    _bootOverlayDone = true;
+    return false;
+  }
+  if (bootPassthroughEvent(e)) return false;
+  const ready = _bootReadyForContinue || (node && node.classList.contains("is-ready"));
+  if (ready) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+    }
+    dismissBootOverlay();
+    return true;
+  }
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+  }
+  return true;
+}
+
 function markBootStage(name) {
-  if (_bootOverlayDone || !(name in BOOT_STAGE_WEIGHTS) || _bootStagesDone.has(name)) return;
+  if (_bootOverlayDone || _bootReadyForContinue || !(name in BOOT_STAGE_WEIGHTS) || _bootStagesDone.has(name)) return;
   _bootStagesDone.add(name);
   _bootProgress = clamp(_bootProgress + BOOT_STAGE_WEIGHTS[name], 0, 1);
   setBootBar(_bootProgress);
   if (_bootStagesDone.size >= Object.keys(BOOT_STAGE_WEIGHTS).length) {
-    dismissBootOverlay();
+    showBootContinue();
   }
 }
 
 function armBootOverlayFallback() {
-  if (_bootTimeoutId || _bootOverlayDone) return;
+  if (_bootTimeoutId || _bootOverlayDone || _bootReadyForContinue) return;
   _bootTimeoutId = setTimeout(() => {
-    console.warn("[boot] overlay timeout — revealing scene");
-    dismissBootOverlay();
+    console.warn("[boot] overlay timeout — showing continue prompt");
+    showBootContinue();
   }, BOOT_OVERLAY_TIMEOUT_MS);
+  const node = bootOverlayNode();
+  if (!node || node.dataset.bootBound) return;
+  node.dataset.bootBound = "1";
+  const onContinue = (e) => { acceptBootContinue(e); };
+  window.addEventListener("keydown", onContinue, true);
+  window.addEventListener("pointerdown", onContinue, true);
+  window.__aimBootOverlay = true;
 }
 
 /**
@@ -13453,6 +13530,10 @@ function refresh(syncInputs = true) {
 }
 
 function onKeyDown(e) {
+  if (bootBlocksInput()) {
+    acceptBootContinue(e);
+    return;
+  }
   if (typingFocus()) return;
 
   const k = e.key;
@@ -13642,6 +13723,10 @@ function onKeyUp(e) {
 }
 
 function onMouseDown(e) {
+  if (bootBlocksInput()) {
+    acceptBootContinue(e);
+    return;
+  }
   const canvas = el("view3d");
   if (e.target !== canvas && !canvas.contains(e.target)) {
     // allow UI

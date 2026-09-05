@@ -38,15 +38,33 @@
       <div class="boot-bar" id="bootBar" role="progressbar" aria-labelledby="bootLabel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div id="bootBarFill" class="boot-bar-fill"></div>
       </div>
+      <p class="boot-continue" id="bootContinue" hidden>Press Space or any key to continue</p>
     </div>
   </div>
   <script>
     (function () {
       var FALLBACK_MS = 12000;
       var FADE_MS = 320;
-      window.setTimeout(function () {
-        var node = document.getElementById("bootOverlay");
-        if (!node || node.classList.contains("is-done") || node.hidden) return;
+      var dismissed = false;
+      function overlay() { return document.getElementById("bootOverlay"); }
+      function showContinue() {
+        var node = overlay();
+        if (!node || dismissed || node.classList.contains("is-done") || node.classList.contains("is-ready") || node.hidden) return;
+        node.classList.add("is-ready");
+        node.setAttribute("aria-busy", "false");
+        var fill = document.getElementById("bootBarFill");
+        if (fill) fill.style.width = "100%";
+        var bar = document.getElementById("bootBar");
+        if (bar) bar.setAttribute("aria-valuenow", "100");
+        var label = document.getElementById("bootLabel");
+        if (label) label.hidden = true;
+        var cont = document.getElementById("bootContinue");
+        if (cont) cont.hidden = false;
+      }
+      function fadeAway() {
+        var node = overlay();
+        if (!node || dismissed) return;
+        dismissed = true;
         node.classList.add("is-done");
         node.setAttribute("aria-busy", "false");
         window.setTimeout(function () {
@@ -54,7 +72,27 @@
           node.hidden = true;
           node.setAttribute("aria-hidden", "true");
         }, FADE_MS + 40);
-      }, FALLBACK_MS);
+      }
+      function passthrough(e) {
+        if (!e || e.type !== "keydown") return false;
+        if (e.metaKey || e.ctrlKey || e.altKey) return true;
+        return /^F\d{1,2}$/.test(e.key || "");
+      }
+      function onContinue(e) {
+        var node = overlay();
+        if (!node || dismissed || node.hidden || node.classList.contains("is-done")) return;
+        if (passthrough(e)) return;
+        if (window.__aimBootOverlay) return;
+        if (!node.classList.contains("is-ready")) {
+          if (e && e.cancelable) e.preventDefault();
+          return;
+        }
+        if (e && e.cancelable) e.preventDefault();
+        fadeAway();
+      }
+      window.setTimeout(showContinue, FALLBACK_MS);
+      window.addEventListener("keydown", onContinue, true);
+      window.addEventListener("pointerdown", onContinue, true);
     })();
   </script>
   <div class="viewport-wrap">

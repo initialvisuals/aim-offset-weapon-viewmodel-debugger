@@ -785,7 +785,7 @@ body[data-game-style="arcade"] .settings-dialog .hint kbd {
 .boot-overlay.is-gone,
 .boot-overlay[hidden] { display: none !important; }
 .boot-overlay-inner {
-  width: min(240px, 56vw);
+  width: min(320px, 72vw);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -798,8 +798,24 @@ body[data-game-style="arcade"] .settings-dialog .hint kbd {
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
+.boot-overlay.is-ready .boot-label { display: none; }
+.boot-continue {
+  margin: 0.15rem 0 0;
+  color: rgba(231, 236, 245, 0.52);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-align: center;
+  line-height: 1.35;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.boot-overlay.is-ready .boot-continue {
+  opacity: 1;
+}
+.boot-continue[hidden] { display: none; }
+.boot-overlay.is-ready .boot-continue[hidden] { display: block; }
 .boot-bar {
-  width: 100%;
+  width: min(240px, 56vw);
   height: 3px;
   background: #161616;
   border-radius: 2px;

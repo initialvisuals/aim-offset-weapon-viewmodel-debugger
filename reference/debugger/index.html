@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260824v70" />
+  <link rel="stylesheet" href="styles.css?v=20260824v71" />
   <style>
     /* Critical first-paint cover if styles.css is stale. Full rules live in styles.css. */
     .boot-overlay {
@@ -372,6 +372,23 @@
       </div>
 
       <div class="settings-section">
+        <h3>Audio</h3>
+        <label class="slider-row">Voice
+          <input type="range" id="volVoiceSlider" min="0" max="2" step="0.01" value="1.00" />
+          <code id="volVoiceVal">100%</code>
+        </label>
+        <label class="slider-row">Music
+          <input type="range" id="volMusicSlider" min="0" max="2" step="0.01" value="1.00" />
+          <code id="volMusicVal">100%</code>
+        </label>
+        <label class="slider-row">FX
+          <input type="range" id="volFxSlider" min="0" max="2" step="0.01" value="1.00" />
+          <code id="volFxVal">100%</code>
+        </label>
+        <p class="note">Voice / Music reserved for later. FX is shots, reload, hits, glass, pickups.</p>
+      </div>
+
+      <div class="settings-section">
         <h3>Pass lab</h3>
         <label>Backdrop
           <select id="passLabModeSelect">
@@ -619,7 +636,7 @@
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>X</kbd> drop held kit · <kbd>F</kbd> bench / world kit / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
-          <li>Weapon cues: fire / dry / reload / pickup / drop (procedural Web Audio; file slots later)</li>
+          <li>Weapon cues: fire / dry / reload / pickup / drop (procedural Web Audio; Settings Audio FX; file slots later)</li>
           <li>Tuners persist locally · Reset defaults · Copy settings · <kbd>P</kbd> freeze pass lab</li>
         </ul>
       </div>
@@ -628,6 +645,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260824v70"></script>
+    <script type="module" src="app.js?v=20260824v71"></script>
 </body>
 </html>

@@ -214,6 +214,7 @@ let barrelHeatHazeLive = false;
 const _hazeMuzzleWorld = new THREE.Vector3();
 const _hazeMuzzleLocal = new THREE.Vector3();
 const _hazeMuzzlePrev = new THREE.Vector3();
+const _hazeBillboardCam = new THREE.Vector3();
 let hazeMuzzlePrevOk = false;
 /** Recoil pattern index resets after this gap of not firing. */
 const RECOIL_RESET_MS = 200;
@@ -6271,6 +6272,13 @@ function updateBarrelHeatCardMorph(dt) {
   player.hazeLeanX = lerp(player.hazeLeanX || 0, targetX, k);
   player.hazeLeanUp = lerp(player.hazeLeanUp || 0, targetUp, k);
   if (!barrelHeatHazeLive) return;
+  if (camera) {
+    camera.getWorldPosition(_hazeBillboardCam);
+    gunRoot.traverse((o) => {
+      if (!o.userData.barrelHeatShimmer) return;
+      o.lookAt(_hazeBillboardCam);
+    });
+  }
   const leanX = player.hazeLeanX;
   const leanUp = player.hazeLeanUp;
   const clock = barrelHeatClock;
@@ -6582,7 +6590,7 @@ function renderHeatHaze(dest) {
 
   let grabbed = false;
   let grabDepth = false;
-  const grab = grabHeatHazeScene(dest, { wantDepth: groundOn || depthOk });
+  const grab = grabHeatHazeScene(dest, { wantDepth: groundOn && depthOk });
   if (grab.ok) {
     grabbed = true;
     grabDepth = !!grab.hasDepth;

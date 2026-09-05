@@ -283,8 +283,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260824v70";
-const APP_BUILD_STAMP = "2026-09-04 23:10";
+const APP_CACHE_BUST = "20260824v71";
+const APP_BUILD_STAMP = "2026-09-05 00:45";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -419,6 +419,10 @@ const state = {
   brightness: 1.00,
   /** Viewport CSS contrast / “gamma” feel (0.8–1.6). Identity 1.00 = ungraded sRGB. */
   gamma: 1.00,
+  /** Audio bus gains (0–2, 1.00 = 100%). Voice/Music reserved; FX drives sfx.play. */
+  volVoice: 1,
+  volMusic: 1,
+  volFx: 1,
   /** Linear distance fog (THREE.Fog) — tunable in Settings (O). */
   fogEnabled: true,
   fogNear: 375,
@@ -842,6 +846,11 @@ function applyReloadMagMotion(u) {
  * decoded once; an AudioBuffer plays immediately. Empty / null / missing =
  * procedural fallback (no assets required). Call sites stay sfx.play("fire").
  *
+ * Buses (created in ensure): voice / music / fx → master → destination.
+ * All current sfx.play(*) cues use dest("fx"). Settings Voice / Music / FX
+ * sliders own those GainNodes immediately (even with nothing playing).
+ * Later: sfx.playVoice(...) → dest("voice"); a music player → dest("music").
+ *
  * Stable slot ids:
  *   fire              shot — opts.weaponClass = "smg" | "rifle" | "sniper"
  *   dry               empty-chamber click only (not reload)
@@ -857,6 +866,20 @@ function applyReloadMagMotion(u) {
  *
  * Later: sfx.slots.fire = "sounds/fire.ogg" (or an AudioBuffer). Same for any id.
  */
+
+const VOL_MIN = 0;
+const VOL_MAX = 2;
+const VOL_DEFAULT = 1;
+
+function clampVol(v) {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return VOL_DEFAULT;
+  return clamp(n, VOL_MIN, VOL_MAX);
+}
+
+function formatVolPct(v) {
+  return `${Math.round(clampVol(v) * 100)}%`;
+}
 function sfxWeaponClass(weaponId = state.weaponId) {
   if (weaponId === "example_rifle") return "rifle";
   if (weaponId === "example_sniper") return "sniper";
@@ -874,6 +897,10 @@ const SFX_SLOT_IDS = Object.freeze([
 
 const sfx = {
   ctx: null,
+  master: null,
+  /** Category gains. Later playVoice / music helpers connect here, not destination. */
+  bus: { voice: null, music: null, fx: null },
+  busIds: Object.freeze(["voice", "music", "fx"]),
   slotIds: SFX_SLOT_IDS,
   /** Per-slot URL string or AudioBuffer. null / "" = procedural. */
   slots: {
@@ -902,7 +929,38 @@ const sfx = {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.connect(this.ctx.destination);
+    this.bus.voice = this.ctx.createGain();
+    this.bus.music = this.ctx.createGain();
+    this.bus.fx = this.ctx.createGain();
+    this.bus.voice.connect(this.master);
+    this.bus.music.connect(this.master);
+    this.bus.fx.connect(this.master);
+    this.applyBusGains();
     return this.ctx;
+  },
+  /**
+   * Category output. Registry for later:
+   *   sfx.playVoice(...) → dest("voice")
+   *   music player      → dest("music")
+   *   all current cues  → dest("fx")  (fire, reload, hits, glass, pickup, …)
+   */
+  dest(kind = "fx") {
+    const c = this.ensure();
+    if (!c) return null;
+    return this.bus[kind] || this.bus.fx || c.destination;
+  },
+  applyBusGains() {
+    if (!this.ctx || !this.bus.fx) return;
+    const now = this.ctx.currentTime;
+    const voice = clampVol(state.volVoice);
+    const music = clampVol(state.volMusic);
+    const fx = clampVol(state.volFx);
+    this.bus.voice.gain.setValueAtTime(voice, now);
+    this.bus.music.gain.setValueAtTime(music, now);
+    this.bus.fx.gain.setValueAtTime(fx, now);
+    this.master.gain.setValueAtTime(1, now);
   },
   resume() {
     const c = this.ensure();
@@ -946,7 +1004,7 @@ const sfx = {
     const gain = opts && opts.gain != null ? opts.gain : 1;
     g.gain.value = gain;
     src.connect(g);
-    g.connect(c.destination);
+    g.connect(this.dest("fx"));
     src.start(now);
   },
   playRegistered(kind, opts) {
@@ -993,7 +1051,7 @@ const sfx = {
     g.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + Math.max(0.0008, attack));
     g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
     osc.connect(g);
-    g.connect(c.destination);
+    g.connect(this.dest("fx"));
     osc.start(now);
     osc.stop(now + dur + 0.02);
   },
@@ -1010,7 +1068,7 @@ const sfx = {
     g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
     src.connect(filt);
     filt.connect(g);
-    g.connect(c.destination);
+    g.connect(this.dest("fx"));
     src.start(now);
     src.stop(now + dur + 0.01);
   },
@@ -1078,7 +1136,7 @@ const sfx = {
       const now = c.currentTime;
       const out = c.createGain();
       out.gain.value = 0;
-      out.connect(c.destination);
+      out.connect(this.dest("fx"));
       const noise = c.createBufferSource();
       noise.buffer = this.noiseBuffer(0.08);
       noise.connect(out);
@@ -1112,7 +1170,7 @@ const sfx = {
 
     const now = c.currentTime;
     const out = c.createGain();
-    out.connect(c.destination);
+    out.connect(this.dest("fx"));
 
     if (kind === "bullseye") {
       out.gain.setValueAtTime(0.0001, now);
@@ -1133,7 +1191,7 @@ const sfx = {
       g2.gain.exponentialRampToValueAtTime(0.12, now + 0.01);
       g2.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
       o2.connect(g2);
-      g2.connect(c.destination);
+      g2.connect(this.dest("fx"));
       o2.start(now);
       o2.stop(now + 0.18);
       return;
@@ -1162,7 +1220,7 @@ const sfx = {
       og.gain.exponentialRampToValueAtTime(0.14, now + 0.004);
       og.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
       osc.connect(og);
-      og.connect(c.destination);
+      og.connect(this.dest("fx"));
       osc.start(now);
       osc.stop(now + 0.14);
       return;
@@ -1190,7 +1248,7 @@ const sfx = {
       og.gain.exponentialRampToValueAtTime(0.2, now + 0.01);
       og.gain.exponentialRampToValueAtTime(0.0001, now + 0.17);
       osc.connect(og);
-      og.connect(c.destination);
+      og.connect(this.dest("fx"));
       osc.start(now);
       osc.stop(now + 0.18);
       return;
@@ -1216,7 +1274,7 @@ const sfx = {
       cg.gain.exponentialRampToValueAtTime(0.08, now + 0.001);
       cg.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
       click.connect(cg);
-      cg.connect(c.destination);
+      cg.connect(this.dest("fx"));
       click.start(now);
       click.stop(now + 0.03);
       return;
@@ -1247,7 +1305,7 @@ const sfx = {
         g.gain.exponentialRampToValueAtTime(0.16, now + delay + 0.008);
         g.gain.exponentialRampToValueAtTime(0.0001, now + delay + dur);
         osc.connect(g);
-        g.connect(c.destination);
+        g.connect(this.dest("fx"));
         osc.start(now + delay);
         osc.stop(now + delay + dur + 0.02);
       };
@@ -1305,7 +1363,7 @@ const sfx = {
         g.gain.exponentialRampToValueAtTime(peak, now + delay + 0.006);
         g.gain.exponentialRampToValueAtTime(0.0001, now + delay + dur);
         osc.connect(g);
-        g.connect(c.destination);
+        g.connect(this.dest("fx"));
         osc.start(now + delay);
         osc.stop(now + delay + dur + 0.02);
       };
@@ -3273,6 +3331,42 @@ function setGamma(v, { toast = false } = {}) {
   scheduleSaveSettings();
 }
 
+const AUDIO_VOL_KEYS = [
+  { key: "volVoice", slider: "volVoiceSlider", val: "volVoiceVal", label: "Voice" },
+  { key: "volMusic", slider: "volMusicSlider", val: "volMusicVal", label: "Music" },
+  { key: "volFx", slider: "volFxSlider", val: "volFxVal", label: "FX" },
+];
+
+function syncAudioVolUI() {
+  for (const row of AUDIO_VOL_KEYS) {
+    const slider = el(row.slider);
+    const val = el(row.val);
+    if (slider) slider.value = String(state[row.key]);
+    if (val) val.textContent = formatVolPct(state[row.key]);
+  }
+}
+
+function applyAudioVolumes() {
+  state.volVoice = clampVol(state.volVoice);
+  state.volMusic = clampVol(state.volMusic);
+  state.volFx = clampVol(state.volFx);
+  if (sfx.ctx) sfx.applyBusGains();
+  syncAudioVolUI();
+}
+
+function setAudioVol(key, v, { toast = false } = {}) {
+  if (!AUDIO_VOL_KEYS.some((row) => row.key === key)) return;
+  state[key] = clampVol(v);
+  sfx.ensure();
+  sfx.applyBusGains();
+  syncAudioVolUI();
+  if (toast) {
+    const row = AUDIO_VOL_KEYS.find((r) => r.key === key);
+    showToast(`${row.label} ${formatVolPct(state[key])}`);
+  }
+  scheduleSaveSettings();
+}
+
 function setPluge(on, { toast = false } = {}) {
   state.showPluge = !!on;
   applyDisplayLook();
@@ -3333,6 +3427,8 @@ function syncSettingsUI() {
   const gammaVal = el("gammaVal");
   if (gammaSlider) gammaSlider.value = String(state.gamma);
   if (gammaVal) gammaVal.textContent = Number(state.gamma).toFixed(2);
+
+  syncAudioVolUI();
 
   const chkFog = el("chkFog");
   if (chkFog) chkFog.checked = !!state.fogEnabled;
@@ -3999,6 +4095,9 @@ const SETTINGS_FIELDS = [
   { key: "showHipReticle", src: "state", type: "bool" },
   { key: "brightness", src: "state", type: "num" },
   { key: "gamma", src: "state", type: "num" },
+  { key: "volVoice", src: "state", type: "num" },
+  { key: "volMusic", src: "state", type: "num" },
+  { key: "volFx", src: "state", type: "num" },
   { key: "fogEnabled", src: "state", type: "bool" },
   { key: "fogNear", src: "state", type: "num" },
   { key: "fogFar", src: "state", type: "num" },
@@ -4129,6 +4228,9 @@ function applySettingsBlob(blob) {
   state.passLabPip = !!state.passLabPip;
   state.passLabPipSrc = normalizePassLabPipSrc(state.passLabPipSrc);
   state.passLabWorld = !!state.passLabWorld;
+  state.volVoice = clampVol(state.volVoice ?? VOL_DEFAULT);
+  state.volMusic = clampVol(state.volMusic ?? VOL_DEFAULT);
+  state.volFx = clampVol(state.volFx ?? VOL_DEFAULT);
 }
 
 function loadPersistedSettings() {
@@ -4174,6 +4276,7 @@ function applySettingsSideEffects() {
   setPassLabPip(!!state.passLabPip, { toast: false });
   setPassLabPipSrc(state.passLabPipSrc, { toast: false });
   setPassLabWorld(!!state.passLabWorld, { toast: false });
+  applyAudioVolumes();
   trimImpactDecals();
   expireImpactDecals();
   trimCasings();
@@ -14045,6 +14148,18 @@ function bind() {
   const gammaSlider = el("gammaSlider");
   if (gammaSlider) {
     gammaSlider.oninput = (e) => setGamma(e.target.value);
+  }
+  const volVoiceSlider = el("volVoiceSlider");
+  if (volVoiceSlider) {
+    volVoiceSlider.oninput = (e) => setAudioVol("volVoice", e.target.value);
+  }
+  const volMusicSlider = el("volMusicSlider");
+  if (volMusicSlider) {
+    volMusicSlider.oninput = (e) => setAudioVol("volMusic", e.target.value);
+  }
+  const volFxSlider = el("volFxSlider");
+  if (volFxSlider) {
+    volFxSlider.oninput = (e) => setAudioVol("volFx", e.target.value);
   }
   const chkPluge = el("chkPluge");
   if (chkPluge) {

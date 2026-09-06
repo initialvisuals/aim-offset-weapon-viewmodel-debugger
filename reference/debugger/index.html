@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260905v72" />
+  <link rel="stylesheet" href="styles.css?v=20260906v73" />
   <style>
     /* Critical first-paint cover if styles.css is stale. Full rules live in styles.css. */
     .boot-overlay {
@@ -452,7 +452,7 @@
           <input type="range" id="cloudsSlider" min="0" max="1" step="0.01" value="0.55" />
           <code id="cloudsVal">0.55</code>
         </label>
-        <p class="note">Sun / sky / fog. Brightness/gamma stay as grade. Default dusk; night stays dark. Clouds 0 = clear. Intensities multiply the clock (1.00 = authored).</p>
+        <p class="note">Sun / layered sky / fog. Brightness/gamma stay as grade. Default dusk; night stays dark (stars + faint band). Clouds 0 = clear; mid-slider is thin cirrus over thicker banks. Intensities multiply the clock (1.00 = authored).</p>
         <label class="slider-row">Ambient
           <input type="range" id="lightAmbSlider" min="0" max="2.5" step="0.01" value="1.00" />
           <code id="lightAmbVal">1.00×</code>
@@ -574,7 +574,7 @@
           <input type="range" id="fogFarSlider" min="200" max="650" step="1" value="520" />
           <code id="fogFarVal">520</code>
         </label>
-        <p class="note">Linear <code>THREE.Fog</code> (color tracks clear). Not heat haze — Lighting heat toggles do not change bay fog. Floor shimmer is Lighting → Ground haze (off).</p>
+        <p class="note">Linear <code>THREE.Fog</code> (color tracks clear). Defaults 375/520 still hide long tracers. Sky horizon haze is Lighting, not this slider. Floor shimmer is Lighting → Ground haze (off).</p>
       </div>
 
       <div class="settings-section">
@@ -645,6 +645,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260905v72"></script>
+    <script type="module" src="app.js?v=20260906v73"></script>
 </body>
 </html>

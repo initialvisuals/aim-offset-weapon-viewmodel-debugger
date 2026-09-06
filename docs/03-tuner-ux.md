@@ -23,6 +23,7 @@ This is a **recommended** reference UX. Match the *behaviors*; rebind keys to ta
 | Delete (or dedicated Copy) | Copy paste-ready JSON for the current weapon to clipboard |
 | Optional: Ctrl+Z | Undo (~20 deep is plenty) |
 | Optional: Space | Test-fire kick preview without a full sim shot |
+| Optional: Heat tune | Sustained cyclic fire with recoil / sway frozen so heat or muzzle VFX can be dialed live |
 
 ## Step sizes
 

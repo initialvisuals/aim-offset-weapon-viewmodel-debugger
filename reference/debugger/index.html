@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260906v77" />
+  <link rel="stylesheet" href="styles.css?v=20260906v78" />
   <style>
     /* Critical first-paint cover if styles.css is stale. Full rules live in styles.css. */
     .boot-overlay {
@@ -212,6 +212,7 @@
             <button type="button" id="btnSettings" title="O">Settings…</button>
             <button type="button" id="btnAds" class="toggle" aria-pressed="false" title="Insert">ADS preview</button>
             <button type="button" id="btnSway" class="toggle" aria-pressed="true" title="Toggle viewmodel sway">Sway</button>
+            <button type="button" id="btnHeatTune" class="toggle" aria-pressed="false" title="Sustained fire, no recoil — live-tune heat cards">Heat tune</button>
             <button type="button" id="btnPerf" class="toggle" aria-pressed="false" title="Toggle performance overlay">Perf</button>
             <button type="button" id="btnCopy" title="Copy JSON">Copy JSON</button>
             <button type="button" id="btnCloseDbg" title="`">Close</button>
@@ -302,7 +303,7 @@
                 <li>Optics table = <kbd>F</kbd>/click attach (SMG: holo/acog · Rifle: all rail optics · Sniper: iron/sniper · illegal = toast)</li>
                 <li>Weapons bench = <kbd>F</kbd>/click equip MP9-Z / SR-25 / M24 Sniper (fresh defaults) · world kits on the floor keep mag ammo / optic / can · red <strong>RESET TARGETS</strong> button clears paper holes, stands silhouettes, drops berm popups, restores floods</li>
                 <li>Kit table (left) = <kbd>F</kbd>/click seat mag (MP9-Z 20 stick / 45 banana / 60 double drum · SR-25 20 · M24 5) or mount/unmount that gun's suppressor. Wrong-gun mag/can does not highlight</li>
-                <li><kbd>Insert</kbd> ADS preview · Sway toggle in header</li>
+                <li><kbd>Insert</kbd> ADS preview · Sway toggle in header · Heat tune sprays with no recoil</li>
                 <li><kbd>End</kbd> cycle pose</li>
                 <li><kbd>↑</kbd><kbd>↓</kbd> select axis · <kbd>←</kbd><kbd>→</kbd> nudge</li>
                 <li><kbd>PgUp</kbd><kbd>PgDn</kbd> step size</li>
@@ -561,6 +562,8 @@
         </label>
         <label class="check-row"><input type="checkbox" id="chkDitherAnimate" /> Animate dither</label>
         <p class="note">Banding floor after tone map, not grain. Hash = luma TPDF. Scale = frequency; offsets slide in px. Animate off (looks digital). 0 = skip.</p>
+        <label class="check-row"><input type="checkbox" id="chkHeatTune" /> Heat tune (sustained fire, no recoil)</label>
+        <p class="note">Same idea as the debugger header toggle. While on, the equipped gun sprays at its auto rate (semi / bolt use a steady pulse) so barrel heat stays visible. Recoil, sway, and bob freeze. Off returns to normal fire. Works with Settings open so you can drag the dials live. Boot overlay still blocks it.</p>
         <label class="slider-row">Barrel heat
           <input type="range" id="barrelHeatSlider" min="0" max="2" step="0.01" value="1.00" />
           <code id="barrelHeatVal">1.00</code>
@@ -707,7 +710,7 @@
           <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold · mouse wheel crouch height</li>
           <li>Ctrl / ⌘ soaked during play (best-effort; some browsers still take Ctrl+W / Ctrl+Q). Crouch stays <kbd>C</kbd>/<kbd>Z</kbd></li>
           <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · <kbd>U</kbd> cycle hold · RMB ADS · LMB fire</li>
-          <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
+          <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode · Heat tune = sustained fire, no recoil</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
           <li><kbd>X</kbd> drop held kit · <kbd>F</kbd> bench / world kit / mag / suppressor / reset-targets (weapons + optics + kit table; <kbd>G</kbd> backup)</li>
           <li>Weapon cues: fire / dry / reload / pickup / drop (procedural Web Audio; Settings Audio FX; file slots later)</li>
@@ -719,6 +722,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260906v77"></script>
+    <script type="module" src="app.js?v=20260906v78"></script>
 </body>
 </html>

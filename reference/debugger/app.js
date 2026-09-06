@@ -293,8 +293,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260906v74";
-const APP_BUILD_STAMP = "2026-09-06 03:50";
+const APP_CACHE_BUST = "20260906v75";
+const APP_BUILD_STAMP = "2026-09-06 03:54";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -1445,6 +1445,7 @@ function setPanelOpen(open) {
     if (document.pointerLockElement) document.exitPointerLock();
   }
   updateHudHint();
+  shouldSoakBrowserMods();
 }
 function togglePanel() { setPanelOpen(!state.panelOpen); }
 
@@ -1459,6 +1460,7 @@ function setGunModal(open) {
     if (document.pointerLockElement) document.exitPointerLock();
   }
   updateHudHint();
+  shouldSoakBrowserMods();
 }
 
 function setSettingsOpen(open, { nested = false } = {}) {
@@ -1472,6 +1474,7 @@ function setSettingsOpen(open, { nested = false } = {}) {
     syncSettingsUI();
   }
   updateHudHint();
+  shouldSoakBrowserMods();
 }
 function toggleSettings() { setSettingsOpen(!state.settingsOpen); }
 
@@ -11365,6 +11368,7 @@ function dismissBootOverlay() {
   };
   node.addEventListener("transitionend", onEnd);
   setTimeout(hide, BOOT_OVERLAY_FADE_MS + 80);
+  shouldSoakBrowserMods();
 }
 
 function acceptBootContinue(e) {
@@ -14141,41 +14145,60 @@ function refresh(syncInputs = true) {
 
 /** Browser modifier codes — not a crouch bind. */
 const BROWSER_MOD_CODES = new Set(["ControlLeft", "ControlRight", "MetaLeft", "MetaRight"]);
-/** Ctrl/Meta + these would steal the page (close tab, select-all, find, …). */
-const BROWSER_MOD_COMBO_CODES = new Set([
-  "KeyW", "KeyA", "KeyS", "KeyD", "Space",
-  "KeyC", "KeyV", "KeyX", "KeyZ", "KeyR", "KeyF", "KeyP",
-  "KeyT", "KeyN", "KeyO", "KeyG", "KeyU", "KeyL", "KeyH",
+/** Close-tab / chrome combos we always name (any Ctrl/Meta combo is also soaked). */
+const BROWSER_CLOSE_TAB_CODES = new Set([
+  "KeyW", "KeyQ", "KeyN", "KeyT", "KeyR", "KeyL", "KeyP",
+  "KeyA", "KeyS", "KeyD", "Space", "Tab", "F5",
 ]);
 
 function shouldSoakBrowserMods() {
-  if (bootBlocksInput()) return false;
-  if (typingFocus()) return false;
-  return gameplayActive() || !!document.pointerLockElement;
+  const on = !bootBlocksInput() && !typingFocus() && (gameplayActive() || !!document.pointerLockElement);
+  window.__aimSoakBrowserMods = on;
+  return on;
 }
 
 function isBrowserModSoak(e) {
   if (!e) return false;
-  if (BROWSER_MOD_CODES.has(e.code)) return true;
-  return !!(e.ctrlKey || e.metaKey) && BROWSER_MOD_COMBO_CODES.has(e.code);
+  if (BROWSER_MOD_CODES.has(e.code) || e.key === "Control" || e.key === "Meta") return true;
+  if (e.ctrlKey || e.metaKey) return true;
+  return BROWSER_CLOSE_TAB_CODES.has(e.code) && !!(e.ctrlKey || e.metaKey);
 }
 
-function soakBrowserModKeys(e) {
+function soakBrowserModKeys(e, { stop = true } = {}) {
   if (!shouldSoakBrowserMods() || !isBrowserModSoak(e)) return false;
   if (e.cancelable) e.preventDefault();
-  e.stopPropagation();
+  try { e.returnValue = false; } catch (_) { /* ignore */ }
+  if (stop) {
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+  }
   return true;
 }
 
 function onKeyDownCapture(e) {
-  soakBrowserModKeys(e);
+  // preventDefault only here so the document capture soak still runs.
+  soakBrowserModKeys(e, { stop: false });
   onKeyDown(e);
 }
 
 function onKeyUpCapture(e) {
-  soakBrowserModKeys(e);
+  soakBrowserModKeys(e, { stop: false });
   onKeyUp(e);
 }
+
+function installBrowserModSoak() {
+  if (window.__aimBrowserModSoakBound) return;
+  window.__aimBrowserModSoakBound = true;
+  const opts = { capture: true, passive: false };
+  window.addEventListener("keydown", onKeyDownCapture, opts);
+  window.addEventListener("keyup", onKeyUpCapture, opts);
+  document.addEventListener("keydown", soakBrowserModKeys, opts);
+  document.addEventListener("keyup", soakBrowserModKeys, opts);
+  document.addEventListener("keypress", soakBrowserModKeys, opts);
+  shouldSoakBrowserMods();
+}
+
+installBrowserModSoak();
 
 function onKeyDown(e) {
   if (bootBlocksInput()) {
@@ -14443,6 +14466,7 @@ function bindPointerLock() {
       input.spaceDown = false;
       state.spaceHoldT = 0;
     }
+    shouldSoakBrowserMods();
   });
 }
 
@@ -14833,8 +14857,7 @@ function bind() {
   if (decalDrawSlider) decalDrawSlider.oninput = (e) => setDecalDraw(e.target.value);
   syncFxSettingsUI();
 
-  window.addEventListener("keydown", onKeyDownCapture, true);
-  window.addEventListener("keyup", onKeyUpCapture, true);
+  installBrowserModSoak();
   window.addEventListener("mousedown", onMouseDown);
   window.addEventListener("mouseup", onMouseUp);
   window.addEventListener("mousemove", onMouseMove);

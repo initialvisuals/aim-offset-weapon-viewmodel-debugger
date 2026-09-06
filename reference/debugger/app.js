@@ -332,8 +332,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260906v77";
-const APP_BUILD_STAMP = "2026-09-06 11:56";
+const APP_CACHE_BUST = "20260906v78";
+const APP_BUILD_STAMP = "2026-09-06 19:50";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -396,6 +396,8 @@ const state = {
   /** Instance id of the held kit. Null while empty-handed. */
   heldInstanceId: null,
   swayEnabled: true,
+  /** Session: spray at cyclic rate with no recoil so heat cards can be tuned live. */
+  heatTune: false,
   holdBreath: false,
   score: 0,
   breathLeft: 3,
@@ -707,11 +709,80 @@ function isAutoFire() {
   return state.fireMode === "auto" && weaponSupportsAuto();
 }
 
+/** Heat-tune spray may run while Settings / debugger pause normal gameplay. */
+function heatTuneActive() {
+  return !!state.heatTune && !bootBlocksInput() && !state.gunModalOpen && !state.handsEmpty;
+}
+
+/** Cyclic interval while heat-tuning. Semi / bolt get a steady pulse so heat still builds. */
+function heatTuneFireInterval() {
+  if (state.weaponId === "example_smg") return SMG_AUTO_SEC;
+  if (state.weaponId === "example_rifle") return 0.14;
+  if (isBoltGun()) return 0.16;
+  return 0.12;
+}
+
+function cancelReloadVisual() {
+  if (!state.reloading) {
+    resetMagVisual();
+    return;
+  }
+  state.reloading = false;
+  state.reloadElapsed = 0;
+  state.reloadInsertPlayed = false;
+  resetMagVisual();
+}
+
+function syncHeatTuneUI() {
+  const btn = el("btnHeatTune");
+  if (btn) btn.setAttribute("aria-pressed", state.heatTune ? "true" : "false");
+  const chk = el("chkHeatTune");
+  if (chk) chk.checked = !!state.heatTune;
+}
+
+function setHeatTune(on, { toast = true } = {}) {
+  const want = !!on;
+  if (want && state.handsEmpty) {
+    state.heatTune = false;
+    syncHeatTuneUI();
+    updateFireModeHud();
+    if (toast) showToast("Equip a gun to heat-tune");
+    return;
+  }
+  state.heatTune = want;
+  if (state.heatTune) {
+    cancelReloadVisual();
+    cancelBoltCycle();
+    const spec = magSpecForLoadout();
+    if (state.ammoInMag < spec.capacity) {
+      state.ammoInMag = spec.capacity;
+    }
+    if (player.recoilPunch) player.recoilPunch.set(0, 0, 0);
+    if (player.recoilRot) player.recoilRot.set(0, 0, 0);
+    player.camRecoilP = 0;
+    player.camRecoilY = 0;
+    player.swayAmp = 0;
+    player.gunBobW = 0;
+    updateAmmoHud();
+  }
+  syncHeatTuneUI();
+  updateFireModeHud();
+  updateHudHint();
+  if (toast) {
+    showToast(state.heatTune ? "Heat tune ON — sustained fire, no recoil" : "Heat tune OFF");
+  }
+}
+
 function updateFireModeHud() {
   const node = el("fireModeHud");
   if (!node) return;
   node.style.visibility = state.handsEmpty ? "hidden" : "";
   if (state.handsEmpty) return;
+  if (state.heatTune) {
+    node.textContent = "HEAT TUNE";
+    node.classList.add("auto");
+    return;
+  }
   const auto = isAutoFire();
   node.textContent = auto ? "AUTO" : "SEMI";
   node.classList.toggle("auto", auto);
@@ -823,6 +894,7 @@ function updateAmmoHud() {
 
 function beginReload() {
   if (!gameplayActive()) return;
+  if (state.heatTune) return;
   if (state.handsEmpty) return;
   if (state.reloading) return;
   const spec = magSpecForLoadout();
@@ -3803,6 +3875,7 @@ function syncSettingsUI() {
   if (chkHip) chkHip.checked = state.showHipReticle;
   const chkRays = el("chkAimRays");
   if (chkRays) chkRays.checked = state.showAimRays;
+  syncHeatTuneUI();
 
   const zsel = el("settingsZeroDist");
   if (zsel) zsel.value = String(state.zeroDist);
@@ -11970,6 +12043,20 @@ function applyHoldToScene() {
 
 function applySwayAndRecoil(dt, moving) {
   if (!swayRig) return;
+  if (state.heatTune) {
+    if (player.recoilPunch) player.recoilPunch.set(0, 0, 0);
+    if (player.recoilRot) player.recoilRot.set(0, 0, 0);
+    player.camRecoilP = 0;
+    player.camRecoilY = 0;
+    player.swayAmp = 0;
+    player.gunBobW = 0;
+    const crouchB = clamp(state.crouchGrad, 0, 1);
+    const vaultB = state.vaulting ? 1 - Math.abs(state.vaultT / Math.max(0.12, state.vaultDur) - 0.5) * 2 : 0;
+    const tuck = Math.max(crouchB, state.sliding ? 0.7 : 0, clamp(vaultB, 0, 1));
+    swayRig.position.set(0, -0.06 * tuck, 0.03 * tuck);
+    swayRig.rotation.set(0.04 * tuck, 0, 0, "XYZ");
+    return;
+  }
   player.swayT += dt;
   const adsT = state.adsPreview ? 1 : state.adsFactor;
   let amp = state.swayEnabled ? 1 : 0;
@@ -12809,32 +12896,42 @@ function applyShotRecoil() {
 }
 
 function fireWeapon({ fromHold = false } = {}) {
-  if (!gameplayActive()) return;
-  if (state.vaulting) return;
-  if (player.fireCooldown > 0 || state.boltCycling) return;
-  if (state.lookPickup) {
+  const tune = heatTuneActive();
+  if (!tune && !gameplayActive()) return;
+  if (bootBlocksInput() || state.gunModalOpen) return;
+  if (!tune && state.vaulting) return;
+  if (player.fireCooldown > 0) return;
+  if (!tune && state.boltCycling) return;
+  if (!tune && state.lookPickup) {
     if (fromHold) return;
     tryEquipLooked();
     return;
   }
   if (state.handsEmpty) return;
-  if (state.reloading) return;
+  if (!tune && state.reloading) return;
   sfx.resume();
-  if (state.ammoInMag <= 0) {
+  if (!tune && state.ammoInMag <= 0) {
     sfx.play("dry");
     player.fireCooldown = 0.18;
     updateAmmoHud();
     return;
   }
-  state.ammoInMag -= 1;
-  updateAmmoHud();
+  if (!tune) {
+    state.ammoInMag -= 1;
+    updateAmmoHud();
+  }
   sfx.play("fire", { weaponClass: sfxWeaponClass() });
-  player.fireCooldown = fireCooldownForLoadout();
+  player.fireCooldown = tune ? heatTuneFireInterval() : fireCooldownForLoadout();
   addBarrelHeatShot();
   fireFlash();
-  if (isBoltGun()) beginBoltCycle();
-  else spawnCasing();
-  applyShotRecoil();
+  if (tune) {
+    spawnCasing();
+  } else if (isBoltGun()) {
+    beginBoltCycle();
+  } else {
+    spawnCasing();
+  }
+  if (!tune) applyShotRecoil();
 
   // Sim (hobZero): spawn at muzzle, launch so arc meets sight at Z.
   // Arcade: spawn at muzzle, initial dir = camera aim (reticle-faithful).
@@ -14139,8 +14236,8 @@ function updatePlayer(dt) {
     player.wasCrouched = wantCrouch;
   }
 
-  // View bob
-  const bobAmp = (moving && !state.vaulting) ? (sprinting ? 0.025 : (state.sliding ? 0.008 : 0.014)) : 0;
+  // View bob (frozen while heat-tuning so the gun stays readable)
+  const bobAmp = (!state.heatTune && moving && !state.vaulting) ? (sprinting ? 0.025 : (state.sliding ? 0.008 : 0.014)) : 0;
   player.bobPhase += dt * (moving && !state.vaulting ? (sprinting ? 12 : 8) : 0);
   const bobY = Math.sin(player.bobPhase) * bobAmp;
   const bobX = Math.cos(player.bobPhase * 0.5) * bobAmp * 0.5;
@@ -14206,7 +14303,9 @@ function updatePlayer(dt) {
   }
 
   if (player.fireCooldown > 0) player.fireCooldown -= dt;
-  if (isAutoFire() && input.shoot && !state.handsEmpty && !state.reloading && state.ammoInMag > 0) {
+  if (heatTuneActive()) {
+    fireWeapon({ fromHold: true });
+  } else if (isAutoFire() && input.shoot && !state.handsEmpty && !state.reloading && state.ammoInMag > 0) {
     fireWeapon({ fromHold: true });
   }
 
@@ -14389,9 +14488,13 @@ function updateHudHint() {
   const hint = el("hudHint");
   if (!hint) return;
   if (state.settingsOpen) {
-    hint.innerHTML = `Settings open — <kbd>O</kbd> / Esc close`;
+    hint.innerHTML = state.heatTune
+      ? `Settings open — heat tune spraying · <kbd>O</kbd> / Esc close`
+      : `Settings open — <kbd>O</kbd> / Esc close`;
   } else if (state.panelOpen) {
-    hint.innerHTML = `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
+    hint.innerHTML = state.heatTune
+      ? `Debugger open — heat tune spraying · <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`
+      : `Debugger open — <kbd>\`</kbd> close · <kbd>G</kbd> guns · <kbd>O</kbd> settings`;
   } else {
     hint.innerHTML = `<kbd>\`</kbd> Debugger · <kbd>O</kbd> Settings · <kbd>C</kbd>/<kbd>Z</kbd> crouch · wheel height · WASD · mouse look · <kbd>Q</kbd>/<kbd>E</kbd> lean · <kbd>U</kbd> cycle hold · <kbd>F</kbd> bench / world kit · <kbd>X</kbd> drop kit · RMB ADS · hold Space vault (ADS: breath) · LMB fire · <kbd>B</kbd> fire mode · <kbd>R</kbd> reload · <kbd>G</kbd> guns`;
   }
@@ -14949,6 +15052,10 @@ function bind() {
       showToast(state.swayEnabled ? "Sway ON" : "Sway OFF (clean tuning)");
     };
   }
+  const heatTuneBtn = el("btnHeatTune");
+  if (heatTuneBtn) {
+    heatTuneBtn.onclick = () => setHeatTune(!state.heatTune);
+  }
   const perfBtn = el("btnPerf");
   if (perfBtn) {
     perfBtn.onclick = () => setPerfOverlay(!state.showPerf, { toast: true });
@@ -15216,6 +15323,11 @@ function bind() {
     chkGroundHeatHaze.checked = !!state.groundHeatHaze;
     chkGroundHeatHaze.onchange = (e) => setGroundHeatHaze(e.target.checked, { toast: true });
   }
+  const chkHeatTune = el("chkHeatTune");
+  if (chkHeatTune) {
+    chkHeatTune.onchange = (e) => setHeatTune(e.target.checked);
+  }
+  syncHeatTuneUI();
   syncHeatHazeUI();
   syncBuildStamp();
   const sunSizeSlider = el("sunSizeSlider");

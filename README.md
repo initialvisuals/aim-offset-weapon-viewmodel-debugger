@@ -19,7 +19,7 @@ Static HTML/JS, Three.js from CDN, no bundler — no compile step. Full run + Wi
 What the range is exercising:
 
 - Two-tab **tuner** (`` ` ``) — live hip/ADS holds, attachments, Copy JSON
-- ~400 m lane with fog (375/520 still hides long tracers), time of day + procedural sky (Settings `O`), procedural bay concrete, and shootable flood bulbs
+- ~400 m lane with fog (375/520 still hides long tracers), time of day + layered procedural sky (Settings `O` — horizon haze, multi-layer clouds, night star field), procedural bay concrete, and shootable flood bulbs
 - Berm-peak popup figures; **F** bench pickups (guns / optics / mags / suppressors / table reset)
 - **R** reload (mag-out / slam-in); crouch / slide; wall-clamped lean; vault; Sim vs Arcade ballistics (HoB / zero)
 - **SMG auto, in-line recoil** — **B** semi/auto (SMG only); hold LMB in AUTO (~1200 rpm)

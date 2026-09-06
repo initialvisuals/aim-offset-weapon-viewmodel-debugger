@@ -293,8 +293,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260905v72";
-const APP_BUILD_STAMP = "2026-09-05 01:25";
+const APP_CACHE_BUST = "20260906v73";
+const APP_BUILD_STAMP = "2026-09-06 02:25";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -1843,7 +1843,7 @@ function ensureSkyDiscs() {
   ensureSkyDome();
 }
 
-/** Inverted sky sphere: ToD gradient, sun/moon halo, hashed stars, FBM clouds. */
+/** Inverted sky sphere: layered ToD atmosphere, halo, dense stars + band, multi-layer FBM clouds. */
 function ensureSkyDome() {
   if (!scene || skyDome) return;
   skyMat = new THREE.ShaderMaterial({
@@ -1858,6 +1858,7 @@ function ensureSkyDome() {
       sunColor: { value: new THREE.Color(0xfff1dd) },
       moonColor: { value: new THREE.Color(0xb8c8dc) },
       cloudColor: { value: new THREE.Color(0xd8c8b4) },
+      airColor: { value: new THREE.Color(0x6a88a8) },
       sunHalo: { value: 1 },
       sunAngular: { value: (SUN_SIZE_DEFAULT * Math.PI / 180) * 0.5 },
       moonHalo: { value: 0 },
@@ -1865,6 +1866,7 @@ function ensureSkyDome() {
       cloudAmt: { value: CLOUDS_DEFAULT },
       twilightAmt: { value: 0.5 },
       hazeAmt: { value: 0.7 },
+      nightAmt: { value: 0 },
       skyTime: { value: 0 },
     },
     vertexShader: /* glsl */`
@@ -1888,6 +1890,7 @@ function ensureSkyDome() {
       uniform vec3 sunColor;
       uniform vec3 moonColor;
       uniform vec3 cloudColor;
+      uniform vec3 airColor;
       uniform float sunHalo;
       uniform float sunAngular;
       uniform float moonHalo;
@@ -1895,6 +1898,7 @@ function ensureSkyDome() {
       uniform float cloudAmt;
       uniform float twilightAmt;
       uniform float hazeAmt;
+      uniform float nightAmt;
       uniform float skyTime;
       varying vec3 vWorldDir;
 
@@ -1929,7 +1933,7 @@ function ensureSkyDome() {
       float fbm(vec3 p) {
         float v = 0.0;
         float a = 0.5;
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 5; i++) {
           v += a * vnoise(p);
           p = p * 2.07 + vec3(11.2, 4.7, 19.1);
           a *= 0.5;
@@ -1957,21 +1961,32 @@ function ensureSkyDome() {
       void main() {
         vec3 dir = normalize(vWorldDir);
         float elev = dir.y;
-        float zenMix = smoothstep(-0.06, 0.72, elev);
-        zenMix = pow(clamp(zenMix, 0.0, 1.0), 0.82);
+        // Wide, soft zenith falloff — no painted-sphere lip at the horizon.
+        float zenMix = smoothstep(-0.22, 0.94, elev);
+        zenMix = pow(clamp(zenMix, 0.0, 1.0), 0.58);
         vec3 col = mix(horizonColor, zenithColor, zenMix);
 
-        float hBand = exp(-pow(elev / 0.13, 2.0));
         vec3 sunAz = normalize(vec3(sunDir.x, 0.0, sunDir.z) + vec3(1e-5, 0.0, 0.0));
         vec3 dirAz = normalize(vec3(dir.x, 0.0, dir.z) + vec3(1e-5, 0.0, 0.0));
         float towardSun = clamp(dot(dirAz, sunAz) * 0.5 + 0.5, 0.0, 1.0);
-        float tw = hBand * twilightAmt * (0.28 + 0.72 * towardSun);
+
+        // Layered aerial perspective: thick berm haze + thinner mid-air + below-horizon.
+        float hazeLow = exp(-pow(max(elev + 0.02, 0.0) / 0.145, 1.45));
+        float hazeMid = exp(-pow(max(elev, 0.0) / 0.40, 1.75));
+        float haze = hazeLow * 0.82 + hazeMid * 0.22;
+        float dayKeep = 1.0 - nightAmt * 0.92;
+        col = mix(col, fogColor, haze * hazeAmt * mix(1.0, 0.22, nightAmt));
+
+        float rayleigh = pow(clamp(1.0 - abs(elev), 0.0, 1.0), 1.55);
+        col = mix(col, airColor, rayleigh * 0.16 * dayKeep * hazeAmt);
+
+        float hBand = exp(-pow(elev / 0.11, 2.0));
+        float tw = hBand * twilightAmt * (0.22 + 0.78 * towardSun);
         col = mix(col, twilightColor, tw);
 
-        float haze = exp(-pow(max(elev, 0.0) / 0.20, 2.0));
-        float below = smoothstep(0.04, -0.12, elev);
-        col = mix(col, fogColor, haze * hazeAmt);
-        col = mix(col, fogColor * 0.45, below * 0.85);
+        float below = smoothstep(0.10, -0.24, elev);
+        vec3 groundHaze = fogColor * mix(0.52, 0.08, nightAmt);
+        col = mix(col, groundHaze, below * 0.88);
 
         float mu = clamp(dot(dir, normalize(sunDir)), -1.0, 1.0);
         float ang = acos(mu);
@@ -1988,27 +2003,63 @@ function ensureSkyDome() {
         float muM = clamp(dot(dir, normalize(moonDir)), 0.0, 1.0);
         col += moonColor * moonHalo * (pow(muM, 48.0) * 0.85 + pow(muM, 10.0) * 0.16);
 
-        if (starAmt > 0.008 && elev > 0.018) {
-          float skyFade = smoothstep(0.018, 0.14, elev);
-          float s = starLayer(dir, 148.0, 0.9964, skyTime, 1.55);
-          s += starLayer(dir, 76.0, 0.9938, skyTime, 0.85) * 0.42;
-          s += starLayer(dir, 210.0, 0.9978, skyTime, 2.15) * 0.7;
-          col += vec3(0.82, 0.88, 1.0) * s * starAmt * skyFade;
+        if (starAmt > 0.008 && elev > 0.012) {
+          float skyFade = smoothstep(0.012, 0.16, elev);
+          // Dense faint field + brighter sparks. Twinkle stays mild.
+          float s = starLayer(dir, 62.0, 0.9865, skyTime, 0.62) * 0.28;
+          s += starLayer(dir, 108.0, 0.9918, skyTime, 1.15) * 0.55;
+          s += starLayer(dir, 168.0, 0.9952, skyTime, 1.65) * 0.85;
+          s += starLayer(dir, 240.0, 0.9974, skyTime, 2.05) * 0.72;
+          s += starLayer(dir, 320.0, 0.9986, skyTime, 2.55) * 0.95;
+          vec3 starCol = mix(vec3(0.78, 0.84, 1.0), vec3(1.0, 0.92, 0.82), hash13(floor(dir * 168.0)) * 0.55);
+          col += starCol * s * starAmt * skyFade;
+
+          // Soft galactic band — ToD-gated with stars, not a texture card.
+          vec3 galAxis = normalize(vec3(0.26, 0.40, 0.88));
+          float galLat = abs(dot(dir, galAxis));
+          float mw = pow(1.0 - smoothstep(0.0, 0.40, galLat), 1.7);
+          float mwN = fbm(dir * 7.2 + vec3(2.1, 8.4, 1.3));
+          float dust = smoothstep(0.38, 0.76, fbm(dir * 13.5 + 9.0));
+          mw *= (0.32 + 0.68 * mwN) * mix(0.5, 1.0, dust);
+          col += vec3(0.46, 0.54, 0.72) * mw * starAmt * skyFade * 0.20;
         }
 
-        if (cloudAmt > 0.004 && elev > -0.06) {
-          vec3 d1 = vec3(skyTime * 0.011, 0.0, skyTime * 0.0065);
-          vec3 d2 = vec3(-skyTime * 0.0058, skyTime * 0.0016, skyTime * 0.0038);
-          float n1 = fbm(dir * vec3(2.55, 0.92, 2.55) + d1);
-          float n2 = fbm(dir * vec3(4.35, 1.45, 4.35) + vec3(17.0, 9.0, 4.0) + d2);
-          float cloud = n1 * 0.64 + n2 * 0.36;
-          cloud = smoothstep(0.40, 0.74, cloud);
-          float band = smoothstep(-0.03, 0.13, elev) * smoothstep(0.94, 0.40, elev);
-          cloud *= cloudAmt * band;
+        if (cloudAmt > 0.004 && elev > -0.08) {
+          float elevBand = smoothstep(-0.04, 0.11, elev) * smoothstep(0.96, 0.36, elev);
+          float hiBand = smoothstep(0.14, 0.30, elev) * smoothstep(0.93, 0.48, elev);
+          float loBand = smoothstep(-0.03, 0.07, elev) * smoothstep(0.40, 0.10, elev);
+
+          vec3 driftHi = vec3(skyTime * 0.017, 0.0, skyTime * 0.0042);
+          vec3 driftMid = vec3(-skyTime * 0.0070, skyTime * 0.0010, skyTime * 0.0052);
+          vec3 driftLo = vec3(skyTime * 0.0032, 0.0, -skyTime * 0.0024);
+
+          // Thin cirrus — stretched, faster. Reads from low slider values.
+          float cirrus = fbm(dir * vec3(4.7, 0.20, 1.28) + driftHi + vec3(3.0, 0.0, 8.0));
+          cirrus = smoothstep(0.50, 0.78, cirrus);
+          float cirrusW = smoothstep(0.02, 0.40, cloudAmt) * (1.0 - 0.30 * smoothstep(0.74, 1.0, cloudAmt));
+
+          // Thicker banks — puffier, slower parallax. Mid-slider is the authored mix.
+          float banks = fbm(dir * vec3(2.10, 0.76, 2.10) + driftMid);
+          float shred = fbm(dir * vec3(5.5, 1.55, 5.5) + driftMid * 1.35 + 12.0);
+          banks = smoothstep(mix(0.52, 0.34, cloudAmt), mix(0.80, 0.58, cloudAmt), banks);
+          banks *= mix(0.74, 1.10, shred);
+          float bankW = smoothstep(0.16, 0.86, cloudAmt);
+
+          // Slow horizon scud — sells depth without a second world.
+          float scud = fbm(dir * vec3(1.48, 0.52, 1.48) + driftLo + vec3(19.0, 4.0, 2.0));
+          scud = smoothstep(0.48, 0.72, scud);
+          float scudW = smoothstep(0.26, 0.94, cloudAmt);
+
+          float cloud = cirrus * cirrusW * hiBand * 0.50
+            + banks * bankW * elevBand * 0.80
+            + scud * scudW * loBand * 0.38;
+          cloud = clamp(cloud, 0.0, 1.0);
+
           vec3 ccol = cloudColor;
-          ccol = mix(ccol, twilightColor, twilightAmt * 0.5 * (0.4 + 0.6 * towardSun));
-          float shade = 0.72 + 0.28 * n2;
-          col = mix(col, ccol * shade, cloud * 0.78);
+          ccol = mix(ccol, twilightColor, twilightAmt * 0.48 * (0.32 + 0.68 * towardSun));
+          ccol = mix(ccol, fogColor, loBand * 0.32 * hazeAmt);
+          float shade = 0.70 + 0.30 * shred;
+          col = mix(col, ccol * shade, cloud);
         }
 
         gl_FragColor = vec4(col, 1.0);
@@ -2024,7 +2075,7 @@ function ensureSkyDome() {
     lights: false,
     toneMapped: true,
   });
-  skyDome = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 32), skyMat);
+  skyDome = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 48), skyMat);
   skyDome.scale.setScalar(90);
   skyDome.renderOrder = -20;
   skyDome.frustumCulled = false;
@@ -2032,6 +2083,7 @@ function ensureSkyDome() {
   skyDome.receiveShadow = false;
   skyDome.raycast = () => {};
   scene.add(skyDome);
+  ensureHorizonHaze();
 }
 
 function syncSkyUniforms(pal, path) {
@@ -2043,7 +2095,7 @@ function syncSkyUniforms(pal, path) {
   const twilight = smooth01(clamp((22 - Math.abs(elDeg)) / 18, 0, 1)) * (elDeg > -8 ? 1 : clamp((elDeg + 14) / 6, 0, 1));
 
   const zen = pal.sky.clone().lerp(pal.hemiSky, lerp(0.20, 0.035, night));
-  if (night > 0.5) zen.multiplyScalar(lerp(1, 0.12, (night - 0.5) * 2));
+  if (night > 0.5) zen.multiplyScalar(lerp(1, 0.08, (night - 0.5) * 2));
   u.zenithColor.value.copy(zen);
   u.horizonColor.value.copy(pal.sky);
   const twc = pal.sun.clone().lerp(new THREE.Color(0xff7a4a), 0.45);
@@ -2074,12 +2126,25 @@ function syncSkyUniforms(pal, path) {
   u.starAmt.value = night * clamp((-elDeg + 2) / 10, 0, 1);
   u.cloudAmt.value = state.clouds ?? CLOUDS_DEFAULT;
   u.twilightAmt.value = twilight * day + twilight * 0.25;
-  u.hazeAmt.value = state.fogEnabled ? 0.74 : 0.22;
+  u.hazeAmt.value = state.fogEnabled ? 0.86 : 0.28;
+  u.nightAmt.value = night;
+  const air = pal.hemiSky.clone().lerp(pal.sky, 0.45);
+  air.lerp(new THREE.Color(0x6a88a8), 0.35 * day);
+  if (night > 0.4) air.multiplyScalar(lerp(1, 0.12, (night - 0.4) / 0.6));
+  u.airColor.value.copy(air);
+  syncHorizonHaze(pal, night, twilight);
 }
 
 function skyFollowRadius() {
   const far = (camera && camera.far) || 2000;
-  return Math.max(28, Math.min(220, far * 0.42));
+  // Sit just inside far clip so look-up reads as volume, not a painted ball.
+  return Math.max(140, Math.min(far * 0.84, 4200));
+}
+
+/** Horizon haze skirts — beyond the berm, inside far clip. Camera-follow, not a second range. */
+function horizonHazeRadius() {
+  const far = (camera && camera.far) || 2000;
+  return Math.max(460, Math.min(far * 0.36, 820));
 }
 
 /** Sun/moon mesh distance: just inside far clip so the disc is sky, not a finite ball in the bay. */
@@ -2088,14 +2153,145 @@ function skyDiscDistance() {
   return far * 0.92;
 }
 
+function makeHorizonHazeMaterial(peakY, opacityMul) {
+  return new THREE.ShaderMaterial({
+    name: "HorizonHazeSkirt",
+    uniforms: {
+      hazeColor: { value: new THREE.Color(SCENE_BG_BASE) },
+      hazeAmt: { value: 0.55 },
+      nightAmt: { value: 0 },
+      peakY: { value: peakY },
+      opacityMul: { value: opacityMul },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform vec3 hazeColor;
+      uniform float hazeAmt;
+      uniform float nightAmt;
+      uniform float peakY;
+      uniform float opacityMul;
+      varying vec2 vUv;
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+      float hash12(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+      }
+      void main() {
+        float n = hash12(vec2(vUv.x * 22.0, floor(vUv.x * 48.0)));
+        float ridge = peakY + (n - 0.5) * 0.16;
+        float band = smoothstep(0.0, 0.20, vUv.y) * smoothstep(ridge + 0.18, ridge - 0.22, vUv.y);
+        float a = band * hazeAmt * opacityMul * (1.0 - nightAmt * 0.90);
+        if (a < 0.004) discard;
+        gl_FragColor = vec4(hazeColor, a);
+        #include <logdepthbuf_fragment>
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    fog: false,
+    lights: false,
+    toneMapped: true,
+  });
+}
+
+/** Cheap camera-follow haze skirts past the berm. Soft silhouettes, not a second world. */
+function ensureHorizonHaze() {
+  if (!scene || horizonHaze) return;
+  horizonHazeMats = [];
+  horizonHaze = new THREE.Group();
+  horizonHaze.name = "horizonHaze";
+  horizonHaze.renderOrder = -18;
+  const specs = [
+    { peak: 0.46, opacity: 0.55 },
+    { peak: 0.58, opacity: 0.32 },
+  ];
+  for (const spec of specs) {
+    const mat = makeHorizonHazeMaterial(spec.peak, spec.opacity);
+    horizonHazeMats.push(mat);
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 48, 1, true), mat);
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.raycast = () => {};
+    mesh.renderOrder = -18;
+    horizonHaze.add(mesh);
+  }
+  scene.add(horizonHaze);
+
+  distantHazePlates = new THREE.Group();
+  distantHazePlates.name = "distantHazePlates";
+  const ridges = [
+    { meters: 640, y: 7, w: 260, h: 20, peak: 0.40, opacity: 0.36 },
+    { meters: 780, y: 11, w: 340, h: 28, peak: 0.48, opacity: 0.20 },
+  ];
+  for (const s of ridges) {
+    const mat = makeHorizonHazeMaterial(s.peak, s.opacity);
+    horizonHazeMats.push(mat);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+    mesh.position.set(0, s.y, rangeZ(s.meters));
+    mesh.scale.set(s.w, s.h, 1);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.raycast = () => {};
+    mesh.renderOrder = -17;
+    distantHazePlates.add(mesh);
+  }
+  scene.add(distantHazePlates);
+}
+
+function syncHorizonHaze(pal, night, twilight) {
+  if (!horizonHazeMats || !horizonHazeMats.length) return;
+  const fogC = (scene && scene.fog && scene.fog.color)
+    ? scene.fog.color.clone()
+    : (pal.sky ? pal.sky.clone() : new THREE.Color(SCENE_BG_BASE));
+  const dusk = new THREE.Color(0xc88860);
+  const amt = (state.fogEnabled ? 0.64 : 0.26) * (1 - night * 0.88) * (0.78 + twilight * 0.32);
+  for (const mat of horizonHazeMats) {
+    const u = mat.uniforms;
+    u.hazeColor.value.copy(fogC).lerp(pal.sky, 0.28);
+    if (twilight > 0.05 && night < 0.85) {
+      u.hazeColor.value.lerp(dusk, twilight * 0.28 * (1 - night));
+    }
+    if (night > 0.5) u.hazeColor.value.multiplyScalar(lerp(1, 0.14, (night - 0.5) * 2));
+    u.nightAmt.value = night;
+    u.hazeAmt.value = amt;
+  }
+}
+
+function updateHorizonHazeFollow() {
+  if (!horizonHaze || !camera) return;
+  ensureHorizonHaze();
+  horizonHaze.position.copy(_skyCamPos);
+  const R = horizonHazeRadius();
+  const kids = horizonHaze.children;
+  if (kids[0]) kids[0].scale.set(R, 42, R);
+  if (kids[1]) kids[1].scale.set(R * 1.18, 68, R * 1.18);
+}
+
 function updateSkyDome(dt) {
   if (!skyDome || !camera) return;
   camera.getWorldPosition(_skyCamPos);
   skyDome.position.copy(_skyCamPos);
   const R = skyFollowRadius();
-  skyDome.scale.setScalar(Math.max(20, R * 0.55));
+  skyDome.scale.setScalar(Math.max(80, R));
   if (skyMat) skyMat.uniforms.skyTime.value += dt;
   if (skyMat) skyMat.uniforms.sunAngular.value = sunHalfAngleRad();
+  updateHorizonHazeFollow();
   const discR = skyDiscDistance();
   const coreRad = (SUN_CORE_DEG * Math.PI / 180) * 0.5;
   const sunScale = Math.max(0.035, discR * Math.tan(coreRad));
@@ -2708,6 +2904,8 @@ function bindPassLabMaterial() {
 function updatePassLabBackdrop() {
   const on = passLabBackdropOn();
   if (skyDome) skyDome.visible = !on;
+  if (horizonHaze) horizonHaze.visible = !on;
+  if (distantHazePlates) distantHazePlates.visible = !on;
   if (on) {
     if (sunDisc) sunDisc.visible = false;
     if (moonDisc) moonDisc.visible = false;
@@ -3850,9 +4048,14 @@ let outputDither = null;
 let hemiLight, ambLight, keyLight, fillLight, rimLight, moonLight;
 let sunDisc = null;
 let moonDisc = null;
-/** Fullscreen-ish sky dome (gradient, halo, stars, FBM clouds). Follows the camera. */
+/** Fullscreen-ish sky dome (layered atmosphere, halo, stars, multi-layer clouds). Follows the camera. */
 let skyDome = null;
 let skyMat = null;
+/** Camera-follow horizon haze skirts (soft depth past the berm). */
+let horizonHaze = null;
+let horizonHazeMats = null;
+/** World-locked soft ridge plates beyond the 410 m berm. */
+let distantHazePlates = null;
 const _skyCamPos = new THREE.Vector3();
 const _moonDir = new THREE.Vector3(0, 1, 0);
 const SKY_DISC_R = 180;

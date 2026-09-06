@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260906v76" />
+  <link rel="stylesheet" href="styles.css?v=20260906v77" />
   <style>
     /* Critical first-paint cover if styles.css is stale. Full rules live in styles.css. */
     .boot-overlay {
@@ -566,24 +566,57 @@
           <code id="barrelHeatVal">1.00</code>
         </label>
         <p class="note">Orange/amber glow from rounds through the tube. A can takes some heat. SMG cooks fast; rifle warms; bolt barely ticks. 0 = off.</p>
-        <label class="slider-row">Haze strength
+        <label class="slider-row">Barrel warp
           <input type="range" id="heatHazeStrengthSlider" min="0" max="2" step="0.01" value="1.00" />
           <code id="heatHazeStrengthVal">1.00</code>
         </label>
+        <p class="note">Refraction strength on barrel cards and the muzzle lobe. Not the orange steel glow, and not floor / height-fog.</p>
         <label class="slider-row">Card size
-          <input type="range" id="heatHazeCardSizeSlider" min="0.35" max="2" step="0.01" value="1.00" />
+          <input type="range" id="heatHazeCardSizeSlider" min="0.05" max="2.5" step="0.01" value="1.00" />
           <code id="heatHazeCardSizeVal">1.00</code>
+        </label>
+        <label class="slider-row">Card width
+          <input type="range" id="heatHazeCardScaleXSlider" min="0.15" max="2.5" step="0.01" value="1.00" />
+          <code id="heatHazeCardScaleXVal">1.00</code>
+        </label>
+        <label class="slider-row">Card height
+          <input type="range" id="heatHazeCardScaleYSlider" min="0.15" max="2.5" step="0.01" value="1.00" />
+          <code id="heatHazeCardScaleYVal">1.00</code>
+        </label>
+        <label class="slider-row">Card count
+          <input type="range" id="heatHazeCardCountSlider" min="0" max="20" step="1" value="7" />
+          <code id="heatHazeCardCountVal">7</code>
+        </label>
+        <label class="slider-row">Slice count
+          <input type="range" id="heatHazeCardSegsSlider" min="4" max="32" step="1" value="16" />
+          <code id="heatHazeCardSegsVal">16</code>
+        </label>
+        <label class="slider-row">Feather
+          <input type="range" id="heatHazeFeatherSlider" min="0" max="2" step="0.01" value="1.00" />
+          <code id="heatHazeFeatherVal">1.00</code>
+        </label>
+        <label class="slider-row">Wind
+          <input type="range" id="heatHazeWindSlider" min="0" max="2" step="0.01" value="1.00" />
+          <code id="heatHazeWindVal">1.00</code>
+        </label>
+        <label class="slider-row">Friction
+          <input type="range" id="heatHazeFrictionSlider" min="0" max="2" step="0.01" value="1.00" />
+          <code id="heatHazeFrictionVal">1.00</code>
         </label>
         <label class="slider-row">Lobe size
           <input type="range" id="heatHazeLobeSizeSlider" min="0.35" max="2" step="0.01" value="1.00" />
           <code id="heatHazeLobeSizeVal">1.00</code>
+        </label>
+        <label class="slider-row">Ground haze
+          <input type="range" id="heatHazeGroundStrengthSlider" min="0" max="2" step="0.01" value="1.00" />
+          <code id="heatHazeGroundStrengthVal">1.00</code>
         </label>
         <div class="settings-checks">
           <label class="check-row"><input type="checkbox" id="chkHeatHazeMaster" checked /> Heat haze master</label>
           <label class="check-row"><input type="checkbox" id="chkBarrelHeatHaze" checked /> Barrel cards</label>
           <label class="check-row"><input type="checkbox" id="chkGroundHeatHaze" /> Ground / height-fog</label>
         </div>
-        <p class="note">Barrel cards: tip-weighted lattice on the tube (bottoms locked; tops rise / trail). Separate <strong>card size</strong> (lattice height) and <strong>lobe size</strong> (muzzle circle, seated on the tip). Grab + UV warp, depth-gated vs far fog and luma-locked so night sky stays black. <strong>Cards</strong> default ON. <strong>Ground / height-fog</strong> stays <strong>off</strong>. <strong>Master</strong> or strength 0 kills both. Scene fog is a separate Fog control. Barrel heat slider stays the orange on the steel.</p>
+        <p class="note">Each card is a mesh (width × height) pinned at the <strong>bottom-center</strong> tube seat. <strong>Card size</strong> is overall (low = thin ribbon; mid = useful; high has headroom). <strong>Width / height</strong> scale that box from the pin. <strong>Feather</strong> is the soft margin from the outer box to the inner heat core (top corners inset). <strong>Slice count</strong> is horizontal bands up the card (trail resolution). <strong>Count</strong> 0–20 scatters cards on the tip-weighted zones. <strong>Wind / friction</strong> lag the upper slices when you swing so heat paints the air; bottoms stay locked. <strong>Barrel warp</strong> is card + lobe refraction. <strong>Lobe size</strong> is the muzzle circle only. <strong>Ground haze</strong> is the floor / height-fog post — off unless that checkbox is on. <strong>Master</strong> kills both paths. Barrel warp 0 kills cards + lobe. Ground haze 0 kills the floor post. Scene fog is a separate Fog control. Barrel heat stays the orange on the steel.</p>
       </div>
 
       <div class="settings-section">
@@ -686,6 +719,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260906v76"></script>
+    <script type="module" src="app.js?v=20260906v77"></script>
 </body>
 </html>

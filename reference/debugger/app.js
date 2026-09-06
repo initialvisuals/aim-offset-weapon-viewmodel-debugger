@@ -223,7 +223,17 @@ const _hazeCardPos = new THREE.Vector3();
 const _hazeBillboardMat = new THREE.Matrix4();
 const _hazeWorldQuat = new THREE.Quaternion();
 const _hazeParentQuat = new THREE.Quaternion();
+const _hazeTrailWorld = new THREE.Vector3();
+const _hazeTrailDesired = new THREE.Vector3();
+const _hazeTrailLocal = new THREE.Vector3();
+const _hazeTrailPrev = new THREE.Vector3();
+const _hazeInvWorld = new THREE.Matrix4();
+const _hazeMuzzleWorldPrev = new THREE.Vector3();
+const _hazeMuzzleWorldVel = new THREE.Vector3();
 let hazeMuzzlePrevOk = false;
+let hazeMuzzleWorldPrevOk = false;
+/** Last addBarrelHeatShimmer args so count / slice rebuilds can restamp the lattice. */
+let barrelHeatShimmerAnchor = null;
 /** When set (URL `?heat=`), stored heat does not cool — inspection freeze. */
 let barrelHeatFreeze = null;
 /** Recoil pattern index resets after this gap of not firing. */
@@ -274,15 +284,40 @@ const BLOOM_MIPS = 3;
 const BARREL_HEAT_DEFAULT = 1;
 /** Settings max (0–2). */
 const BARREL_HEAT_MUL_MAX = 2;
-/** Colorless heat-haze warp / vert displace (0 = off). Mid-slider is the authored look. */
+/** Barrel card + muzzle-lobe warp (0 = off). Not ground / height-fog. Mid is authored. */
 const HEAT_HAZE_STRENGTH_DEFAULT = 1;
 const HEAT_HAZE_STRENGTH_MAX = 2;
+/** Ground / height-fog post only. Independent of barrel warp. */
+const HEAT_HAZE_GROUND_STRENGTH_DEFAULT = 1;
 /** Noise-cell / volume-height mul. 1 = authored (~0.46 m ground, ~11 cm barrel). */
 const HEAT_HAZE_SIZE_DEFAULT = 1;
 const HEAT_HAZE_SIZE_MIN = 0.35;
 const HEAT_HAZE_SIZE_MAX = 2;
-/** Lattice card height / noise. Independent of the muzzle lobe. */
+/** Lattice overall size slider. Low is a thin ribbon; 1 = authored; high has headroom. */
 const HEAT_HAZE_CARD_SIZE_DEFAULT = HEAT_HAZE_SIZE_DEFAULT;
+const HEAT_HAZE_CARD_SIZE_MIN = 0.05;
+const HEAT_HAZE_CARD_SIZE_MAX = 2.5;
+/** Per-card width / height, pinned at the tube seat (bottom center). */
+const HEAT_HAZE_CARD_SCALE_DEFAULT = 1;
+const HEAT_HAZE_CARD_SCALE_MIN = 0.15;
+const HEAT_HAZE_CARD_SCALE_MAX = 2.5;
+/** How many lattice cards to scatter on the tip-weighted zones. */
+const HEAT_HAZE_CARD_COUNT_DEFAULT = 7;
+const HEAT_HAZE_CARD_COUNT_MIN = 0;
+const HEAT_HAZE_CARD_COUNT_MAX = 20;
+/** Vertical slices per card (trail resolution up the plume). */
+const HEAT_HAZE_CARD_SEGS_DEFAULT = 16;
+const HEAT_HAZE_CARD_SEGS_MIN = 4;
+const HEAT_HAZE_CARD_SEGS_MAX = 32;
+/** Air-trail: how hard upper verts lag a swing (0 = sticker, 2 = long paint). */
+const HEAT_HAZE_WIND_DEFAULT = 1;
+const HEAT_HAZE_WIND_MAX = 2;
+/** How fast lagged tops catch the tube (0 = slippery, 2 = snap). */
+const HEAT_HAZE_FRICTION_DEFAULT = 1;
+const HEAT_HAZE_FRICTION_MAX = 2;
+/** Soft margin from mesh extents (green) to the active heat core (orange). */
+const HEAT_HAZE_FEATHER_DEFAULT = 1;
+const HEAT_HAZE_FEATHER_MAX = 2;
 /** Fullscreen muzzle lobe radius. Independent of the lattice cards. */
 const HEAT_HAZE_LOBE_SIZE_DEFAULT = HEAT_HAZE_SIZE_DEFAULT;
 /**
@@ -294,11 +329,11 @@ const HEAT_HAZE_LOBE_SIZE_DEFAULT = HEAT_HAZE_SIZE_DEFAULT;
 const GROUND_HEAT_HAZE_DEFAULT = false;
 /** Barrel heat-haze cards (grab UV warp). Default ON — this is the heat warp. */
 const BARREL_HEAT_HAZE_DEFAULT = true;
-/** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
+/** Master gate for barrel cards + ground post. OFF forces both off. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260906v76";
-const APP_BUILD_STAMP = "2026-09-06 05:20";
+const APP_CACHE_BUST = "20260906v77";
+const APP_BUILD_STAMP = "2026-09-06 11:56";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -495,10 +530,26 @@ const state = {
   adsDofRadius: ADS_DOF_RADIUS,
   /** Barrel heat glow mul (0 = off, 2 = strong). Default 1. */
   barrelHeat: BARREL_HEAT_DEFAULT,
-  /** Colorless haze warp / displace (0 = off). Independent of barrel emissive. */
+  /** Barrel card + muzzle-lobe warp (0 = off). Independent of barrel emissive and ground fog. */
   heatHazeStrength: HEAT_HAZE_STRENGTH_DEFAULT,
-  /** Lattice card height / noise. Independent of the muzzle lobe. */
+  /** Ground / height-fog post strength only. */
+  heatHazeGroundStrength: HEAT_HAZE_GROUND_STRENGTH_DEFAULT,
+  /** Lattice overall size (remapped: low = thin). Independent of the muzzle lobe. */
   heatHazeCardSize: HEAT_HAZE_CARD_SIZE_DEFAULT,
+  /** Extra card width (thick / thin). Bottom-center pin. */
+  heatHazeCardScaleX: HEAT_HAZE_CARD_SCALE_DEFAULT,
+  /** Extra card height (rise). Bottoms stay on the tube. */
+  heatHazeCardScaleY: HEAT_HAZE_CARD_SCALE_DEFAULT,
+  /** How many cards to scatter on the tip-weighted zones (0 = none). */
+  heatHazeCardCount: HEAT_HAZE_CARD_COUNT_DEFAULT,
+  /** Vertical slices per card. */
+  heatHazeCardSegs: HEAT_HAZE_CARD_SEGS_DEFAULT,
+  /** Swing trail / air paint on upper verts. */
+  heatHazeWind: HEAT_HAZE_WIND_DEFAULT,
+  /** How fast the trail catches the tube. */
+  heatHazeFriction: HEAT_HAZE_FRICTION_DEFAULT,
+  /** Soft margin from card extents to the inner heat core. */
+  heatHazeFeather: HEAT_HAZE_FEATHER_DEFAULT,
   /** Fullscreen muzzle lobe radius. Independent of the lattice cards. */
   heatHazeLobeSize: HEAT_HAZE_LOBE_SIZE_DEFAULT,
   /** Master gate: OFF forces barrel cards + ground post off. Strength 0 also kills them. */
@@ -2982,6 +3033,7 @@ function applyPassLabFromUrl() {
           if (!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT)) state.heatHazeMaster = true;
           if (!(state.barrelHeatHaze ?? BARREL_HEAT_HAZE_DEFAULT)) state.barrelHeatHaze = true;
           if ((state.heatHazeStrength ?? 0) < 0.01) state.heatHazeStrength = HEAT_HAZE_STRENGTH_DEFAULT;
+          if ((state.heatHazeCardCount ?? 0) < 1) state.heatHazeCardCount = HEAT_HAZE_CARD_COUNT_DEFAULT;
           syncHeatHazeUI();
         }
         requestAnimationFrame(() => applyBarrelHeatVisual());
@@ -3328,42 +3380,91 @@ async function freezePassLab() {
 }
 
 function heatHazeMasterOn() {
-  const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
-  return !!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT) && str >= 0.01;
+  return !!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT);
+}
+
+function barrelWarpAmt() {
+  return clamp(state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
+}
+
+function groundHazeStrengthAmt() {
+  return clamp(state.heatHazeGroundStrength ?? HEAT_HAZE_GROUND_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
 }
 
 function barrelHeatCardsEnabled() {
-  return heatHazeMasterOn() && !!(state.barrelHeatHaze ?? BARREL_HEAT_HAZE_DEFAULT);
+  return heatHazeMasterOn() && !!(state.barrelHeatHaze ?? BARREL_HEAT_HAZE_DEFAULT) && barrelWarpAmt() >= 0.01;
 }
 
 function groundHeatHazeEnabled() {
-  return heatHazeMasterOn() && !!state.groundHeatHaze;
+  return heatHazeMasterOn() && !!state.groundHeatHaze && groundHazeStrengthAmt() >= 0.01;
 }
 
 function heatHazeCardSizeAmt() {
-  return clamp(state.heatHazeCardSize ?? HEAT_HAZE_CARD_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+  return clamp(state.heatHazeCardSize ?? HEAT_HAZE_CARD_SIZE_DEFAULT, HEAT_HAZE_CARD_SIZE_MIN, HEAT_HAZE_CARD_SIZE_MAX);
+}
+
+/** Low slider = thin ribbon; 1.00 = authored lattice; high keeps headroom. */
+function heatHazeCardSizeVisual() {
+  const s = heatHazeCardSizeAmt();
+  if (s <= 1) {
+    const u = (s - HEAT_HAZE_CARD_SIZE_MIN) / Math.max(1e-6, 1 - HEAT_HAZE_CARD_SIZE_MIN);
+    return 0.055 + 0.945 * Math.pow(clamp(u, 0, 1), 1.7);
+  }
+  const u = (s - 1) / Math.max(1e-6, HEAT_HAZE_CARD_SIZE_MAX - 1);
+  return 1 + 1.35 * clamp(u, 0, 1);
 }
 
 function heatHazeLobeSizeAmt() {
   return clamp(state.heatHazeLobeSize ?? HEAT_HAZE_LOBE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
 }
 
+function heatHazeCardScaleXAmt() {
+  return clamp(state.heatHazeCardScaleX ?? HEAT_HAZE_CARD_SCALE_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+}
+
+function heatHazeCardScaleYAmt() {
+  return clamp(state.heatHazeCardScaleY ?? HEAT_HAZE_CARD_SCALE_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+}
+
+function heatHazeCardCountAmt() {
+  return Math.round(clamp(state.heatHazeCardCount ?? HEAT_HAZE_CARD_COUNT_DEFAULT, HEAT_HAZE_CARD_COUNT_MIN, HEAT_HAZE_CARD_COUNT_MAX));
+}
+
+function heatHazeCardSegsAmt() {
+  return Math.round(clamp(state.heatHazeCardSegs ?? HEAT_HAZE_CARD_SEGS_DEFAULT, HEAT_HAZE_CARD_SEGS_MIN, HEAT_HAZE_CARD_SEGS_MAX));
+}
+
+function heatHazeWindAmt() {
+  return clamp(state.heatHazeWind ?? HEAT_HAZE_WIND_DEFAULT, 0, HEAT_HAZE_WIND_MAX);
+}
+
+function heatHazeFrictionAmt() {
+  return clamp(state.heatHazeFriction ?? HEAT_HAZE_FRICTION_DEFAULT, 0, HEAT_HAZE_FRICTION_MAX);
+}
+
+function heatHazeFeatherAmt() {
+  return clamp(state.heatHazeFeather ?? HEAT_HAZE_FEATHER_DEFAULT, 0, HEAT_HAZE_FEATHER_MAX);
+}
+
+function syncHeatHazeSlider(id, valId, n, digits) {
+  const slider = el(id);
+  const val = el(valId);
+  if (slider) slider.value = String(n);
+  if (val) val.textContent = digits === 0 ? String(Math.round(n)) : Number(n).toFixed(digits);
+}
+
 function syncHeatHazeUI() {
-  const st = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
-  const cardSz = heatHazeCardSizeAmt();
-  const lobeSz = heatHazeLobeSizeAmt();
-  const stSlider = el("heatHazeStrengthSlider");
-  const stVal = el("heatHazeStrengthVal");
-  if (stSlider) stSlider.value = String(st);
-  if (stVal) stVal.textContent = Number(st).toFixed(2);
-  const cardSlider = el("heatHazeCardSizeSlider");
-  const cardVal = el("heatHazeCardSizeVal");
-  if (cardSlider) cardSlider.value = String(cardSz);
-  if (cardVal) cardVal.textContent = Number(cardSz).toFixed(2);
-  const lobeSlider = el("heatHazeLobeSizeSlider");
-  const lobeVal = el("heatHazeLobeSizeVal");
-  if (lobeSlider) lobeSlider.value = String(lobeSz);
-  if (lobeVal) lobeVal.textContent = Number(lobeSz).toFixed(2);
+  syncHeatHazeSlider("heatHazeStrengthSlider", "heatHazeStrengthVal", barrelWarpAmt(), 2);
+  syncHeatHazeSlider("heatHazeGroundStrengthSlider", "heatHazeGroundStrengthVal", groundHazeStrengthAmt(), 2);
+  syncHeatHazeSlider("heatHazeCardSizeSlider", "heatHazeCardSizeVal", heatHazeCardSizeAmt(), 2);
+  syncHeatHazeSlider("heatHazeCardScaleXSlider", "heatHazeCardScaleXVal", heatHazeCardScaleXAmt(), 2);
+  syncHeatHazeSlider("heatHazeCardScaleYSlider", "heatHazeCardScaleYVal", heatHazeCardScaleYAmt(), 2);
+  syncHeatHazeSlider("heatHazeCardCountSlider", "heatHazeCardCountVal", heatHazeCardCountAmt(), 0);
+  syncHeatHazeSlider("heatHazeCardSegsSlider", "heatHazeCardSegsVal", heatHazeCardSegsAmt(), 0);
+  syncHeatHazeSlider("heatHazeWindSlider", "heatHazeWindVal", heatHazeWindAmt(), 2);
+  syncHeatHazeSlider("heatHazeFrictionSlider", "heatHazeFrictionVal", heatHazeFrictionAmt(), 2);
+  syncHeatHazeSlider("heatHazeFeatherSlider", "heatHazeFeatherVal", heatHazeFeatherAmt(), 2);
+  syncHeatHazeSlider("heatHazeLobeSizeSlider", "heatHazeLobeSizeVal", heatHazeLobeSizeAmt(), 2);
   const master = el("chkHeatHazeMaster");
   if (master) master.checked = !!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT);
   const cards = el("chkBarrelHeatHaze");
@@ -3378,17 +3479,91 @@ function setHeatHazeStrength(v, { toast = false } = {}) {
   applyBarrelHeatVisual();
   applyHeatHazeUniforms();
   syncHeatHazeUI();
-  if (toast) showToast(`Heat haze ${state.heatHazeStrength.toFixed(2)}`);
+  if (toast) showToast(`Barrel warp ${state.heatHazeStrength.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function setHeatHazeGroundStrength(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, HEAT_HAZE_STRENGTH_MAX);
+  state.heatHazeGroundStrength = Number.isFinite(n) ? n : HEAT_HAZE_GROUND_STRENGTH_DEFAULT;
+  applyHeatHazeUniforms();
+  syncHeatHazeUI();
+  if (toast) showToast(`Ground haze ${state.heatHazeGroundStrength.toFixed(2)}`);
   scheduleSaveSettings();
 }
 
 function setHeatHazeCardSize(v, { toast = false } = {}) {
-  const n = clamp(parseFloat(v), HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+  const n = clamp(parseFloat(v), HEAT_HAZE_CARD_SIZE_MIN, HEAT_HAZE_CARD_SIZE_MAX);
   state.heatHazeCardSize = Number.isFinite(n) ? n : HEAT_HAZE_CARD_SIZE_DEFAULT;
   applyHeatHazeUniforms();
   syncHeatHazeMeshScales();
   syncHeatHazeUI();
   if (toast) showToast(`Heat card size ${state.heatHazeCardSize.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function setHeatHazeCardScaleX(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+  state.heatHazeCardScaleX = Number.isFinite(n) ? n : HEAT_HAZE_CARD_SCALE_DEFAULT;
+  syncHeatHazeMeshScales();
+  syncHeatHazeUI();
+  if (toast) showToast(`Card width ${state.heatHazeCardScaleX.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function setHeatHazeCardScaleY(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+  state.heatHazeCardScaleY = Number.isFinite(n) ? n : HEAT_HAZE_CARD_SCALE_DEFAULT;
+  syncHeatHazeMeshScales();
+  syncHeatHazeUI();
+  if (toast) showToast(`Card height ${state.heatHazeCardScaleY.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function setHeatHazeCardCount(v, { toast = false } = {}) {
+  const n = Math.round(clamp(parseFloat(v), HEAT_HAZE_CARD_COUNT_MIN, HEAT_HAZE_CARD_COUNT_MAX));
+  const next = Number.isFinite(n) ? n : HEAT_HAZE_CARD_COUNT_DEFAULT;
+  const prev = heatHazeCardCountAmt();
+  state.heatHazeCardCount = next;
+  if (next !== prev) rebuildBarrelHeatShimmer();
+  syncHeatHazeUI();
+  if (toast) showToast(`Heat cards ${state.heatHazeCardCount}`);
+  scheduleSaveSettings();
+}
+
+function setHeatHazeCardSegs(v, { toast = false } = {}) {
+  const n = Math.round(clamp(parseFloat(v), HEAT_HAZE_CARD_SEGS_MIN, HEAT_HAZE_CARD_SEGS_MAX));
+  const next = Number.isFinite(n) ? n : HEAT_HAZE_CARD_SEGS_DEFAULT;
+  const prev = heatHazeCardSegsAmt();
+  state.heatHazeCardSegs = next;
+  if (next !== prev) rebuildBarrelHeatShimmer();
+  syncHeatHazeUI();
+  if (toast) showToast(`Slice count ${state.heatHazeCardSegs}`);
+  scheduleSaveSettings();
+}
+
+function setHeatHazeWind(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, HEAT_HAZE_WIND_MAX);
+  state.heatHazeWind = Number.isFinite(n) ? n : HEAT_HAZE_WIND_DEFAULT;
+  syncHeatHazeUI();
+  if (toast) showToast(`Heat wind ${state.heatHazeWind.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function setHeatHazeFriction(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, HEAT_HAZE_FRICTION_MAX);
+  state.heatHazeFriction = Number.isFinite(n) ? n : HEAT_HAZE_FRICTION_DEFAULT;
+  syncHeatHazeUI();
+  if (toast) showToast(`Heat friction ${state.heatHazeFriction.toFixed(2)}`);
+  scheduleSaveSettings();
+}
+
+function setHeatHazeFeather(v, { toast = false } = {}) {
+  const n = clamp(parseFloat(v), 0, HEAT_HAZE_FEATHER_MAX);
+  state.heatHazeFeather = Number.isFinite(n) ? n : HEAT_HAZE_FEATHER_DEFAULT;
+  applyHeatHazeUniforms();
+  syncHeatHazeUI();
+  if (toast) showToast(`Card feather ${state.heatHazeFeather.toFixed(2)}`);
   scheduleSaveSettings();
 }
 
@@ -4377,7 +4552,15 @@ const SETTINGS_FIELDS = [
   { key: "adsDofRadius", src: "state", type: "num" },
   { key: "barrelHeat", src: "state", type: "num" },
   { key: "heatHazeStrength", src: "state", type: "num" },
+  { key: "heatHazeGroundStrength", src: "state", type: "num" },
   { key: "heatHazeCardSize", src: "state", type: "num" },
+  { key: "heatHazeCardScaleX", src: "state", type: "num" },
+  { key: "heatHazeCardScaleY", src: "state", type: "num" },
+  { key: "heatHazeCardCount", src: "state", type: "num" },
+  { key: "heatHazeCardSegs", src: "state", type: "num" },
+  { key: "heatHazeWind", src: "state", type: "num" },
+  { key: "heatHazeFriction", src: "state", type: "num" },
+  { key: "heatHazeFeather", src: "state", type: "num" },
   { key: "heatHazeLobeSize", src: "state", type: "num" },
   { key: "heatHazeMaster", src: "state", type: "bool" },
   { key: "barrelHeatHaze", src: "state", type: "bool" },
@@ -4463,6 +4646,7 @@ function applySettingsBlob(blob) {
   state.concreteScale = clamp(state.concreteScale ?? CONCRETE_SCALE_DEFAULT, CONCRETE_SCALE_MIN, CONCRETE_SCALE_MAX);
   state.concreteVar = clamp(state.concreteVar ?? CONCRETE_VAR_DEFAULT, CONCRETE_VAR_MIN, CONCRETE_VAR_MAX);
   state.heatHazeStrength = clamp(state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
+  state.heatHazeGroundStrength = clamp(state.heatHazeGroundStrength ?? HEAT_HAZE_GROUND_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
   {
     const legacy = Number.isFinite(blob.heatHazeSize) ? blob.heatHazeSize : null;
     if (!Object.prototype.hasOwnProperty.call(blob, "heatHazeCardSize") && legacy != null) {
@@ -4472,7 +4656,14 @@ function applySettingsBlob(blob) {
       state.heatHazeLobeSize = legacy;
     }
   }
-  state.heatHazeCardSize = clamp(state.heatHazeCardSize ?? HEAT_HAZE_CARD_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
+  state.heatHazeCardSize = clamp(state.heatHazeCardSize ?? HEAT_HAZE_CARD_SIZE_DEFAULT, HEAT_HAZE_CARD_SIZE_MIN, HEAT_HAZE_CARD_SIZE_MAX);
+  state.heatHazeCardScaleX = clamp(state.heatHazeCardScaleX ?? HEAT_HAZE_CARD_SCALE_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+  state.heatHazeCardScaleY = clamp(state.heatHazeCardScaleY ?? HEAT_HAZE_CARD_SCALE_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+  state.heatHazeCardCount = Math.round(clamp(state.heatHazeCardCount ?? HEAT_HAZE_CARD_COUNT_DEFAULT, HEAT_HAZE_CARD_COUNT_MIN, HEAT_HAZE_CARD_COUNT_MAX));
+  state.heatHazeCardSegs = Math.round(clamp(state.heatHazeCardSegs ?? HEAT_HAZE_CARD_SEGS_DEFAULT, HEAT_HAZE_CARD_SEGS_MIN, HEAT_HAZE_CARD_SEGS_MAX));
+  state.heatHazeWind = clamp(state.heatHazeWind ?? HEAT_HAZE_WIND_DEFAULT, 0, HEAT_HAZE_WIND_MAX);
+  state.heatHazeFriction = clamp(state.heatHazeFriction ?? HEAT_HAZE_FRICTION_DEFAULT, 0, HEAT_HAZE_FRICTION_MAX);
+  state.heatHazeFeather = clamp(state.heatHazeFeather ?? HEAT_HAZE_FEATHER_DEFAULT, 0, HEAT_HAZE_FEATHER_MAX);
   state.heatHazeLobeSize = clamp(state.heatHazeLobeSize ?? HEAT_HAZE_LOBE_SIZE_DEFAULT, HEAT_HAZE_SIZE_MIN, HEAT_HAZE_SIZE_MAX);
   state.heatHazeMaster = !!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT);
   state.barrelHeatHaze = !!(state.barrelHeatHaze ?? BARREL_HEAT_HAZE_DEFAULT);
@@ -4525,6 +4716,7 @@ function applySettingsSideEffects() {
   syncConcreteUniforms();
   applyBarrelHeatVisual();
   applyHeatHazeUniforms();
+  rebuildBarrelHeatShimmer();
   syncHeatHazeMeshScales();
   setCrouchGrad(state.crouchGrad, { remember: false });
   setPerfOverlay(!!state.showPerf, { toast: false });
@@ -6259,15 +6451,22 @@ const HEAT_HAZE_NOISE_GLSL = /* glsl */`
           body = max(body, height * (0.40 + 0.60 * haze));
           mask = body * edgeX * edgeY * height;
         } else if (uBarrelCard > 0.5) {
-          // Soft safe zone: L/R/top feathered; bottom seats on tube; dome rises from the seat.
-          float padLR = 0.10;
+          // Green box = mesh UV. Orange core = feathered heat. Bottom-center stays seated.
+          float f = clamp(uFeather, 0.0, 2.0);
+          float f01 = clamp(f * 0.5, 0.0, 1.0);
+          float padLR = 0.04 + 0.06 * f;
           float edgeX = smoothstep(0.0, padLR, vu.x) * smoothstep(1.0, 1.0 - padLR, vu.x);
           float seat = smoothstep(-0.04, 0.05, vu.y);
-          float topCut = smoothstep(0.94, 0.58, vu.y);
-          float dx = (vu.x - 0.5) / 0.48;
-          float dy = (vu.y - 0.02) / 0.78;
+          float topHi = mix(0.995, 0.88, f01);
+          float topLo = mix(0.78, 0.38, f01);
+          float topCut = smoothstep(topHi, topLo, vu.y);
+          float cx = abs(vu.x - 0.5) * 2.0;
+          float corner = smoothstep(0.35, 1.05, cx * vu.y * (0.45 + 0.85 * f));
+          float cornerKeep = 1.0 - corner * clamp(f * 0.55, 0.0, 1.0);
+          float dx = (vu.x - 0.5) / mix(0.58, 0.38, f01);
+          float dy = (vu.y - 0.02) / mix(0.92, 0.64, f01);
           float dome = 1.0 - smoothstep(0.22, 1.22, dx * dx + dy * dy * 0.70);
-          float vignette = edgeX * seat * topCut * clamp(dome, 0.0, 1.0);
+          float vignette = edgeX * seat * topCut * cornerKeep * clamp(dome, 0.0, 1.0);
           mask = body * vignette;
         } else {
           float edgeX = smoothstep(0.0, 0.12, vu.x) * smoothstep(1.0, 0.88, vu.x);
@@ -6295,6 +6494,7 @@ function makeHeatHazeMaterial(opts = {}) {
       uBarrelCard: { value: opts.barrelCard ? 1 : 0 },
       uFloorY: { value: FLOOR_Y },
       uBandH: { value: opts.bandH != null ? opts.bandH : GROUND_HAZE_H },
+      uFeather: { value: HEAT_HAZE_FEATHER_DEFAULT },
       tScene: { value: getHeatHazeDummyTex() },
       uHasScene: { value: 0 },
       uHasDepth: { value: 0 },
@@ -6326,6 +6526,7 @@ function makeHeatHazeMaterial(opts = {}) {
       uniform float uBarrelCard;
       uniform float uFloorY;
       uniform float uBandH;
+      uniform float uFeather;
       varying vec2 vUv;
       varying vec3 vWorldPos;
       varying vec2 vNxy;
@@ -6377,6 +6578,7 @@ function makeHeatHazeMaterial(opts = {}) {
       uniform float uBarrelCard;
       uniform float uFloorY;
       uniform float uBandH;
+      uniform float uFeather;
       uniform sampler2D tScene;
       uniform float uHasScene;
       uniform float uHasDepth;
@@ -6471,7 +6673,92 @@ function tagBarrelHeatMesh(mesh, role) {
   }
 }
 
+/** Tip-weighted placement bins (body → muzzle). Count 0–20 scatters inside these. */
+const HEAT_HAZE_PLACEMENT_ZONES = [
+  { along: -0.42, lat: [0], wMul: 1.05, hMul: 1.22, roll: 0, weight: 1.0 },
+  { along: -0.16, lat: [-0.013, 0.013], wMul: 0.56, hMul: 1.08, roll: 0.08, weight: 1.4 },
+  { along: 0.08, lat: [0], wMul: 0.38, hMul: 0.96, roll: 0, weight: 1.8 },
+  { along: 0.22, lat: [-0.009, 0.009], wMul: 0.28, hMul: 0.80, roll: 0.11, weight: 2.2 },
+  { along: 0.38, lat: [0], wMul: 0.20, hMul: 0.64, roll: 0, weight: 2.6 },
+];
+
+function heatHazeHash01(i, salt) {
+  const n = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function heatHazeCardSpecs(count, segsH) {
+  const n = Math.round(clamp(count, HEAT_HAZE_CARD_COUNT_MIN, HEAT_HAZE_CARD_COUNT_MAX));
+  if (n <= 0) return [];
+  const zones = HEAT_HAZE_PLACEMENT_ZONES;
+  const totalW = zones.reduce((s, z) => s + z.weight, 0);
+  const raw = zones.map((z) => (n * z.weight) / totalW);
+  const floors = raw.map((v) => Math.floor(v));
+  let left = n - floors.reduce((s, v) => s + v, 0);
+  const order = raw.map((v, i) => ({ i, frac: v - floors[i] })).sort((a, b) => b.frac - a.frac);
+  const counts = floors.slice();
+  for (let k = 0; k < left; k++) counts[order[k].i] += 1;
+  const specs = [];
+  let idx = 0;
+  for (let zi = 0; zi < zones.length; zi++) {
+    const z = zones[zi];
+    const c = counts[zi];
+    for (let j = 0; j < c; j++) {
+      const h1 = heatHazeHash01(idx + 1, zi + 1);
+      const h2 = heatHazeHash01(idx + 3, zi + 5);
+      const alongJ = (h1 - 0.5) * 0.10;
+      const latChoices = z.lat;
+      const latBase = latChoices[j % latChoices.length];
+      const latJ = (h2 - 0.5) * (latChoices.length > 1 ? 0.006 : 0.010);
+      const along = clamp(z.along + alongJ, -0.55, 0.45);
+      const lat = latBase + latJ;
+      const rollSign = lat >= 0 ? 1 : -1;
+      specs.push({
+        name: `barrelHeatShimmer_${idx}`,
+        lat,
+        wMul: z.wMul * (0.88 + 0.24 * h1),
+        hMul: z.hMul * (0.90 + 0.20 * h2),
+        along,
+        segsW: Math.round(lerp(12, 28, clamp(z.wMul / 1.05, 0, 1))),
+        segsH,
+        roll: rollSign * Math.abs(z.roll) * (0.7 + 0.6 * h1),
+      });
+      idx += 1;
+    }
+  }
+  return specs;
+}
+
+function removeBarrelHeatShimmer() {
+  if (!gunRoot) return;
+  const doomed = [];
+  gunRoot.traverse((o) => {
+    if (o.name === "barrelHeatHaze") doomed.push(o);
+  });
+  const mats = new Set();
+  for (const g of doomed) {
+    g.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) mats.add(o.material);
+    });
+    if (g.parent) g.parent.remove(g);
+  }
+  mats.forEach((m) => {
+    if (m && m.dispose) m.dispose();
+  });
+}
+
+function rebuildBarrelHeatShimmer() {
+  if (!gunRoot || !barrelHeatShimmerAnchor) return;
+  const a = barrelHeatShimmerAnchor;
+  addBarrelHeatShimmer(a.x, a.y, a.z, a.length);
+  applyBarrelHeatVisual();
+}
+
 function addBarrelHeatShimmer(x, y, z, length) {
+  if (!gunRoot) return;
+  barrelHeatShimmerAnchor = { x, y, z, length };
+  removeBarrelHeatShimmer();
   const len = Math.max(0.1, length);
   const hazeH = BARREL_HAZE_H;
   const mat = makeHeatHazeMaterial({
@@ -6491,29 +6778,23 @@ function addBarrelHeatShimmer(x, y, z, length) {
   group.position.set(x, y, z);
   group.rotation.y = Math.PI / 2;
   group.layers.set(HEAT_HAZE_LAYER);
-  // Tip-weighted lattice: one longer body card, mid pair, then thinner cards at the muzzle.
+  // Tip-weighted lattice: scatter N cards on body / mid / tip bins.
   // Plane local X = along barrel (after group yaw); Y = up; Z = lateral.
-  // local −X points toward the gun body (group sits near tip). Origin is the tube seat.
-  const sz = heatHazeCardSizeAmt();
-  const specs = [
-    { name: "barrelHeatShimmerBody", lat: 0, wMul: 1.05, hMul: 1.22, along: -0.42, segsW: 32, segsH: 16, roll: 0 },
-    { name: "barrelHeatShimmerMidL", lat: -0.013, wMul: 0.56, hMul: 1.08, along: -0.16, segsW: 22, segsH: 14, roll: 0.08 },
-    { name: "barrelHeatShimmerMidR", lat: 0.013, wMul: 0.56, hMul: 1.08, along: -0.16, segsW: 22, segsH: 14, roll: -0.08 },
-    { name: "barrelHeatShimmerTipC", lat: 0, wMul: 0.38, hMul: 0.96, along: 0.08, segsW: 16, segsH: 12, roll: 0 },
-    { name: "barrelHeatShimmerTipL", lat: -0.009, wMul: 0.28, hMul: 0.80, along: 0.22, segsW: 14, segsH: 10, roll: 0.11 },
-    { name: "barrelHeatShimmerTipR", lat: 0.009, wMul: 0.28, hMul: 0.80, along: 0.22, segsW: 14, segsH: 10, roll: -0.11 },
-    { name: "barrelHeatShimmerTipN", lat: 0, wMul: 0.20, hMul: 0.64, along: 0.38, segsW: 12, segsH: 10, roll: 0 },
-  ];
+  // Origin is the tube seat so scale X/Y grow from bottom-center.
+  const specs = heatHazeCardSpecs(heatHazeCardCountAmt(), heatHazeCardSegsAmt());
+  const vis = heatHazeCardSizeVisual();
+  const sx = vis * heatHazeCardScaleXAmt();
+  const sy = vis * heatHazeCardScaleYAmt();
   for (const spec of specs) {
     const cardW = len * 1.22 * spec.wMul;
     const cardH = hazeH * 1.48 * spec.hMul;
     const geo = new THREE.PlaneGeometry(cardW, cardH, spec.segsW, spec.segsH);
-    // Pivot at the bottom edge so scale.y / billboard rotate about the tube, not the midplane.
+    // Pivot at the bottom edge so scale / billboard rotate about the tube, not the midplane.
     geo.translate(0, cardH * 0.5, 0);
     const base = new Float32Array(geo.attributes.position.array);
     const card = new THREE.Mesh(geo, mat);
     card.position.set(spec.along * len, 0, spec.lat);
-    card.scale.y = sz;
+    card.scale.set(sx, sy, 1);
     card.renderOrder = 6;
     card.visible = false;
     card.name = spec.name;
@@ -6522,6 +6803,8 @@ function addBarrelHeatShimmer(x, y, z, length) {
     card.userData.hazeSeatY = 0;
     card.userData.hazeRoll = spec.roll;
     card.userData.hazeBasePos = base;
+    card.userData.hazeTrailWorld = new Float32Array(base.length);
+    card.userData.hazeTrailReady = false;
     card.layers.set(HEAT_HAZE_LAYER);
     card.frustumCulled = false;
     card.raycast = () => {};
@@ -6549,15 +6832,20 @@ function applyBarrelHeatVisual() {
       o.material.emissiveIntensity = punch * tip;
     }
     if (o.userData.barrelHeatShimmer && o.material && o.material.uniforms) {
-      const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
+      const str = barrelWarpAmt();
       const cardsOn = barrelHeatCardsEnabled();
       const show = cardsOn && h > 0.10 && mul >= 0.01 && str >= 0.01;
       o.visible = show;
       o.material.uniforms.uHeat.value = show ? clamp((h - 0.08) * 1.22 * mul, 0, 1) : 0;
       o.material.uniforms.uTime.value = barrelHeatClock;
-      if (show) barrelHeatHazeLive = true;
+      if (!show) o.userData.hazeTrailReady = false;
     }
   });
+  {
+    const str = barrelWarpAmt();
+    const cardsOn = barrelHeatCardsEnabled();
+    if (cardsOn && h > 0.10 && mul >= 0.01 && str >= 0.01) barrelHeatHazeLive = true;
+  }
   applyHeatHazeUniforms();
 }
 
@@ -6605,30 +6893,42 @@ function eachHeatHazeMat(fn) {
 }
 
 function applyHeatHazeUniforms() {
-  const str = clamp(state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
-  const cardSz = heatHazeCardSizeAmt();
+  const barrelStr = barrelWarpAmt();
+  const groundStr = groundHazeStrengthAmt();
+  const cardSz = heatHazeCardSizeVisual();
   eachHeatHazeMat((mat) => {
-    mat.uniforms.uStrength.value = str;
-    mat.uniforms.uSize.value = cardSz;
+    const isGround = !!(mat.uniforms.uHeightFog && mat.uniforms.uHeightFog.value > 0.5);
+    mat.uniforms.uStrength.value = isGround ? groundStr : barrelStr;
+    mat.uniforms.uSize.value = isGround ? 1 : cardSz;
     if (mat.uniforms.uFloorY) mat.uniforms.uFloorY.value = FLOOR_Y;
+    if (mat.uniforms.uFeather) mat.uniforms.uFeather.value = heatHazeFeatherAmt();
   });
+  if (heatHazePost && heatHazePost.hazeMat && heatHazePost.hazeMat.uniforms) {
+    heatHazePost.hazeMat.uniforms.uStrength.value = groundStr;
+  }
   if (heatHazePost && heatHazePost.barrelMat && heatHazePost.barrelMat.uniforms) {
-    heatHazePost.barrelMat.uniforms.uStrength.value = str;
+    heatHazePost.barrelMat.uniforms.uStrength.value = barrelStr;
     heatHazePost.barrelMat.uniforms.uSize.value = heatHazeLobeSizeAmt();
+    if (heatHazePost.barrelMat.uniforms.uFeather) {
+      heatHazePost.barrelMat.uniforms.uFeather.value = heatHazeFeatherAmt();
+    }
   }
 }
 
 function syncHeatHazeMeshScales() {
-  const sz = heatHazeCardSizeAmt();
   if (!gunRoot) return;
+  const vis = heatHazeCardSizeVisual();
+  const sx = vis * heatHazeCardScaleXAmt();
+  const sy = vis * heatHazeCardScaleYAmt();
   gunRoot.traverse((o) => {
     if (!o.userData.barrelHeatShimmer) return;
-    o.scale.y = sz;
+    // Bottom-center seat: geo origin is the tube, so X thickens and Y grows up.
+    o.scale.set(sx, sy, 1);
     o.position.y = o.userData.hazeSeatY != null ? o.userData.hazeSeatY : 0;
   });
 }
 
-/** Bottom edge stays seated on the tube; top free-floats opposite sway + muzzle velocity. */
+/** Bottom edge stays seated on the tube; tops trail the air (wind + friction). */
 function updateBarrelHeatCardMorph(dt) {
   if (!gunRoot) return;
   const sx = swayRig ? swayRig.position.x : 0;
@@ -6650,8 +6950,18 @@ function updateBarrelHeatCardMorph(dt) {
     }
     _hazeMuzzlePrev.copy(_hazeMuzzleLocal);
     hazeMuzzlePrevOk = true;
+    if (hazeMuzzleWorldPrevOk) {
+      _hazeMuzzleWorldVel.subVectors(_hazeMuzzleWorld, _hazeMuzzleWorldPrev).divideScalar(dtUse);
+      _hazeMuzzleWorldVel.clampLength(0, 4.2);
+    } else {
+      _hazeMuzzleWorldVel.set(0, 0, 0);
+    }
+    _hazeMuzzleWorldPrev.copy(_hazeMuzzleWorld);
+    hazeMuzzleWorldPrevOk = true;
   } else if (dt >= 0.12) {
     hazeMuzzlePrevOk = false;
+    hazeMuzzleWorldPrevOk = false;
+    _hazeMuzzleWorldVel.set(0, 0, 0);
   }
   const vk = 1 - Math.exp(-8 * dtUse);
   player.hazeVelX = lerp(player.hazeVelX || 0, clamp(vx, -3.5, 3.5), vk);
@@ -6687,31 +6997,73 @@ function updateBarrelHeatCardMorph(dt) {
   const leanX = player.hazeLeanX;
   const leanUp = player.hazeLeanUp;
   const clock = barrelHeatClock;
+  const wind = heatHazeWindAmt();
+  const fric = heatHazeFrictionAmt();
+  // High friction / low wind snaps to the tube; low friction + wind paints the air.
+  const catchRate = (1.8 + fric * 10) / (1 + wind * 1.2);
+  const catchK = 1 - Math.exp(-catchRate * dtUse);
   gunRoot.traverse((o) => {
     if (!o.userData.barrelHeatShimmer || !o.userData.hazeBasePos || !o.geometry) return;
     const pos = o.geometry.attributes.position;
     if (!pos) return;
     const base = o.userData.hazeBasePos;
+    const trail = o.userData.hazeTrailWorld;
     const h = o.userData.hazeH0 || BARREL_HAZE_H;
     const arr = pos.array;
+    o.updateWorldMatrix(true, false);
+    _hazeInvWorld.copy(o.matrixWorld).invert();
+    const ready = !!o.userData.hazeTrailReady;
     for (let i = 0, n = pos.count; i < n; i++) {
       const ix = i * 3;
       const y0 = base[ix + 1];
       const t = clamp(y0 / Math.max(h, 1e-6), 0, 1);
-      if (t <= 1e-4) {
-        arr[ix] = base[ix];
-        arr[ix + 1] = base[ix + 1];
-        arr[ix + 2] = base[ix + 2];
-        continue;
-      }
       const w = t * t;
       const along = base[ix];
       const wig = Math.sin(clock * 7.1 + along * 36 + t * 9.5) * 0.0016
         + Math.sin(clock * 4.2 + along * 19) * 0.0011;
-      arr[ix] = base[ix] + wig * w * 0.55;
-      arr[ix + 1] = base[ix + 1] + leanUp * w * 0.028 + Math.abs(wig) * w * 0.35;
-      arr[ix + 2] = base[ix + 2] + leanX * w * 0.042 + wig * w;
+      // Rest pose in local (bottoms = authored seat).
+      _hazeTrailLocal.set(
+        base[ix] + wig * w * 0.55,
+        base[ix + 1] + leanUp * w * 0.028 + Math.abs(wig) * w * 0.35,
+        base[ix + 2] + leanX * w * 0.042 + wig * w
+      );
+      _hazeTrailDesired.copy(_hazeTrailLocal).applyMatrix4(o.matrixWorld);
+      if (t <= 0.02) {
+        _hazeTrailWorld.copy(_hazeTrailDesired);
+      } else if (!ready || !trail) {
+        _hazeTrailWorld.copy(_hazeTrailDesired);
+      } else {
+        _hazeTrailPrev.set(trail[ix], trail[ix + 1], trail[ix + 2]);
+        _hazeTrailWorld.copy(_hazeTrailDesired);
+        _hazeTrailWorld.x -= _hazeMuzzleWorldVel.x * wind * w * 0.048;
+        _hazeTrailWorld.y -= _hazeMuzzleWorldVel.y * wind * w * 0.048;
+        _hazeTrailWorld.z -= _hazeMuzzleWorldVel.z * wind * w * 0.048;
+        _hazeTrailWorld.lerpVectors(_hazeTrailPrev, _hazeTrailWorld, catchK);
+        const maxTrail = (0.032 + wind * 0.14) * w;
+        const dx = _hazeTrailWorld.x - _hazeTrailDesired.x;
+        const dy = _hazeTrailWorld.y - _hazeTrailDesired.y;
+        const dz = _hazeTrailWorld.z - _hazeTrailDesired.z;
+        const dist = Math.hypot(dx, dy, dz);
+        if (dist > maxTrail && dist > 1e-8) {
+          const s = maxTrail / dist;
+          _hazeTrailWorld.set(
+            _hazeTrailDesired.x + dx * s,
+            _hazeTrailDesired.y + dy * s,
+            _hazeTrailDesired.z + dz * s
+          );
+        }
+      }
+      if (trail) {
+        trail[ix] = _hazeTrailWorld.x;
+        trail[ix + 1] = _hazeTrailWorld.y;
+        trail[ix + 2] = _hazeTrailWorld.z;
+      }
+      _hazeTrailLocal.copy(_hazeTrailWorld).applyMatrix4(_hazeInvWorld);
+      arr[ix] = _hazeTrailLocal.x;
+      arr[ix + 1] = _hazeTrailLocal.y;
+      arr[ix + 2] = _hazeTrailLocal.z;
     }
+    o.userData.hazeTrailReady = true;
     pos.needsUpdate = true;
   });
 }
@@ -6818,6 +7170,7 @@ function initHeatHazePost() {
       uBarrelCard: { value: 0 },
       uFloorY: { value: FLOOR_Y },
       uBandH: { value: GROUND_HAZE_H },
+      uFeather: { value: HEAT_HAZE_FEATHER_DEFAULT },
       tScene: { value: getHeatHazeDummyTex() },
       uHasScene: { value: 0 },
       uHasDepth: { value: 0 },
@@ -6846,6 +7199,7 @@ function initHeatHazePost() {
       uniform float uBarrelCard;
       uniform float uFloorY;
       uniform float uBandH;
+      uniform float uFeather;
       uniform sampler2D tScene;
       uniform float uHasScene;
       uniform float uHasDepth;
@@ -6914,6 +7268,7 @@ function initHeatHazePost() {
       uBarrelCard: { value: 1 },
       uFloorY: { value: FLOOR_Y },
       uBandH: { value: BARREL_HAZE_H },
+      uFeather: { value: HEAT_HAZE_FEATHER_DEFAULT },
       tScene: { value: getHeatHazeDummyTex() },
       uHasScene: { value: 0 },
       uHasDepth: { value: 0 },
@@ -6944,6 +7299,7 @@ function initHeatHazePost() {
       uniform float uBarrelCard;
       uniform float uFloorY;
       uniform float uBandH;
+      uniform float uFeather;
       uniform sampler2D tScene;
       uniform float uHasScene;
       uniform float uHasDepth;
@@ -7088,7 +7444,7 @@ function blitBarrelHeatMuzzle(dest, resx, resy, hasDepth) {
   const raw = barrelHeatAmt[state.weaponId] || 0;
   const h = mul < 0.01 ? 0 : raw;
   const heat = clamp((h - 0.08) * 1.22 * mul, 0, 1);
-  const str = clamp(state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT, 0, HEAT_HAZE_STRENGTH_MAX);
+  const str = barrelWarpAmt();
   const u = heatHazePost.barrelMat.uniforms;
   u.tScene.value = heatHazeGrabRT.texture;
   u.uHasScene.value = 1;
@@ -7216,7 +7572,7 @@ function renderHeatHaze(dest) {
   }
 
   if (groundOn && grabbed && grabDepth) {
-    const str = state.heatHazeStrength ?? HEAT_HAZE_STRENGTH_DEFAULT;
+    const str = groundHazeStrengthAmt();
     const grabTex = heatHazeGrabRT.texture;
     camera.updateMatrixWorld();
     const h = groundHeatAmount();
@@ -7227,7 +7583,7 @@ function renderHeatHaze(dest) {
     u.uHeat.value = h;
     u.uTime.value = barrelHeatClock;
     u.uStrength.value = clamp(str, 0, HEAT_HAZE_STRENGTH_MAX);
-    u.uSize.value = heatHazeCardSizeAmt();
+    u.uSize.value = 1;
     u.uFloorY.value = FLOOR_Y;
     u.uResolution.value.set(resx, resy);
     u.projInverse.value.copy(camera.projectionMatrixInverse);
@@ -14829,21 +15185,22 @@ function bind() {
     barrelHeatSlider.oninput = (e) => setBarrelHeat(e.target.value);
   }
   syncBarrelHeatUI();
-  const heatHazeStrengthSlider = el("heatHazeStrengthSlider");
-  if (heatHazeStrengthSlider) {
-    heatHazeStrengthSlider.value = String(state.heatHazeStrength);
-    heatHazeStrengthSlider.oninput = (e) => setHeatHazeStrength(e.target.value);
-  }
-  const heatHazeCardSizeSlider = el("heatHazeCardSizeSlider");
-  if (heatHazeCardSizeSlider) {
-    heatHazeCardSizeSlider.value = String(heatHazeCardSizeAmt());
-    heatHazeCardSizeSlider.oninput = (e) => setHeatHazeCardSize(e.target.value);
-  }
-  const heatHazeLobeSizeSlider = el("heatHazeLobeSizeSlider");
-  if (heatHazeLobeSizeSlider) {
-    heatHazeLobeSizeSlider.value = String(heatHazeLobeSizeAmt());
-    heatHazeLobeSizeSlider.oninput = (e) => setHeatHazeLobeSize(e.target.value);
-  }
+  const bindHeatSlider = (id, fn) => {
+    const node = el(id);
+    if (!node) return;
+    node.oninput = (e) => fn(e.target.value);
+  };
+  bindHeatSlider("heatHazeStrengthSlider", setHeatHazeStrength);
+  bindHeatSlider("heatHazeGroundStrengthSlider", setHeatHazeGroundStrength);
+  bindHeatSlider("heatHazeCardSizeSlider", setHeatHazeCardSize);
+  bindHeatSlider("heatHazeCardScaleXSlider", setHeatHazeCardScaleX);
+  bindHeatSlider("heatHazeCardScaleYSlider", setHeatHazeCardScaleY);
+  bindHeatSlider("heatHazeCardCountSlider", setHeatHazeCardCount);
+  bindHeatSlider("heatHazeCardSegsSlider", setHeatHazeCardSegs);
+  bindHeatSlider("heatHazeFeatherSlider", setHeatHazeFeather);
+  bindHeatSlider("heatHazeWindSlider", setHeatHazeWind);
+  bindHeatSlider("heatHazeFrictionSlider", setHeatHazeFriction);
+  bindHeatSlider("heatHazeLobeSizeSlider", setHeatHazeLobeSize);
   const chkHeatHazeMaster = el("chkHeatHazeMaster");
   if (chkHeatHazeMaster) {
     chkHeatHazeMaster.checked = !!(state.heatHazeMaster ?? HEAT_HAZE_MASTER_DEFAULT);

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260906v73" />
+  <link rel="stylesheet" href="styles.css?v=20260906v74" />
   <style>
     /* Critical first-paint cover if styles.css is stale. Full rules live in styles.css. */
     .boot-overlay {
@@ -253,7 +253,7 @@
               <ul class="keys">
                 <li><kbd>`</kbd> toggle debugger</li>
                 <li><kbd>G</kbd> gun select</li>
-                <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold · mouse wheel crouch height</li>
+                <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold · mouse wheel crouch height (Ctrl / ⌘ soaked during play — not a crouch bind)</li>
                 <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint (blocked while crouched; sprint+crouch = slide)</li>
                 <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · <kbd>U</kbd> cycle hold · RMB ADS</li>
                 <li>Hold <kbd>Space</kbd> vault (when prompted) · ADS + Space = hold breath · tap Space reserved</li>
@@ -632,6 +632,7 @@
         <ul class="keys settings-keys">
           <li><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint</li>
           <li><kbd>C</kbd> crouch toggle · <kbd>Z</kbd> crouch hold · mouse wheel crouch height</li>
+          <li>Ctrl / ⌘ soaked during play (no browser menus / select-all). Crouch stays <kbd>C</kbd>/<kbd>Z</kbd></li>
           <li><kbd>Q</kbd>/<kbd>E</kbd> lean (wall-clamped) · <kbd>U</kbd> cycle hold · RMB ADS · LMB fire</li>
           <li><kbd>R</kbd> reload · hold <kbd>Space</kbd> vault (ADS: breath) · <kbd>B</kbd> fire mode</li>
           <li><kbd>-</kbd>/<kbd>=</kbd> zero distance · <kbd>`</kbd> debugger · <kbd>G</kbd> guns</li>
@@ -645,6 +646,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260906v73"></script>
+    <script type="module" src="app.js?v=20260906v74"></script>
 </body>
 </html>

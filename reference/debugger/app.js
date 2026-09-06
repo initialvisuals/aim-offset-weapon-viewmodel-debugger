@@ -293,8 +293,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. Strength 0 also kills them. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260906v73";
-const APP_BUILD_STAMP = "2026-09-06 02:25";
+const APP_CACHE_BUST = "20260906v74";
+const APP_BUILD_STAMP = "2026-09-06 03:50";
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -13589,7 +13589,8 @@ function updateVaultPrompt(baseText) {
 }
 
 function updatePlayer(dt) {
-  // Analog crouch (C toggle / Z hold / wheel). No Ctrl — browsers steal it.
+  // Analog crouch (C toggle / Z hold / wheel). Ctrl/Meta are soaked during
+  // play so the browser does not steal them; they are not a crouch bind.
   // Z hold: press from stand goes to last depth; release stands unless C is latched.
   if (input.crouchHold && state.crouchGrad < 0.04 && !state.vaulting) {
     setCrouchGrad(state.crouchLastDepth > 0.05 ? state.crouchLastDepth : 1);
@@ -14136,6 +14137,44 @@ function refresh(syncInputs = true) {
   el("attPreview").textContent = JSON.stringify(currentAttPose(), null, 2);
   const opticSel = el("opticSelect");
   if (opticSel && opticSel.value !== state.optic) opticSel.value = state.optic;
+}
+
+/** Browser modifier codes — not a crouch bind. */
+const BROWSER_MOD_CODES = new Set(["ControlLeft", "ControlRight", "MetaLeft", "MetaRight"]);
+/** Ctrl/Meta + these would steal the page (close tab, select-all, find, …). */
+const BROWSER_MOD_COMBO_CODES = new Set([
+  "KeyW", "KeyA", "KeyS", "KeyD", "Space",
+  "KeyC", "KeyV", "KeyX", "KeyZ", "KeyR", "KeyF", "KeyP",
+  "KeyT", "KeyN", "KeyO", "KeyG", "KeyU", "KeyL", "KeyH",
+]);
+
+function shouldSoakBrowserMods() {
+  if (bootBlocksInput()) return false;
+  if (typingFocus()) return false;
+  return gameplayActive() || !!document.pointerLockElement;
+}
+
+function isBrowserModSoak(e) {
+  if (!e) return false;
+  if (BROWSER_MOD_CODES.has(e.code)) return true;
+  return !!(e.ctrlKey || e.metaKey) && BROWSER_MOD_COMBO_CODES.has(e.code);
+}
+
+function soakBrowserModKeys(e) {
+  if (!shouldSoakBrowserMods() || !isBrowserModSoak(e)) return false;
+  if (e.cancelable) e.preventDefault();
+  e.stopPropagation();
+  return true;
+}
+
+function onKeyDownCapture(e) {
+  soakBrowserModKeys(e);
+  onKeyDown(e);
+}
+
+function onKeyUpCapture(e) {
+  soakBrowserModKeys(e);
+  onKeyUp(e);
 }
 
 function onKeyDown(e) {
@@ -14794,8 +14833,8 @@ function bind() {
   if (decalDrawSlider) decalDrawSlider.oninput = (e) => setDecalDraw(e.target.value);
   syncFxSettingsUI();
 
-  window.addEventListener("keydown", onKeyDown);
-  window.addEventListener("keyup", onKeyUp);
+  window.addEventListener("keydown", onKeyDownCapture, true);
+  window.addEventListener("keyup", onKeyUpCapture, true);
   window.addEventListener("mousedown", onMouseDown);
   window.addEventListener("mouseup", onMouseUp);
   window.addEventListener("mousemove", onMouseMove);

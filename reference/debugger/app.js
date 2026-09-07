@@ -1,6 +1,7 @@
 /** Three.js block-gun viewmodel tuner demo (ES module). */
 
 import * as THREE from "three";
+import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 
 const POSE_KEYS = ["hip", "hip_low", "hip_cant", "sprint_high", "ads", "ads_cant", "ads_holo", "ads_acog", "ads_sniper_scope"];
 const HOME_HOLD_KEYS = ["hip", "hip_low", "hip_cant"];
@@ -332,8 +333,15 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260906v77";
-const APP_BUILD_STAMP = "2026-09-06 11:56";
+const APP_CACHE_BUST = "20260906v79";
+const APP_BUILD_STAMP = "2026-09-06 22:00";
+/** In-repo day mountain HDRI — contrast backdrop for barrel heat (do not duplicate). */
+const SKY_HDRI_URL = new URL("./assets/hdri/table_mountain_2_8k_day.hdr", import.meta.url).href;
+/** Yaw (rad). 0.50 aims the mountain mass downrange (−Z), not the HDRI sun. */
+const SKY_HDRI_YAW = 0.50;
+/** Conservative IBL so ToD lights still own the bay. */
+const SKY_HDRI_ENV_INTENSITY = 0.38;
+const SKY_HDRI_DEFAULT = true;
 /** PIP blit sources. `final` = what the user sees. */
 const PASS_LAB_PIP_SOURCES = ["final", "scene", "heat"];
 const PASS_LAB_PIP_SRC_DEFAULT = "final";
@@ -564,6 +572,8 @@ const state = {
   sunPunch: SUN_PUNCH_DEFAULT,
   /** Procedural cloud cover (0 = clear). Stars follow the clock. */
   clouds: CLOUDS_DEFAULT,
+  /** Day mountain HDRI on the existing sky dome + IBL. Default ON for heat contrast. */
+  skyHdri: SKY_HDRI_DEFAULT,
   /** Pass-lab far-Z chart. `off` = normal ToD sky. */
   passLabMode: PASS_LAB_MODE_DEFAULT,
   /** Live center-crop PIP + red sample rect. */
@@ -1903,6 +1913,94 @@ function ensureSkyDiscs() {
   ensureSkyDome();
 }
 
+let skyHdriTex = null;
+let skyHdriEnv = null;
+let skyHdriLoading = false;
+let _skyHdriStub = null;
+
+function skyHdriStub() {
+  if (_skyHdriStub) return _skyHdriStub;
+  const data = new Uint8Array([0, 0, 0, 255]);
+  _skyHdriStub = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+  _skyHdriStub.needsUpdate = true;
+  return _skyHdriStub;
+}
+
+function skyHdriWanted() {
+  return !!(state.skyHdri ?? SKY_HDRI_DEFAULT) && !passLabBackdropOn();
+}
+
+function todNightAmt(pal) {
+  return clamp((0.10 - ((pal && pal.sunI) || 0)) / 0.10, 0, 1);
+}
+
+function applySkyHdriBinding(night) {
+  if (!scene) return;
+  const on = skyHdriWanted() && !!skyHdriEnv;
+  if (on) {
+    if (night == null) night = todNightAmt(sampleTod(state.timeOfDay));
+    scene.environment = skyHdriEnv;
+    scene.environmentIntensity = SKY_HDRI_ENV_INTENSITY * (1 - night * 0.92);
+  } else {
+    if (scene.environment === skyHdriEnv) scene.environment = null;
+    scene.environmentIntensity = 1;
+  }
+}
+
+function bindSkyHdriToDome() {
+  if (!skyMat) return;
+  skyMat.uniforms.hdriMap.value = skyHdriTex || skyHdriStub();
+  skyMat.uniforms.hdriYaw.value = SKY_HDRI_YAW;
+  skyMat.uniformsNeedUpdate = true;
+}
+
+function ensureSkyHdri() {
+  if (skyHdriTex || skyHdriLoading) return;
+  skyHdriLoading = true;
+  const loader = new RGBELoader();
+  loader.load(
+    SKY_HDRI_URL,
+    (tex) => {
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      tex.needsUpdate = true;
+      skyHdriTex = tex;
+      bindSkyHdriToDome();
+      if (renderer) {
+        const pmrem = new THREE.PMREMGenerator(renderer);
+        pmrem.compileEquirectangularShader();
+        const envRt = pmrem.fromEquirectangular(tex);
+        skyHdriEnv = envRt.texture;
+        pmrem.dispose();
+      }
+      applySkyHdriBinding();
+      applyDisplayLook();
+      console.info("[sky] day HDRI ready", tex.image && tex.image.width, skyMat && skyMat.uniforms.hdriAmt.value);
+    },
+    undefined,
+    (err) => {
+      console.warn("[sky] day HDRI failed to load", err);
+      skyHdriLoading = false;
+    }
+  );
+}
+
+function syncSkyHdriUI() {
+  const chk = el("chkSkyHdri");
+  if (chk) chk.checked = !!(state.skyHdri ?? SKY_HDRI_DEFAULT);
+}
+
+function setSkyHdri(on, { toast = false } = {}) {
+  state.skyHdri = !!on;
+  applySkyHdriBinding();
+  applyDisplayLook();
+  syncSkyHdriUI();
+  if (toast) showToast(state.skyHdri ? "Day HDRI ON" : "Day HDRI OFF");
+  scheduleSaveSettings();
+}
+
 /** Inverted sky sphere: layered ToD atmosphere, halo, dense stars + band, multi-layer FBM clouds. */
 function ensureSkyDome() {
   if (!scene || skyDome) return;
@@ -1928,6 +2026,9 @@ function ensureSkyDome() {
       hazeAmt: { value: 0.7 },
       nightAmt: { value: 0 },
       skyTime: { value: 0 },
+      hdriMap: { value: skyHdriStub() },
+      hdriAmt: { value: 0 },
+      hdriYaw: { value: SKY_HDRI_YAW },
     },
     vertexShader: /* glsl */`
       varying vec3 vWorldDir;
@@ -1960,6 +2061,9 @@ function ensureSkyDome() {
       uniform float hazeAmt;
       uniform float nightAmt;
       uniform float skyTime;
+      uniform sampler2D hdriMap;
+      uniform float hdriAmt;
+      uniform float hdriYaw;
       varying vec3 vWorldDir;
 
       #include <common>
@@ -2026,6 +2130,19 @@ function ensureSkyDome() {
         zenMix = pow(clamp(zenMix, 0.0, 1.0), 0.58);
         vec3 col = mix(horizonColor, zenithColor, zenMix);
 
+        if (hdriAmt > 0.001) {
+          float cy = cos(hdriYaw);
+          float sy = sin(hdriYaw);
+          vec3 rd = vec3(dir.x * cy - dir.z * sy, dir.y, dir.x * sy + dir.z * cy);
+          vec2 huv = vec2(atan(rd.z, rd.x) * RECIPROCAL_PI2 + 0.5, asin(clamp(rd.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
+          vec3 hdri = texture2D(hdriMap, huv).rgb * 0.55;
+          // Compress the day sun so mountain/sky detail survives ACES (heat needs contrast, not a white sheet).
+          hdri = hdri / (hdri + vec3(1.0));
+          hdri *= 1.45;
+          float ground = smoothstep(0.05, -0.18, elev);
+          col = mix(col, hdri, hdriAmt * (1.0 - ground));
+        }
+
         vec3 sunAz = normalize(vec3(sunDir.x, 0.0, sunDir.z) + vec3(1e-5, 0.0, 0.0));
         vec3 dirAz = normalize(vec3(dir.x, 0.0, dir.z) + vec3(1e-5, 0.0, 0.0));
         float towardSun = clamp(dot(dirAz, sunAz) * 0.5 + 0.5, 0.0, 1.0);
@@ -2035,7 +2152,8 @@ function ensureSkyDome() {
         float hazeMid = exp(-pow(max(elev, 0.0) / 0.40, 1.75));
         float haze = hazeLow * 0.82 + hazeMid * 0.22;
         float dayKeep = 1.0 - nightAmt * 0.92;
-        col = mix(col, fogColor, haze * hazeAmt * mix(1.0, 0.22, nightAmt));
+        float hazeKeep = mix(1.0, 0.18, hdriAmt);
+        col = mix(col, fogColor, haze * hazeAmt * mix(1.0, 0.22, nightAmt) * hazeKeep);
 
         float rayleigh = pow(clamp(1.0 - abs(elev), 0.0, 1.0), 1.55);
         col = mix(col, airColor, rayleigh * 0.16 * dayKeep * hazeAmt);
@@ -2052,13 +2170,14 @@ function ensureSkyDome() {
         float ang = acos(mu);
         float halfA = max(sunAngular, 8e-4);
         float disc = 1.0 - smoothstep(halfA * 0.78, halfA * 1.06, ang);
-        col += sunColor * sunHalo * disc * 0.82;
+        float sunVis = sunHalo * mix(1.0, 0.12, hdriAmt);
+        col += sunColor * sunVis * disc * 0.82;
 
         float haloW = halfA * 8.0;
         float glow = exp(-pow(ang / max(haloW, 1e-4), 2.05));
         float scatter = exp(-pow(ang / max(haloW * 2.4, 1e-4), 1.25));
         float limb = exp(-pow(ang / max(haloW * 1.55, 1e-4), 1.8)) * hBand;
-        col += sunColor * sunHalo * (1.0 - disc) * (glow * 0.32 + scatter * 0.09 + limb * 0.14);
+        col += sunColor * sunVis * (1.0 - disc) * (glow * 0.32 + scatter * 0.09 + limb * 0.14);
 
         float muM = clamp(dot(dir, normalize(moonDir)), 0.0, 1.0);
         col += moonColor * moonHalo * (pow(muM, 48.0) * 0.85 + pow(muM, 10.0) * 0.16);
@@ -2119,7 +2238,8 @@ function ensureSkyDome() {
           ccol = mix(ccol, twilightColor, twilightAmt * 0.48 * (0.32 + 0.68 * towardSun));
           ccol = mix(ccol, fogColor, loBand * 0.32 * hazeAmt);
           float shade = 0.70 + 0.30 * shred;
-          col = mix(col, ccol * shade, cloud);
+          float cloudVis = cloud * mix(1.0, 0.28, hdriAmt);
+          col = mix(col, ccol * shade, cloudVis);
         }
 
         gl_FragColor = vec4(col, 1.0);
@@ -2144,6 +2264,8 @@ function ensureSkyDome() {
   skyDome.raycast = () => {};
   scene.add(skyDome);
   ensureHorizonHaze();
+  bindSkyHdriToDome();
+  ensureSkyHdri();
 }
 
 function syncSkyUniforms(pal, path) {
@@ -2188,6 +2310,10 @@ function syncSkyUniforms(pal, path) {
   u.twilightAmt.value = twilight * day + twilight * 0.25;
   u.hazeAmt.value = state.fogEnabled ? 0.86 : 0.28;
   u.nightAmt.value = night;
+  const hdriOn = skyHdriWanted() && !!skyHdriTex;
+  u.hdriAmt.value = hdriOn ? (1 - night * 0.92) : 0;
+  u.hdriYaw.value = SKY_HDRI_YAW;
+  applySkyHdriBinding(night);
   const air = pal.hemiSky.clone().lerp(pal.sky, 0.45);
   air.lerp(new THREE.Color(0x6a88a8), 0.35 * day);
   if (night > 0.4) air.multiplyScalar(lerp(1, 0.12, (night - 0.4) / 0.6));
@@ -2320,7 +2446,10 @@ function syncHorizonHaze(pal, night, twilight) {
     ? scene.fog.color.clone()
     : (pal.sky ? pal.sky.clone() : new THREE.Color(SCENE_BG_BASE));
   const dusk = new THREE.Color(0xc88860);
-  const amt = (state.fogEnabled ? 0.64 : 0.26) * (1 - night * 0.88) * (0.78 + twilight * 0.32);
+  const hdriOn = skyHdriWanted() && !!skyHdriTex;
+  const amt = (state.fogEnabled ? 0.64 : 0.26) * (1 - night * 0.88) * (0.78 + twilight * 0.32)
+    * (hdriOn ? 0.16 : 1);
+  if (distantHazePlates) distantHazePlates.visible = !hdriOn && !passLabBackdropOn();
   for (const mat of horizonHazeMats) {
     const u = mat.uniforms;
     u.hazeColor.value.copy(fogC).lerp(pal.sky, 0.28);
@@ -2966,6 +3095,7 @@ function updatePassLabBackdrop() {
   if (skyDome) skyDome.visible = !on;
   if (horizonHaze) horizonHaze.visible = !on;
   if (distantHazePlates) distantHazePlates.visible = !on;
+  applySkyHdriBinding();
   if (on) {
     if (sunDisc) sunDisc.visible = false;
     if (moonDisc) moonDisc.visible = false;
@@ -3873,6 +4003,7 @@ function syncSettingsUI() {
   syncSunSizeUI();
   syncSunPunchUI();
   syncCloudsUI();
+  syncSkyHdriUI();
   syncConcreteWearUI();
   syncConcreteScaleUI();
   syncConcreteVarUI();
@@ -4568,6 +4699,7 @@ const SETTINGS_FIELDS = [
   { key: "sunSize", src: "state", type: "num" },
   { key: "sunPunch", src: "state", type: "num" },
   { key: "clouds", src: "state", type: "num" },
+  { key: "skyHdri", src: "state", type: "bool" },
   { key: "passLabMode", src: "state", type: "str" },
   { key: "passLabPip", src: "state", type: "bool" },
   { key: "passLabPipSrc", src: "state", type: "str" },
@@ -4675,6 +4807,7 @@ function applySettingsBlob(blob) {
   state.passLabPip = !!state.passLabPip;
   state.passLabPipSrc = normalizePassLabPipSrc(state.passLabPipSrc);
   state.passLabWorld = !!state.passLabWorld;
+  state.skyHdri = !!(state.skyHdri ?? SKY_HDRI_DEFAULT);
   state.volVoice = clampVol(state.volVoice ?? VOL_DEFAULT);
   state.volMusic = clampVol(state.volMusic ?? VOL_DEFAULT);
   state.volFx = clampVol(state.volFx ?? VOL_DEFAULT);
@@ -4713,6 +4846,8 @@ function applySettingsSideEffects() {
   if (skyMat && skyMat.uniforms && skyMat.uniforms.cloudAmt) {
     skyMat.uniforms.cloudAmt.value = state.clouds;
   }
+  applySkyHdriBinding();
+  syncSkyHdriUI();
   syncConcreteUniforms();
   applyBarrelHeatVisual();
   applyHeatHazeUniforms();
@@ -15139,6 +15274,12 @@ function bind() {
   }
   const todVal = el("todVal");
   if (todVal) todVal.textContent = formatClock(state.timeOfDay);
+  const chkSkyHdri = el("chkSkyHdri");
+  if (chkSkyHdri) {
+    chkSkyHdri.checked = !!(state.skyHdri ?? SKY_HDRI_DEFAULT);
+    chkSkyHdri.onchange = (e) => setSkyHdri(e.target.checked, { toast: true });
+  }
+  syncSkyHdriUI();
 
   const godRaysSlider = el("godRaysSlider");
   if (godRaysSlider) {

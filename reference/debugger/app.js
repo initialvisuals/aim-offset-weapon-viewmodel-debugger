@@ -337,8 +337,8 @@ const APP_CACHE_BUST = "20260906v79";
 const APP_BUILD_STAMP = "2026-09-06 22:00";
 /** In-repo day mountain HDRI — contrast backdrop for barrel heat (do not duplicate). */
 const SKY_HDRI_URL = new URL("./assets/hdri/table_mountain_2_8k_day.hdr", import.meta.url).href;
-/** Yaw (rad) so mountain detail sits downrange (−Z). */
-const SKY_HDRI_YAW = 2.85;
+/** Yaw (rad). 0.50 aims the mountain mass downrange (−Z), not the HDRI sun. */
+const SKY_HDRI_YAW = 0.50;
 /** Conservative IBL so ToD lights still own the bay. */
 const SKY_HDRI_ENV_INTENSITY = 0.38;
 const SKY_HDRI_DEFAULT = true;

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260906v79" />
+  <link rel="stylesheet" href="styles.css?v=20260907v80" />
   <style>
     /* Critical first-paint cover if styles.css is stale. Full rules live in styles.css. */
     .boot-overlay {
@@ -213,7 +213,7 @@
             <button type="button" id="btnSettings" title="O">Settings…</button>
             <button type="button" id="btnAds" class="toggle" aria-pressed="false" title="Insert">ADS preview</button>
             <button type="button" id="btnSway" class="toggle" aria-pressed="true" title="Toggle viewmodel sway">Sway</button>
-            <button type="button" id="btnPerf" class="toggle" aria-pressed="false" title="Toggle performance overlay">Perf</button>
+            <button type="button" id="btnPerf" class="toggle" aria-pressed="true" title="Toggle performance overlay">Perf</button>
             <button type="button" id="btnCopy" title="Copy JSON">Copy JSON</button>
             <button type="button" id="btnCloseDbg" title="`">Close</button>
           </div>
@@ -461,16 +461,16 @@
           <code id="casingCapVal">30000</code>
         </label>
         <label class="slider-row">Hole fade
-          <input type="range" id="holeFadeSlider" min="0" max="60" step="1" value="18" />
-          <code id="holeFadeVal">18s</code>
+          <input type="range" id="holeFadeSlider" min="0" max="60" step="1" value="0" />
+          <code id="holeFadeVal">never</code>
         </label>
         <label class="slider-row">Casing fade
-          <input type="range" id="casingFadeSlider" min="0" max="60" step="1" value="12" />
-          <code id="casingFadeVal">12s</code>
+          <input type="range" id="casingFadeSlider" min="0" max="60" step="1" value="0" />
+          <code id="casingFadeVal">never</code>
         </label>
         <label class="slider-row">Decal draw
-          <input type="range" id="decalDrawSlider" min="50" max="2000" step="10" value="900" />
-          <code id="decalDrawVal">900 m</code>
+          <input type="range" id="decalDrawSlider" min="50" max="2000" step="10" value="700" />
+          <code id="decalDrawVal">700 m</code>
         </label>
         <label class="slider-row">Casing draw
           <input type="range" id="casingDrawSlider" min="8" max="200" step="1" value="55" />
@@ -482,69 +482,69 @@
       <div class="settings-section">
         <h3>Lighting</h3>
         <label class="slider-row">Clock
-          <input type="range" id="todSlider" min="0" max="24" step="0.05" value="18.5" />
-          <code id="todVal">18:30</code>
+          <input type="range" id="todSlider" min="0" max="24" step="0.05" value="6.35" />
+          <code id="todVal">06:21</code>
         </label>
         <label class="slider-row">Clouds
-          <input type="range" id="cloudsSlider" min="0" max="1" step="0.01" value="0.55" />
-          <code id="cloudsVal">0.55</code>
+          <input type="range" id="cloudsSlider" min="0" max="1" step="0.01" value="0" />
+          <code id="cloudsVal">0.00</code>
         </label>
         <label class="check-row"><input type="checkbox" id="chkSkyHdri" checked /> Day HDRI backdrop</label>
-        <p class="note">Sun / layered sky / fog. Brightness/gamma stay as grade. Default dusk; night stays dark (stars + faint band). Clouds 0 = clear; mid-slider is thin cirrus over thicker banks. Intensities multiply the clock (1.00 = authored). Day HDRI (default ON) is the mountain sky behind the range so heat warp has contrast; IBL follows when loaded. Off restores the procedural dome only.</p>
+        <p class="note">Sun / layered sky / fog. Brightness/gamma stay as grade. Default early clock (~06:21); night stays dark (stars + faint band). Clouds 0 = clear; mid-slider is thin cirrus over thicker banks. Intensities multiply the clock (1.00 = clock-only). Day HDRI (default ON) is the mountain sky behind the range so heat warp has contrast; IBL follows when loaded. Off restores the procedural dome only.</p>
         <label class="slider-row">Ambient
-          <input type="range" id="lightAmbSlider" min="0" max="2.5" step="0.01" value="1.00" />
-          <code id="lightAmbVal">1.00×</code>
+          <input type="range" id="lightAmbSlider" min="0" max="2.5" step="0.01" value="0.11" />
+          <code id="lightAmbVal">0.11×</code>
         </label>
         <label class="slider-row">Fill
-          <input type="range" id="lightFillSlider" min="0" max="2.5" step="0.01" value="1.00" />
-          <code id="lightFillVal">1.00×</code>
+          <input type="range" id="lightFillSlider" min="0" max="2.5" step="0.01" value="0.41" />
+          <code id="lightFillVal">0.41×</code>
         </label>
         <label class="slider-row">Hemi
-          <input type="range" id="lightHemiSlider" min="0" max="2.5" step="0.01" value="1.00" />
-          <code id="lightHemiVal">1.00×</code>
+          <input type="range" id="lightHemiSlider" min="0" max="2.5" step="0.01" value="0.61" />
+          <code id="lightHemiVal">0.61×</code>
         </label>
         <label class="slider-row">Sun / key
-          <input type="range" id="lightKeySlider" min="0" max="2.5" step="0.01" value="1.00" />
-          <code id="lightKeyVal">1.00×</code>
+          <input type="range" id="lightKeySlider" min="0" max="2.5" step="0.01" value="2.11" />
+          <code id="lightKeyVal">2.11×</code>
         </label>
         <label class="slider-row">Rim
-          <input type="range" id="lightRimSlider" min="0" max="2.5" step="0.01" value="1.00" />
-          <code id="lightRimVal">1.00×</code>
+          <input type="range" id="lightRimSlider" min="0" max="2.5" step="0.01" value="1.65" />
+          <code id="lightRimVal">1.65×</code>
         </label>
         <label class="slider-row">Moon
-          <input type="range" id="lightMoonSlider" min="0" max="2.5" step="0.01" value="1.00" />
-          <code id="lightMoonVal">1.00×</code>
+          <input type="range" id="lightMoonSlider" min="0" max="2.5" step="0.01" value="1.06" />
+          <code id="lightMoonVal">1.06×</code>
         </label>
         <label class="slider-row">Exposure
-          <input type="range" id="exposureSlider" min="0" max="2.5" step="0.01" value="1.00" />
-          <code id="exposureVal">1.00×</code>
+          <input type="range" id="exposureSlider" min="0" max="2.5" step="0.01" value="1.44" />
+          <code id="exposureVal">1.44×</code>
         </label>
         <label class="slider-row">Sun size
-          <input type="range" id="sunSizeSlider" min="0.08" max="8" step="0.01" value="0.45" />
-          <code id="sunSizeVal">0.45°</code>
+          <input type="range" id="sunSizeSlider" min="0.08" max="8" step="0.01" value="0.62" />
+          <code id="sunSizeVal">0.62°</code>
         </label>
         <label class="slider-row">Sun punch
-          <input type="range" id="sunPunchSlider" min="0" max="4" step="0.01" value="1.40" />
-          <code id="sunPunchVal">1.40</code>
+          <input type="range" id="sunPunchSlider" min="0" max="4" step="0.01" value="0.51" />
+          <code id="sunPunchVal">0.51</code>
         </label>
         <p class="note">Size = disc + sky halo only (real sun ≈ 0.5°), not bloom. Punch is the tiny core (soft-clamped). Halo stays below bloom.</p>
         <label class="slider-row">God rays
-          <input type="range" id="godRaysSlider" min="0" max="2" step="0.01" value="0.90" />
-          <code id="godRaysVal">0.90</code>
+          <input type="range" id="godRaysSlider" min="0" max="2" step="0.01" value="2" />
+          <code id="godRaysVal">2.00</code>
         </label>
         <p class="note">Occlusion shafts from the sun shadow map, not a glow ball. Strongest toward low sun; noon milder; night off. 0 = skip.</p>
         <label class="slider-row">Bloom
-          <input type="range" id="bloomSlider" min="0" max="2" step="0.01" value="0.22" />
-          <code id="bloomVal">0.22</code>
+          <input type="range" id="bloomSlider" min="0" max="2" step="0.01" value="0.08" />
+          <code id="bloomVal">0.08</code>
         </label>
         <p class="note">HDR glow on floods, muzzle, tracers, hot barrels, tiny sun core — not a second sun. 0 = skip.</p>
         <label class="slider-row">Dither
-          <input type="range" id="ditherSlider" min="0" max="0.008" step="0.0001" value="0.001" />
-          <code id="ditherVal">0.0010</code>
+          <input type="range" id="ditherSlider" min="0" max="0.008" step="0.0001" value="0" />
+          <code id="ditherVal">0.0000</code>
         </label>
         <label class="slider-row">Dither scale
-          <input type="range" id="ditherScaleSlider" min="0.25" max="8" step="0.05" value="1" />
-          <code id="ditherScaleVal">1.00</code>
+          <input type="range" id="ditherScaleSlider" min="0.25" max="8" step="0.05" value="3" />
+          <code id="ditherScaleVal">3.00</code>
         </label>
         <label class="slider-row">Dither X
           <input type="range" id="ditherOffXSlider" min="-32" max="32" step="0.25" value="0" />
@@ -564,83 +564,83 @@
         <label class="check-row"><input type="checkbox" id="chkDitherAnimate" /> Animate dither</label>
         <p class="note">Banding floor after tone map, not grain. Hash = luma TPDF. Scale = frequency; offsets slide in px. Animate off (looks digital). 0 = skip.</p>
         <label class="slider-row">Barrel heat
-          <input type="range" id="barrelHeatSlider" min="0" max="2" step="0.01" value="1.00" />
-          <code id="barrelHeatVal">1.00</code>
+          <input type="range" id="barrelHeatSlider" min="0" max="2" step="0.01" value="0.05" />
+          <code id="barrelHeatVal">0.05</code>
         </label>
         <p class="note">Orange/amber glow from rounds through the tube. A can takes some heat. SMG cooks fast; rifle warms; bolt barely ticks. 0 = off.</p>
         <label class="slider-row">Barrel warp
-          <input type="range" id="heatHazeStrengthSlider" min="0" max="2" step="0.01" value="1.00" />
-          <code id="heatHazeStrengthVal">1.00</code>
+          <input type="range" id="heatHazeStrengthSlider" min="0" max="2" step="0.01" value="0.01" />
+          <code id="heatHazeStrengthVal">0.01</code>
         </label>
         <p class="note">Refraction strength on barrel cards and the muzzle lobe. Not the orange steel glow, and not floor / height-fog.</p>
         <label class="slider-row">Card size
-          <input type="range" id="heatHazeCardSizeSlider" min="0.05" max="2.5" step="0.01" value="1.00" />
-          <code id="heatHazeCardSizeVal">1.00</code>
+          <input type="range" id="heatHazeCardSizeSlider" min="0.05" max="2.5" step="0.01" value="1.01" />
+          <code id="heatHazeCardSizeVal">1.01</code>
         </label>
         <label class="slider-row">Card width
-          <input type="range" id="heatHazeCardScaleXSlider" min="0.15" max="2.5" step="0.01" value="1.00" />
-          <code id="heatHazeCardScaleXVal">1.00</code>
+          <input type="range" id="heatHazeCardScaleXSlider" min="0.15" max="2.5" step="0.01" value="0.69" />
+          <code id="heatHazeCardScaleXVal">0.69</code>
         </label>
         <label class="slider-row">Card height
-          <input type="range" id="heatHazeCardScaleYSlider" min="0.15" max="2.5" step="0.01" value="1.00" />
-          <code id="heatHazeCardScaleYVal">1.00</code>
+          <input type="range" id="heatHazeCardScaleYSlider" min="0.15" max="2.5" step="0.01" value="1.63" />
+          <code id="heatHazeCardScaleYVal">1.63</code>
         </label>
         <label class="slider-row">Card count
-          <input type="range" id="heatHazeCardCountSlider" min="0" max="20" step="1" value="7" />
-          <code id="heatHazeCardCountVal">7</code>
+          <input type="range" id="heatHazeCardCountSlider" min="0" max="20" step="1" value="14" />
+          <code id="heatHazeCardCountVal">14</code>
         </label>
         <label class="slider-row">Slice count
-          <input type="range" id="heatHazeCardSegsSlider" min="4" max="32" step="1" value="16" />
-          <code id="heatHazeCardSegsVal">16</code>
+          <input type="range" id="heatHazeCardSegsSlider" min="4" max="32" step="1" value="31" />
+          <code id="heatHazeCardSegsVal">31</code>
         </label>
         <label class="slider-row">Feather
-          <input type="range" id="heatHazeFeatherSlider" min="0" max="2" step="0.01" value="1.00" />
-          <code id="heatHazeFeatherVal">1.00</code>
+          <input type="range" id="heatHazeFeatherSlider" min="0" max="2" step="0.01" value="1.62" />
+          <code id="heatHazeFeatherVal">1.62</code>
         </label>
         <label class="slider-row">Wind
-          <input type="range" id="heatHazeWindSlider" min="0" max="2" step="0.01" value="1.00" />
-          <code id="heatHazeWindVal">1.00</code>
+          <input type="range" id="heatHazeWindSlider" min="0" max="2" step="0.01" value="1.26" />
+          <code id="heatHazeWindVal">1.26</code>
         </label>
         <label class="slider-row">Friction
           <input type="range" id="heatHazeFrictionSlider" min="0" max="2" step="0.01" value="1.00" />
           <code id="heatHazeFrictionVal">1.00</code>
         </label>
         <label class="slider-row">Lobe size
-          <input type="range" id="heatHazeLobeSizeSlider" min="0.35" max="2" step="0.01" value="1.00" />
-          <code id="heatHazeLobeSizeVal">1.00</code>
+          <input type="range" id="heatHazeLobeSizeSlider" min="0.35" max="2" step="0.01" value="1.22" />
+          <code id="heatHazeLobeSizeVal">1.22</code>
         </label>
         <label class="slider-row">Ground haze
-          <input type="range" id="heatHazeGroundStrengthSlider" min="0" max="2" step="0.01" value="1.00" />
-          <code id="heatHazeGroundStrengthVal">1.00</code>
+          <input type="range" id="heatHazeGroundStrengthSlider" min="0" max="2" step="0.01" value="2" />
+          <code id="heatHazeGroundStrengthVal">2.00</code>
         </label>
         <div class="settings-checks">
           <label class="check-row"><input type="checkbox" id="chkHeatHazeMaster" checked /> Heat haze master</label>
           <label class="check-row"><input type="checkbox" id="chkBarrelHeatHaze" checked /> Barrel cards</label>
-          <label class="check-row"><input type="checkbox" id="chkGroundHeatHaze" /> Ground / height-fog</label>
+          <label class="check-row"><input type="checkbox" id="chkGroundHeatHaze" checked /> Ground / height-fog</label>
         </div>
-        <p class="note">Each card is a mesh (width × height) pinned at the <strong>bottom-center</strong> tube seat. <strong>Card size</strong> is overall (low = thin ribbon; mid = useful; high has headroom). <strong>Width / height</strong> scale that box from the pin. <strong>Feather</strong> is the soft margin from the outer box to the inner heat core (top corners inset). <strong>Slice count</strong> is horizontal bands up the card (trail resolution). <strong>Count</strong> 0–20 scatters cards on the tip-weighted zones. <strong>Wind / friction</strong> lag the upper slices when you swing so heat paints the air; bottoms stay locked. <strong>Barrel warp</strong> is card + lobe refraction. <strong>Lobe size</strong> is the muzzle circle only. <strong>Ground haze</strong> is the floor / height-fog post — off unless that checkbox is on. <strong>Master</strong> kills both paths. Barrel warp 0 kills cards + lobe. Ground haze 0 kills the floor post. Scene fog is a separate Fog control. Barrel heat stays the orange on the steel.</p>
+        <p class="note">Each card is a mesh (width × height) pinned at the <strong>bottom-center</strong> tube seat. <strong>Card size</strong> is overall (low = thin ribbon; mid = useful; high has headroom). <strong>Width / height</strong> scale that box from the pin. <strong>Feather</strong> is the soft margin from the outer box to the inner heat core (top corners inset). <strong>Slice count</strong> is horizontal bands up the card (trail resolution). <strong>Count</strong> 0–20 scatters cards on the tip-weighted zones. <strong>Wind / friction</strong> lag the upper slices when you swing so heat paints the air; bottoms stay locked. <strong>Barrel warp</strong> is card + lobe refraction. <strong>Lobe size</strong> is the muzzle circle only. <strong>Ground haze</strong> is the floor / height-fog post — on by default. <strong>Master</strong> kills both paths. Barrel warp 0 kills cards + lobe. Ground haze 0 kills the floor post. Scene fog is a separate Fog control. Barrel heat stays the orange on the steel.</p>
       </div>
 
       <div class="settings-section">
         <h3>Materials</h3>
         <label class="slider-row">Wear
-          <input type="range" id="concreteWearSlider" min="0" max="1" step="0.01" value="0.40" />
-          <code id="concreteWearVal">0.40</code>
+          <input type="range" id="concreteWearSlider" min="0" max="1" step="0.01" value="1" />
+          <code id="concreteWearVal">1.00</code>
         </label>
         <label class="slider-row">Scale
-          <input type="range" id="concreteScaleSlider" min="0.40" max="1.60" step="0.02" value="1.00" />
-          <code id="concreteScaleVal">1.00</code>
+          <input type="range" id="concreteScaleSlider" min="0.40" max="1.60" step="0.02" value="0.40" />
+          <code id="concreteScaleVal">0.40</code>
         </label>
         <label class="slider-row">Variation
-          <input type="range" id="concreteVarSlider" min="0" max="2" step="0.02" value="1.00" />
-          <code id="concreteVarVal">1.00</code>
+          <input type="range" id="concreteVarSlider" min="0" max="2" step="0.02" value="2" />
+          <code id="concreteVarVal">2.00</code>
         </label>
-        <p class="note">Wear = dust / edge fade. Scale = grain (low finer, high blotchier). Variation = per-panel value drift. Mid-slider is authored. Benches stay wood.</p>
+        <p class="note">Wear = dust / edge fade. Scale = grain (low finer, high blotchier). Variation = per-panel value drift. Defaults sit at worn / fine / strong pour. Benches stay wood.</p>
       </div>
 
       <div class="settings-section">
         <h3>Fog</h3>
-        <label class="check-row"><input type="checkbox" id="chkFog" checked /> Fog enabled</label>
+        <label class="check-row"><input type="checkbox" id="chkFog" /> Fog enabled</label>
         <label class="slider-row">Near
           <input type="range" id="fogNearSlider" min="20" max="450" step="1" value="375" />
           <code id="fogNearVal">375</code>
@@ -649,12 +649,12 @@
           <input type="range" id="fogFarSlider" min="200" max="650" step="1" value="520" />
           <code id="fogFarVal">520</code>
         </label>
-        <p class="note">Linear <code>THREE.Fog</code> (color tracks clear). Defaults 375/520 still hide long tracers. Sky horizon haze is Lighting, not this slider. Floor shimmer is Lighting → Ground haze (off).</p>
+        <p class="note">Linear <code>THREE.Fog</code> (color tracks clear). Off by default; near/far 375/520 still hide long tracers when enabled. Sky horizon haze is Lighting, not this slider. Floor shimmer is Lighting → Ground haze (on).</p>
       </div>
 
       <div class="settings-section">
         <h3>Camera clip</h3>
-        <p class="note">Depth planes. Default far <strong>2000</strong> so looking up does not clip at 520&nbsp;m; fog 375/520 still hides tracers. Log depth on.</p>
+        <p class="note">Depth planes. Default far <strong>2000</strong> so looking up does not clip at 520&nbsp;m; fog 375/520 hides tracers when fog is on. Log depth on.</p>
         <label class="slider-row slider-row-num">Near
           <input type="range" id="camNearSlider" min="0.01" max="0.5" step="0.01" value="0.05" />
           <input type="number" id="camNearInput" min="0.001" max="2" step="0.01" value="0.05" />
@@ -696,8 +696,8 @@
           <code id="adsDofTapsVal">12</code>
         </label>
         <label class="slider-row">DOF blur
-          <input type="range" id="adsDofRadiusSlider" min="0" max="0.012" step="0.0001" value="0.0028" />
-          <code id="adsDofRadiusVal">0.0028</code>
+          <input type="range" id="adsDofRadiusSlider" min="0" max="0.012" step="0.0001" value="0.0048" />
+          <code id="adsDofRadiusVal">0.0048</code>
         </label>
         <p class="note">ADS viewmodel only (half-res). Ring taps + center + inner ring. Range stays sharp.</p>
       </div>
@@ -721,6 +721,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260906v79"></script>
+    <script type="module" src="app.js?v=20260907v80"></script>
 </body>
 </html>

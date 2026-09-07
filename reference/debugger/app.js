@@ -245,7 +245,7 @@ const VIEWMODEL_LAYER = 1;
 /** Barrel heat-haze cards — lattice + grab UV warp (fog-safe). */
 const HEAT_HAZE_LAYER = 2;
 /** Disc radius (UV x) at ads=1 on the half-res viewmodel RT. Hint, not milk. */
-const ADS_DOF_RADIUS = 0.0028;
+const ADS_DOF_RADIUS = 0.0048;
 const ADS_DOF_RADIUS_MIN = 0;
 const ADS_DOF_RADIUS_MAX = 0.012;
 /** Ring tap count (plus center + inner ring). Settings default. */
@@ -257,23 +257,23 @@ const ADS_DOF_BREATH_MUL = 1.6;
 /** Half-res volumetric sun-shaft march steps (shadow-map occluded). */
 const GOD_RAYS_STEPS = 48;
 /** Settings default; 0 skips the pass. */
-const GOD_RAYS_DEFAULT = 0.9;
+const GOD_RAYS_DEFAULT = 2;
 /** Settings default; 0 skips the pass. */
-const BLOOM_DEFAULT = 0.22;
+const BLOOM_DEFAULT = 0.08;
 /** Final-output luma dither after ACES (luma units). 0 skips the pass. */
-const DITHER_DEFAULT = 0.001;
+const DITHER_DEFAULT = 0;
 const DITHER_MAX = 0.008;
-const DITHER_SCALE_DEFAULT = 1;
+const DITHER_SCALE_DEFAULT = 3;
 const DITHER_SCALE_MIN = 0.25;
 const DITHER_SCALE_MAX = 8;
 const DITHER_OFF_MIN = -32;
 const DITHER_OFF_MAX = 32;
 const DITHER_TYPE_DEFAULT = "hash";
 const DITHER_TYPES = ["hash", "ign", "bayer"];
-/** Mesh sun angular diameter (degrees). Real sun ~0.53; default a hair smaller. */
-const SUN_SIZE_DEFAULT = 0.45;
+/** Mesh sun angular diameter (degrees). Real sun ~0.53; default a hair larger. */
+const SUN_SIZE_DEFAULT = 0.62;
 /** Core heat of the disc. Soft-clamped so it never floods; halo stays LDR. */
-const SUN_PUNCH_DEFAULT = 1.4;
+const SUN_PUNCH_DEFAULT = 0.51;
 /** Pinpoint HDR seed (degrees). Independent of sun size — does not grow bloom. */
 const SUN_CORE_DEG = 0.10;
 /** Bright-pass luminance floor (HDR). Raised so the sky disc/halo stay out. */
@@ -282,59 +282,59 @@ const BLOOM_KNEE = 0.14;
 /** Dual-filter pyramid depth (half / quarter / eighth). */
 const BLOOM_MIPS = 3;
 /** Settings default; 0 skips the glow. Multiplies barrel emissive only. */
-const BARREL_HEAT_DEFAULT = 1;
+const BARREL_HEAT_DEFAULT = 0.05;
 /** Settings max (0–2). */
 const BARREL_HEAT_MUL_MAX = 2;
-/** Barrel card + muzzle-lobe warp (0 = off). Not ground / height-fog. Mid is authored. */
-const HEAT_HAZE_STRENGTH_DEFAULT = 1;
+/** Barrel card + muzzle-lobe warp (0 = off). Not ground / height-fog. */
+const HEAT_HAZE_STRENGTH_DEFAULT = 0.01;
 const HEAT_HAZE_STRENGTH_MAX = 2;
 /** Ground / height-fog post only. Independent of barrel warp. */
-const HEAT_HAZE_GROUND_STRENGTH_DEFAULT = 1;
+const HEAT_HAZE_GROUND_STRENGTH_DEFAULT = 2;
 /** Noise-cell / volume-height mul. 1 = authored (~0.46 m ground, ~11 cm barrel). */
 const HEAT_HAZE_SIZE_DEFAULT = 1;
 const HEAT_HAZE_SIZE_MIN = 0.35;
 const HEAT_HAZE_SIZE_MAX = 2;
-/** Lattice overall size slider. Low is a thin ribbon; 1 = authored; high has headroom. */
-const HEAT_HAZE_CARD_SIZE_DEFAULT = HEAT_HAZE_SIZE_DEFAULT;
+/** Lattice overall size slider. Low is a thin ribbon; high has headroom. */
+const HEAT_HAZE_CARD_SIZE_DEFAULT = 1.01;
 const HEAT_HAZE_CARD_SIZE_MIN = 0.05;
 const HEAT_HAZE_CARD_SIZE_MAX = 2.5;
 /** Per-card width / height, pinned at the tube seat (bottom center). */
-const HEAT_HAZE_CARD_SCALE_DEFAULT = 1;
+const HEAT_HAZE_CARD_SCALE_X_DEFAULT = 0.69;
+const HEAT_HAZE_CARD_SCALE_Y_DEFAULT = 1.63;
 const HEAT_HAZE_CARD_SCALE_MIN = 0.15;
 const HEAT_HAZE_CARD_SCALE_MAX = 2.5;
 /** How many lattice cards to scatter on the tip-weighted zones. */
-const HEAT_HAZE_CARD_COUNT_DEFAULT = 7;
+const HEAT_HAZE_CARD_COUNT_DEFAULT = 14;
 const HEAT_HAZE_CARD_COUNT_MIN = 0;
 const HEAT_HAZE_CARD_COUNT_MAX = 20;
 /** Vertical slices per card (trail resolution up the plume). */
-const HEAT_HAZE_CARD_SEGS_DEFAULT = 16;
+const HEAT_HAZE_CARD_SEGS_DEFAULT = 31;
 const HEAT_HAZE_CARD_SEGS_MIN = 4;
 const HEAT_HAZE_CARD_SEGS_MAX = 32;
 /** Air-trail: how hard upper verts lag a swing (0 = sticker, 2 = long paint). */
-const HEAT_HAZE_WIND_DEFAULT = 1;
+const HEAT_HAZE_WIND_DEFAULT = 1.26;
 const HEAT_HAZE_WIND_MAX = 2;
 /** How fast lagged tops catch the tube (0 = slippery, 2 = snap). */
 const HEAT_HAZE_FRICTION_DEFAULT = 1;
 const HEAT_HAZE_FRICTION_MAX = 2;
 /** Soft margin from mesh extents (green) to the active heat core (orange). */
-const HEAT_HAZE_FEATHER_DEFAULT = 1;
+const HEAT_HAZE_FEATHER_DEFAULT = 1.62;
 const HEAT_HAZE_FEATHER_MAX = 2;
 /** Fullscreen muzzle lobe radius. Independent of the lattice cards. */
-const HEAT_HAZE_LOBE_SIZE_DEFAULT = HEAT_HAZE_SIZE_DEFAULT;
+const HEAT_HAZE_LOBE_SIZE_DEFAULT = 1.22;
 /**
- * Fullscreen world/height-fog heat post. OFF by default — prior ships slapped
- * sky-blue fog on fire/heat. Barrel cards stay the only heat-distortion path
- * until this is proven safe. Settings checkbox can re-enable for experiments.
- * On load, a one-time migration forces persisted true → false (old builds).
+ * Fullscreen world/height-fog heat post. Default ON.
+ * Older blobs without heatGrabSplit still migrate persisted true → false once
+ * (pre-split builds could slap a blue fog sheet). After that the checkbox persists.
  */
-const GROUND_HEAT_HAZE_DEFAULT = false;
+const GROUND_HEAT_HAZE_DEFAULT = true;
 /** Barrel heat-haze cards (grab UV warp). Default ON — this is the heat warp. */
 const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260906v79";
-const APP_BUILD_STAMP = "2026-09-06 22:00";
+const APP_CACHE_BUST = "20260907v80";
+const APP_BUILD_STAMP = "2026-09-07 03:00";
 /** In-repo day mountain HDRI — contrast backdrop for barrel heat (do not duplicate). */
 const SKY_HDRI_URL = new URL("./assets/hdri/table_mountain_2_8k_day.hdr", import.meta.url).href;
 /** Yaw (rad). 0.50 aims the mountain mass downrange (−Z), not the HDRI sun. */
@@ -353,17 +353,17 @@ const PASS_LAB_PIP_CSS = 200;
 const GROUND_HAZE_H = 0.46;
 const BARREL_HAZE_H = 0.13;
 /** Settings default cloud cover (0 = clear). */
-const CLOUDS_DEFAULT = 0.55;
+const CLOUDS_DEFAULT = 0;
 /** Dust / edge wear on bay concrete (0 = clean pour). Shared GPU uniform. */
-const CONCRETE_WEAR_DEFAULT = 0.4;
+const CONCRETE_WEAR_DEFAULT = 1;
 const uConcreteWear = { value: CONCRETE_WEAR_DEFAULT };
-/** Grain-size mul on authored per-kind scale. Mid-slider = authored look. */
-const CONCRETE_SCALE_DEFAULT = 1;
+/** Grain-size mul on authored per-kind scale. Low = finer aggregate. */
+const CONCRETE_SCALE_DEFAULT = 0.4;
 const CONCRETE_SCALE_MIN = 0.4;
 const CONCRETE_SCALE_MAX = 1.6;
 const uConcreteScale = { value: CONCRETE_SCALE_DEFAULT };
-/** Panel value mul on authored variation (no hue swing). Mid-slider = authored look. */
-const CONCRETE_VAR_DEFAULT = 1;
+/** Panel value mul on authored variation (no hue swing). High = strong pour drift. */
+const CONCRETE_VAR_DEFAULT = 2;
 const CONCRETE_VAR_MIN = 0;
 const CONCRETE_VAR_MAX = 2;
 const uConcreteVar = { value: CONCRETE_VAR_DEFAULT };
@@ -381,8 +381,8 @@ const state = {
   mode: "weapon",
   weaponId: "example_smg",
   poseKey: "hip",
-  /** Last U-cycled unaimed hold. Persisted. hip = chest. */
-  homeHold: "hip",
+  /** Last U-cycled unaimed hold. Persisted. hip = chest; default hip_cant. */
+  homeHold: "hip_cant",
   /** 0..1 blend onto sprint_high while Shift sprinting. */
   sprintHoldT: 0,
   optic: "iron",
@@ -411,8 +411,8 @@ const state = {
   crouchToggled: false,
   /** 0 = stand, 1 = full sit. Wheel / C / Z / slide drive this. */
   crouchGrad: 0,
-  /** Last analog crouch depth for C-toggle (default full sit). */
-  crouchLastDepth: 1,
+  /** Last analog crouch depth for C-toggle. */
+  crouchLastDepth: 0.88,
   sliding: false,
   slideT: 0,
   slideDur: 0.7,
@@ -481,42 +481,42 @@ const state = {
   volMusic: 1,
   volFx: 1,
   /** Linear distance fog (THREE.Fog) — tunable in Settings (O). */
-  fogEnabled: true,
+  fogEnabled: false,
   fogNear: 375,
   fogFar: 520,
   /** Overlay Black/Low/Mid/High/White strip on viewport corner. */
   showPluge: false,
-  /** Debugger performance HUD (backtick panel Perf toggle). Default off. */
-  showPerf: false,
-  /** Hours 0–24. Default evening matches the dusk range look. */
-  timeOfDay: 18.5,
-  /** Scene-light multipliers on the current ToD bases (1.00 = authored). */
-  lightAmbMul: 1,
-  lightFillMul: 1,
-  lightHemiMul: 1,
-  lightKeyMul: 1,
-  lightRimMul: 1,
-  lightMoonMul: 1,
-  /** Multiplier on ToD ACES exposure (1.00 = authored clock). */
-  exposureMul: 1,
+  /** Debugger performance HUD (backtick panel Perf toggle). Default on. */
+  showPerf: true,
+  /** Hours 0–24. Default early clock (~06:21). */
+  timeOfDay: 6.35,
+  /** Scene-light multipliers on the current ToD bases (1.00 = clock-only). */
+  lightAmbMul: 0.11,
+  lightFillMul: 0.41,
+  lightHemiMul: 0.61,
+  lightKeyMul: 2.11,
+  lightRimMul: 1.65,
+  lightMoonMul: 1.06,
+  /** Multiplier on ToD ACES exposure (1.00 = clock-only). */
+  exposureMul: 1.44,
   /** Env/scuff + non-paper punch hole FIFO cap. Paper holes use PAPER_DECAL_MAX. */
   holeCap: 30000,
   /** Brass casing FIFO cap. */
   casingCap: 30000,
   /** Dust / edge wear on bay floor, walls, berm (0–1). */
   concreteWear: CONCRETE_WEAR_DEFAULT,
-  /** Grain-size mul (0.4–1.6). 1 = authored grit. */
+  /** Grain-size mul (0.4–1.6). Low = finer aggregate. */
   concreteScale: CONCRETE_SCALE_DEFAULT,
-  /** Per-panel value mul (0–2). 1 = authored pour drift (no hue swing). */
+  /** Per-panel value mul (0–2). High = strong pour drift (no hue swing). */
   concreteVar: CONCRETE_VAR_DEFAULT,
   /** Seconds after spawn before env/scuff holes despawn. 0 = FIFO only. */
-  holeFade: 18,
+  holeFade: 0,
   /** Seconds after a casing sleeps before despawn. 0 = stay until cap recycles. */
-  casingFade: 12,
+  casingFade: 0,
   /** Hide casings/spent slugs beyond this player XZ distance (m). Not despawn. */
   casingDraw: 55,
   /** Hide holes/crater plugs beyond this player XZ distance (m). Not despawn. */
-  decalDraw: 900,
+  decalDraw: 700,
   /** Volumetric sun shafts (0 = off, 2 = strong). */
   godRays: GOD_RAYS_DEFAULT,
   /** HDR bloom (0 = off, 2 = strong). Independent of god rays. */
@@ -536,7 +536,7 @@ const state = {
   adsDofTaps: ADS_DOF_TAPS_DEFAULT,
   /** ADS viewmodel DOF disc radius (UV x) at ads=1. */
   adsDofRadius: ADS_DOF_RADIUS,
-  /** Barrel heat glow mul (0 = off, 2 = strong). Default 1. */
+  /** Barrel heat glow mul (0 = off, 2 = strong). */
   barrelHeat: BARREL_HEAT_DEFAULT,
   /** Barrel card + muzzle-lobe warp (0 = off). Independent of barrel emissive and ground fog. */
   heatHazeStrength: HEAT_HAZE_STRENGTH_DEFAULT,
@@ -545,9 +545,9 @@ const state = {
   /** Lattice overall size (remapped: low = thin). Independent of the muzzle lobe. */
   heatHazeCardSize: HEAT_HAZE_CARD_SIZE_DEFAULT,
   /** Extra card width (thick / thin). Bottom-center pin. */
-  heatHazeCardScaleX: HEAT_HAZE_CARD_SCALE_DEFAULT,
+  heatHazeCardScaleX: HEAT_HAZE_CARD_SCALE_X_DEFAULT,
   /** Extra card height (rise). Bottoms stay on the tube. */
-  heatHazeCardScaleY: HEAT_HAZE_CARD_SCALE_DEFAULT,
+  heatHazeCardScaleY: HEAT_HAZE_CARD_SCALE_Y_DEFAULT,
   /** How many cards to scatter on the tip-weighted zones (0 = none). */
   heatHazeCardCount: HEAT_HAZE_CARD_COUNT_DEFAULT,
   /** Vertical slices per card. */
@@ -564,7 +564,7 @@ const state = {
   heatHazeMaster: HEAT_HAZE_MASTER_DEFAULT,
   /** Barrel heat-haze cards (grab UV warp). Default ON. */
   barrelHeatHaze: BARREL_HEAT_HAZE_DEFAULT,
-  /** Fullscreen ground/height-fog heat post. Default OFF (fog slap). */
+  /** Fullscreen ground/height-fog heat post. Default ON. */
   groundHeatHaze: GROUND_HEAT_HAZE_DEFAULT,
   /** Visual disc + sky-shader halo (degrees). Must not enlarge the bloom kernel. */
   sunSize: SUN_SIZE_DEFAULT,
@@ -3549,11 +3549,11 @@ function heatHazeLobeSizeAmt() {
 }
 
 function heatHazeCardScaleXAmt() {
-  return clamp(state.heatHazeCardScaleX ?? HEAT_HAZE_CARD_SCALE_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+  return clamp(state.heatHazeCardScaleX ?? HEAT_HAZE_CARD_SCALE_X_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
 }
 
 function heatHazeCardScaleYAmt() {
-  return clamp(state.heatHazeCardScaleY ?? HEAT_HAZE_CARD_SCALE_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+  return clamp(state.heatHazeCardScaleY ?? HEAT_HAZE_CARD_SCALE_Y_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
 }
 
 function heatHazeCardCountAmt() {
@@ -3634,7 +3634,7 @@ function setHeatHazeCardSize(v, { toast = false } = {}) {
 
 function setHeatHazeCardScaleX(v, { toast = false } = {}) {
   const n = clamp(parseFloat(v), HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
-  state.heatHazeCardScaleX = Number.isFinite(n) ? n : HEAT_HAZE_CARD_SCALE_DEFAULT;
+  state.heatHazeCardScaleX = Number.isFinite(n) ? n : HEAT_HAZE_CARD_SCALE_X_DEFAULT;
   syncHeatHazeMeshScales();
   syncHeatHazeUI();
   if (toast) showToast(`Card width ${state.heatHazeCardScaleX.toFixed(2)}`);
@@ -3643,7 +3643,7 @@ function setHeatHazeCardScaleX(v, { toast = false } = {}) {
 
 function setHeatHazeCardScaleY(v, { toast = false } = {}) {
   const n = clamp(parseFloat(v), HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
-  state.heatHazeCardScaleY = Number.isFinite(n) ? n : HEAT_HAZE_CARD_SCALE_DEFAULT;
+  state.heatHazeCardScaleY = Number.isFinite(n) ? n : HEAT_HAZE_CARD_SCALE_Y_DEFAULT;
   syncHeatHazeMeshScales();
   syncHeatHazeUI();
   if (toast) showToast(`Card height ${state.heatHazeCardScaleY.toFixed(2)}`);
@@ -4413,8 +4413,8 @@ let floodLights = [];
 /** Fixture records: lamp/head hit, optional pool, shot-out flag. kind "tube" = spawn strip. */
 let floodFixtures = [];
 const SCENE_BG_BASE = 0x1c2430;
-/** Default clock (18:30) — palettes below are keyed so this hour matches SCENE_BG_BASE. */
-const TOD_DEFAULT = 18.5;
+/** Default clock (~06:21). Palettes still key dusk (~18:30) to SCENE_BG_BASE. */
+const TOD_DEFAULT = 6.35;
 const HEMI_INT_BASE = 0.32;
 const AMB_INT_BASE = 0.12;
 const KEY_INT_BASE = 1.18;
@@ -4436,7 +4436,7 @@ const IMPACT_DECAL_MAX = 30000;
 const IMPACT_DECAL_CAP_MIN = 20;
 const IMPACT_DECAL_CAP_MAX = 30000;
 /** Seconds after spawn; 0 = FIFO only. Paper holes never use this TTL. */
-const HOLE_FADE_SEC = 18;
+const HOLE_FADE_SEC = 0;
 const HOLE_FADE_MAX = 60;
 /** Paper-target holes — persist until table reset (not in the FIFO TTL pool). */
 let paperDecals = [];
@@ -4468,7 +4468,7 @@ let casings = [];
 const CASING_MAX = 30000;
 const CASING_CAP_MIN = 10;
 const CASING_CAP_MAX = 30000;
-const CASING_FADE_SEC = 12;
+const CASING_FADE_SEC = 0;
 const CASING_FADE_MAX = 60;
 /** Hide (not despawn) brass / spent slugs beyond this player XZ range. */
 const CASING_DRAW_MIN = 8;
@@ -4477,7 +4477,7 @@ const CASING_DRAW_DEFAULT = 55;
 /** Hide (not despawn) holes / crater plugs. Min 50 still covers the bay. */
 const DECAL_DRAW_MIN = 50;
 const DECAL_DRAW_MAX = 2000;
-const DECAL_DRAW_DEFAULT = 900;
+const DECAL_DRAW_DEFAULT = 700;
 const _fxDrawTmp = new THREE.Vector3();
 const CASING_GRAVITY = 12;
 /** Breakable beer bottles on the 15–25 m side benches. */
@@ -4789,8 +4789,8 @@ function applySettingsBlob(blob) {
     }
   }
   state.heatHazeCardSize = clamp(state.heatHazeCardSize ?? HEAT_HAZE_CARD_SIZE_DEFAULT, HEAT_HAZE_CARD_SIZE_MIN, HEAT_HAZE_CARD_SIZE_MAX);
-  state.heatHazeCardScaleX = clamp(state.heatHazeCardScaleX ?? HEAT_HAZE_CARD_SCALE_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
-  state.heatHazeCardScaleY = clamp(state.heatHazeCardScaleY ?? HEAT_HAZE_CARD_SCALE_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+  state.heatHazeCardScaleX = clamp(state.heatHazeCardScaleX ?? HEAT_HAZE_CARD_SCALE_X_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
+  state.heatHazeCardScaleY = clamp(state.heatHazeCardScaleY ?? HEAT_HAZE_CARD_SCALE_Y_DEFAULT, HEAT_HAZE_CARD_SCALE_MIN, HEAT_HAZE_CARD_SCALE_MAX);
   state.heatHazeCardCount = Math.round(clamp(state.heatHazeCardCount ?? HEAT_HAZE_CARD_COUNT_DEFAULT, HEAT_HAZE_CARD_COUNT_MIN, HEAT_HAZE_CARD_COUNT_MAX));
   state.heatHazeCardSegs = Math.round(clamp(state.heatHazeCardSegs ?? HEAT_HAZE_CARD_SEGS_DEFAULT, HEAT_HAZE_CARD_SEGS_MIN, HEAT_HAZE_CARD_SEGS_MAX));
   state.heatHazeWind = clamp(state.heatHazeWind ?? HEAT_HAZE_WIND_DEFAULT, 0, HEAT_HAZE_WIND_MAX);

@@ -1951,6 +1951,7 @@ function bindSkyHdriToDome() {
   if (!skyMat) return;
   skyMat.uniforms.hdriMap.value = skyHdriTex || skyHdriStub();
   skyMat.uniforms.hdriYaw.value = SKY_HDRI_YAW;
+  skyMat.uniformsNeedUpdate = true;
 }
 
 function ensureSkyHdri() {
@@ -2445,7 +2446,10 @@ function syncHorizonHaze(pal, night, twilight) {
     ? scene.fog.color.clone()
     : (pal.sky ? pal.sky.clone() : new THREE.Color(SCENE_BG_BASE));
   const dusk = new THREE.Color(0xc88860);
-  const amt = (state.fogEnabled ? 0.64 : 0.26) * (1 - night * 0.88) * (0.78 + twilight * 0.32);
+  const hdriOn = skyHdriWanted() && !!skyHdriTex;
+  const amt = (state.fogEnabled ? 0.64 : 0.26) * (1 - night * 0.88) * (0.78 + twilight * 0.32)
+    * (hdriOn ? 0.16 : 1);
+  if (distantHazePlates) distantHazePlates.visible = !hdriOn && !passLabBackdropOn();
   for (const mat of horizonHazeMats) {
     const u = mat.uniforms;
     u.hazeColor.value.copy(fogC).lerp(pal.sky, 0.28);

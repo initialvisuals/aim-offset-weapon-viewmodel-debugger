@@ -1917,7 +1917,6 @@ let skyHdriTex = null;
 let skyHdriEnv = null;
 let skyHdriLoading = false;
 let _skyHdriStub = null;
-let _skyHdriRt = null;
 
 function skyHdriStub() {
   if (_skyHdriStub) return _skyHdriStub;
@@ -1954,44 +1953,6 @@ function bindSkyHdriToDome() {
   skyMat.uniforms.hdriYaw.value = SKY_HDRI_YAW;
 }
 
-/** Decode the 8k file, then keep a 2k HalfFloat for the dome + PMREM (source file stays put). */
-function blitEquirectHalf(src, width, height) {
-  if (!renderer || !src) return src;
-  const rt = new THREE.WebGLRenderTarget(width, height, {
-    type: THREE.HalfFloatType,
-    format: THREE.RGBAFormat,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    depthBuffer: false,
-    stencilBuffer: false,
-  });
-  rt.texture.colorSpace = src.colorSpace || THREE.LinearSRGBColorSpace;
-  const mat = new THREE.MeshBasicMaterial({ map: src, toneMapped: false, fog: false, depthTest: false, depthWrite: false });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
-  const sc = new THREE.Scene();
-  sc.add(mesh);
-  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  const prev = renderer.getRenderTarget();
-  const prevAuto = renderer.autoClear;
-  const prevCS = renderer.outputColorSpace;
-  const prevTM = renderer.toneMapping;
-  renderer.autoClear = true;
-  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-  renderer.toneMapping = THREE.NoToneMapping;
-  renderer.setRenderTarget(rt);
-  renderer.render(sc, cam);
-  renderer.setRenderTarget(prev);
-  renderer.autoClear = prevAuto;
-  renderer.outputColorSpace = prevCS;
-  renderer.toneMapping = prevTM;
-  mat.dispose();
-  mesh.geometry.dispose();
-  if (_skyHdriRt && _skyHdriRt !== rt) _skyHdriRt.dispose();
-  _skyHdriRt = rt;
-  rt.texture.mapping = THREE.EquirectangularReflectionMapping;
-  return rt.texture;
-}
-
 function ensureSkyHdri() {
   if (skyHdriTex || skyHdriLoading) return;
   skyHdriLoading = true;
@@ -2004,18 +1965,12 @@ function ensureSkyHdri() {
       tex.magFilter = THREE.LinearFilter;
       tex.generateMipmaps = false;
       tex.needsUpdate = true;
-      let usable = tex;
-      if (renderer && (tex.image.width > 2048 || tex.image.height > 1024)) {
-        usable = blitEquirectHalf(tex, 2048, 1024) || tex;
-        if (usable !== tex) tex.dispose();
-      }
-      usable.mapping = THREE.EquirectangularReflectionMapping;
-      skyHdriTex = usable;
+      skyHdriTex = tex;
       bindSkyHdriToDome();
       if (renderer) {
         const pmrem = new THREE.PMREMGenerator(renderer);
         pmrem.compileEquirectangularShader();
-        const envRt = pmrem.fromEquirectangular(usable);
+        const envRt = pmrem.fromEquirectangular(tex);
         skyHdriEnv = envRt.texture;
         pmrem.dispose();
       }

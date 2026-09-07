@@ -225,3 +225,7 @@ The portable value is the **workflow + schema + math**. Engine UI adapters can c
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+**Initial Visuals** — tools, sims, games, and experiments.

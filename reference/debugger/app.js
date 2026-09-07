@@ -2021,6 +2021,7 @@ function ensureSkyHdri() {
       }
       applySkyHdriBinding();
       applyDisplayLook();
+      console.info("[sky] day HDRI ready");
     },
     undefined,
     (err) => {
@@ -2178,7 +2179,10 @@ function ensureSkyDome() {
           float sy = sin(hdriYaw);
           vec3 rd = vec3(dir.x * cy - dir.z * sy, dir.y, dir.x * sy + dir.z * cy);
           vec2 huv = vec2(atan(rd.z, rd.x) * RECIPROCAL_PI2 + 0.5, asin(clamp(rd.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
-          vec3 hdri = texture2D(hdriMap, huv).rgb;
+          vec3 hdri = texture2D(hdriMap, huv).rgb * 0.55;
+          // Compress the day sun so mountain/sky detail survives ACES (heat needs contrast, not a white sheet).
+          hdri = hdri / (hdri + vec3(1.0));
+          hdri *= 1.45;
           float ground = smoothstep(0.05, -0.18, elev);
           col = mix(col, hdri, hdriAmt * (1.0 - ground));
         }
@@ -2278,7 +2282,8 @@ function ensureSkyDome() {
           ccol = mix(ccol, twilightColor, twilightAmt * 0.48 * (0.32 + 0.68 * towardSun));
           ccol = mix(ccol, fogColor, loBand * 0.32 * hazeAmt);
           float shade = 0.70 + 0.30 * shred;
-          col = mix(col, ccol * shade, cloud);
+          float cloudVis = cloud * mix(1.0, 0.28, hdriAmt);
+          col = mix(col, ccol * shade, cloudVis);
         }
 
         gl_FragColor = vec4(col, 1.0);

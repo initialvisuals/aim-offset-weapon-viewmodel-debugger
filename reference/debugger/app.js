@@ -1977,7 +1977,7 @@ function ensureSkyHdri() {
       }
       applySkyHdriBinding();
       applyDisplayLook();
-      console.info("[sky] day HDRI ready");
+      console.info("[sky] day HDRI ready", tex.image && tex.image.width, skyMat && skyMat.uniforms.hdriAmt.value);
     },
     undefined,
     (err) => {

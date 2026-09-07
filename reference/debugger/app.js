@@ -333,8 +333,8 @@ const BARREL_HEAT_HAZE_DEFAULT = true;
 /** Master gate for barrel cards + ground post. OFF forces both off. */
 const HEAT_HAZE_MASTER_DEFAULT = true;
 /** Cache-bust token + America/Toronto build stamp (bump both with index.html ?v=). */
-const APP_CACHE_BUST = "20260907v80";
-const APP_BUILD_STAMP = "2026-09-07 03:00";
+const APP_CACHE_BUST = "20260907v81";
+const APP_BUILD_STAMP = "2026-09-07 09:53";
 /** In-repo day mountain HDRI — contrast backdrop for barrel heat (do not duplicate). */
 const SKY_HDRI_URL = new URL("./assets/hdri/table_mountain_2_8k_day.hdr", import.meta.url).href;
 /** Yaw (rad). 0.50 aims the mountain mass downrange (−Z), not the HDRI sun. */
@@ -1916,6 +1916,8 @@ function ensureSkyDiscs() {
 let skyHdriTex = null;
 let skyHdriEnv = null;
 let skyHdriLoading = false;
+let skyHdriFailed = false;
+let _skyHdriPromise = null;
 let _skyHdriStub = null;
 
 function skyHdriStub() {
@@ -1954,37 +1956,75 @@ function bindSkyHdriToDome() {
   skyMat.uniformsNeedUpdate = true;
 }
 
+function skyHdriSettled() {
+  return !!(skyHdriTex || skyHdriFailed);
+}
+
+/** Drop the in-flight wait so boot can use the procedural sky. Late success still binds. */
+function abandonSkyHdriWait() {
+  if (skyHdriTex || skyHdriFailed) return;
+  skyHdriFailed = true;
+  skyHdriLoading = false;
+}
+
 function ensureSkyHdri() {
-  if (skyHdriTex || skyHdriLoading) return;
+  if (skyHdriTex) {
+    markBootStage("hdri");
+    return Promise.resolve(skyHdriTex);
+  }
+  if (_skyHdriPromise) return _skyHdriPromise;
+
   skyHdriLoading = true;
-  const loader = new RGBELoader();
-  loader.load(
-    SKY_HDRI_URL,
-    (tex) => {
-      tex.mapping = THREE.EquirectangularReflectionMapping;
-      tex.minFilter = THREE.LinearFilter;
-      tex.magFilter = THREE.LinearFilter;
-      tex.generateMipmaps = false;
-      tex.needsUpdate = true;
-      skyHdriTex = tex;
-      bindSkyHdriToDome();
-      if (renderer) {
-        const pmrem = new THREE.PMREMGenerator(renderer);
-        pmrem.compileEquirectangularShader();
-        const envRt = pmrem.fromEquirectangular(tex);
-        skyHdriEnv = envRt.texture;
-        pmrem.dispose();
-      }
-      applySkyHdriBinding();
-      applyDisplayLook();
-      console.info("[sky] day HDRI ready", tex.image && tex.image.width, skyMat && skyMat.uniforms.hdriAmt.value);
-    },
-    undefined,
-    (err) => {
-      console.warn("[sky] day HDRI failed to load", err);
+  skyHdriFailed = false;
+  _skyHdriPromise = new Promise((resolve) => {
+    const loader = new RGBELoader();
+    const finish = (tex) => {
       skyHdriLoading = false;
-    }
-  );
+      markBootStage("hdri");
+      resolve(tex || null);
+    };
+    loader.load(
+      SKY_HDRI_URL,
+      (tex) => {
+        try {
+          tex.mapping = THREE.EquirectangularReflectionMapping;
+          tex.minFilter = THREE.LinearFilter;
+          tex.magFilter = THREE.LinearFilter;
+          tex.generateMipmaps = false;
+          tex.needsUpdate = true;
+          skyHdriTex = tex;
+          skyHdriFailed = false;
+          bindSkyHdriToDome();
+          if (renderer) {
+            const pmrem = new THREE.PMREMGenerator(renderer);
+            pmrem.compileEquirectangularShader();
+            const envRt = pmrem.fromEquirectangular(tex);
+            skyHdriEnv = envRt.texture;
+            pmrem.dispose();
+          }
+          applySkyHdriBinding();
+          applyDisplayLook();
+          console.info("[sky] day HDRI ready", tex.image && tex.image.width, skyMat && skyMat.uniforms.hdriAmt.value);
+        } catch (err) {
+          console.warn("[sky] day HDRI apply failed — procedural fallback", err);
+          skyHdriFailed = true;
+        }
+        finish(skyHdriTex);
+      },
+      (ev) => {
+        const total = ev && ev.total;
+        const loaded = ev && ev.loaded;
+        if (total > 0) updateBootStageProgress("hdri", loaded / total);
+      },
+      (err) => {
+        console.warn("[sky] day HDRI failed to load — procedural fallback", err);
+        skyHdriFailed = true;
+        _skyHdriPromise = null;
+        finish(null);
+      }
+    );
+  });
+  return _skyHdriPromise;
 }
 
 function syncSkyHdriUI() {
@@ -11758,6 +11798,9 @@ function initThree() {
   leanPivot.add(camera);
   scene.add(playerRoot);
 
+  // Overlap the 94MB day HDRI fetch with lights + first-paint world.
+  ensureSkyHdri();
+
   hemiLight = new THREE.HemisphereLight(0x8a9aac, 0x3a3228, HEMI_INT_BASE);
   scene.add(hemiLight);
   ambLight = new THREE.AmbientLight(0x4a5460, AMB_INT_BASE);
@@ -11828,23 +11871,28 @@ function initDisplayPosts() {
   resize();
 }
 
-/** Weighted deferred-boot stages. Heavier shader/post work gets more of the bar. */
+/** Weighted deferred-boot stages. Shader/post work + the day HDRI fetch share the bar. */
 const BOOT_STAGE_WEIGHTS = {
-  core: 0.20,
-  postFX: 0.28,
-  walls: 0.14,
-  mid: 0.13,
-  far: 0.13,
-  prewarm: 0.12,
+  core: 0.16,
+  postFX: 0.22,
+  walls: 0.11,
+  mid: 0.11,
+  far: 0.10,
+  prewarm: 0.10,
+  hdri: 0.20,
 };
 const BOOT_OVERLAY_FADE_MS = 320;
 const BOOT_OVERLAY_TIMEOUT_MS = 8000;
+/** 94MB RGBE; do not unlock Space while this is still in flight. */
+const BOOT_HDRI_TIMEOUT_MS = 120000;
 
 let _bootOverlayDone = false;
 let _bootReadyForContinue = false;
 const _bootStagesDone = new Set();
+const _bootStageFrac = new Map();
 let _bootProgress = 0;
 let _bootTimeoutId = 0;
+let _bootHdriTimeoutId = 0;
 
 function bootOverlayNode() {
   return el("bootOverlay");
@@ -11872,6 +11920,26 @@ function setBootBar(frac) {
   if (bar) bar.setAttribute("aria-valuenow", String(pct));
 }
 
+function bootProgressFromStages() {
+  let sum = 0;
+  for (const name of Object.keys(BOOT_STAGE_WEIGHTS)) {
+    const frac = _bootStagesDone.has(name) ? 1 : (_bootStageFrac.get(name) || 0);
+    sum += BOOT_STAGE_WEIGHTS[name] * clamp(frac, 0, 1);
+  }
+  return clamp(sum, 0, 1);
+}
+
+function syncBootBarFromStages() {
+  _bootProgress = bootProgressFromStages();
+  setBootBar(_bootProgress);
+}
+
+function updateBootStageProgress(name, frac) {
+  if (_bootOverlayDone || _bootReadyForContinue || !(name in BOOT_STAGE_WEIGHTS) || _bootStagesDone.has(name)) return;
+  _bootStageFrac.set(name, clamp(frac, 0, 1));
+  syncBootBarFromStages();
+}
+
 function bootPassthroughEvent(e) {
   if (!e || e.type !== "keydown") return false;
   if (e.metaKey || e.ctrlKey || e.altKey) return true;
@@ -11884,6 +11952,10 @@ function showBootContinue() {
   if (_bootTimeoutId) {
     clearTimeout(_bootTimeoutId);
     _bootTimeoutId = 0;
+  }
+  if (_bootHdriTimeoutId) {
+    clearTimeout(_bootHdriTimeoutId);
+    _bootHdriTimeoutId = 0;
   }
   setBootBar(1);
   const node = bootOverlayNode();
@@ -11903,6 +11975,10 @@ function dismissBootOverlay() {
   if (_bootTimeoutId) {
     clearTimeout(_bootTimeoutId);
     _bootTimeoutId = 0;
+  }
+  if (_bootHdriTimeoutId) {
+    clearTimeout(_bootHdriTimeoutId);
+    _bootHdriTimeoutId = 0;
   }
   setBootBar(1);
   const node = bootOverlayNode();
@@ -11932,7 +12008,7 @@ function acceptBootContinue(e) {
     return false;
   }
   if (bootPassthroughEvent(e)) return false;
-  const ready = _bootReadyForContinue || (node && node.classList.contains("is-ready"));
+  const ready = _bootReadyForContinue;
   if (ready) {
     if (e) {
       e.preventDefault();
@@ -11953,16 +12029,40 @@ function acceptBootContinue(e) {
 function markBootStage(name) {
   if (_bootOverlayDone || _bootReadyForContinue || !(name in BOOT_STAGE_WEIGHTS) || _bootStagesDone.has(name)) return;
   _bootStagesDone.add(name);
-  _bootProgress = clamp(_bootProgress + BOOT_STAGE_WEIGHTS[name], 0, 1);
-  setBootBar(_bootProgress);
+  _bootStageFrac.set(name, 1);
+  syncBootBarFromStages();
   if (_bootStagesDone.size >= Object.keys(BOOT_STAGE_WEIGHTS).length) {
     showBootContinue();
   }
 }
 
+function armHdriBootFallback() {
+  if (_bootHdriTimeoutId || _bootOverlayDone || _bootReadyForContinue) return;
+  _bootHdriTimeoutId = setTimeout(() => {
+    _bootHdriTimeoutId = 0;
+    if (_bootOverlayDone || _bootReadyForContinue) return;
+    if (!_bootStagesDone.has("hdri")) {
+      console.warn("[boot] HDRI timeout — procedural sky fallback");
+      abandonSkyHdriWait();
+      markBootStage("hdri");
+    }
+    if (!_bootReadyForContinue) {
+      console.warn("[boot] overlay timeout — showing continue prompt");
+      showBootContinue();
+    }
+  }, BOOT_HDRI_TIMEOUT_MS);
+}
+
 function armBootOverlayFallback() {
   if (_bootTimeoutId || _bootOverlayDone || _bootReadyForContinue) return;
+  armHdriBootFallback();
   _bootTimeoutId = setTimeout(() => {
+    _bootTimeoutId = 0;
+    if (_bootOverlayDone || _bootReadyForContinue) return;
+    if (!_bootStagesDone.has("hdri") && !skyHdriSettled()) {
+      console.warn("[boot] overlay timeout — still waiting on HDRI");
+      return;
+    }
     console.warn("[boot] overlay timeout — showing continue prompt");
     showBootContinue();
   }, BOOT_OVERLAY_TIMEOUT_MS);
@@ -12049,6 +12149,14 @@ function scheduleDeferredBoot() {
   } else {
     afterAnimationFrames(8, laterSfx);
   }
+  void Promise.resolve()
+    .then(() => ensureSkyHdri())
+    .catch((err) => {
+      console.warn("[boot] HDRI", err);
+    })
+    .finally(() => {
+      markBootStage("hdri");
+    });
 }
 
 function resize() {

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aim Offset / Viewmodel Tuner — Three.js Demo</title>
-  <link rel="stylesheet" href="styles.css?v=20260907v80" />
+  <link rel="stylesheet" href="styles.css?v=20260907v81" />
   <style>
     /* Critical first-paint cover if styles.css is stale. Full rules live in styles.css. */
     .boot-overlay {
@@ -50,7 +50,7 @@
       function overlay() { return document.getElementById("bootOverlay"); }
       function showContinue() {
         var node = overlay();
-        if (!node || dismissed || node.classList.contains("is-done") || node.classList.contains("is-ready") || node.hidden) return;
+        if (!node || dismissed || window.__aimBootOverlay || node.classList.contains("is-done") || node.classList.contains("is-ready") || node.hidden) return;
         node.classList.add("is-ready");
         node.setAttribute("aria-busy", "false");
         var fill = document.getElementById("bootBarFill");
@@ -721,6 +721,6 @@
 
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-    <script type="module" src="app.js?v=20260907v80"></script>
+    <script type="module" src="app.js?v=20260907v81"></script>
 </body>
 </html>
